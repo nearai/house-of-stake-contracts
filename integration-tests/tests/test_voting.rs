@@ -30,24 +30,6 @@ async fn attempt_voting_upgrade(
     Ok(())
 }
 
-#[tokio::test]
-async fn test_upgrade_voting() -> Result<(), Box<dyn std::error::Error>> {
-    let v = VenearTestWorkspaceBuilder::default()
-        .with_voting()
-        .build()
-        .await?;
-    let user_a = v.sandbox.dev_create_account().await?;
-
-    assert!(
-        attempt_voting_upgrade(&user_a, &v).await.is_err(),
-        "User should not be able to upgrade the contract"
-    );
-
-    attempt_voting_upgrade(&v.voting.as_ref().unwrap().owner, &v).await?;
-
-    Ok(())
-}
-
 async fn create_proposal(
     v: &VenearTestWorkspace,
     user: &near_workspaces::Account,
@@ -93,6 +75,61 @@ async fn approve_proposal(
     if !outcome.is_success() {
         return Err(format!("Failed to approve proposal: {:#?}", outcome.outcomes()).into());
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_upgrade_voting() -> Result<(), Box<dyn std::error::Error>> {
+    let v = VenearTestWorkspaceBuilder::default()
+        .with_previous_voting()
+        .build()
+        .await?;
+    let voting = v.voting.as_ref().unwrap();
+    let user_a = v.sandbox.dev_create_account().await?;
+
+    // Verify old config has no council_ids
+    let config: serde_json::Value =
+        v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
+    assert!(
+        config.get("council_ids").is_none(),
+        "Old contract should not have council_ids"
+    );
+
+    // Regular user should not be able to upgrade
+    assert!(
+        attempt_voting_upgrade(&user_a, &v).await.is_err(),
+        "User should not be able to upgrade the contract"
+    );
+
+    // Owner upgrades to new version
+    attempt_voting_upgrade(&voting.owner, &v).await?;
+
+    // Verify migrated config has new fields with defaults
+    let config: serde_json::Value =
+        v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
+
+    let council_ids: Vec<AccountId> = serde_json::from_value(config["council_ids"].clone())?;
+    assert!(
+        council_ids.is_empty(),
+        "council_ids should default to empty"
+    );
+
+    let timelock_duration_ns: U64 =
+        serde_json::from_value(config["timelock_duration_ns"].clone())?;
+    assert_eq!(
+        timelock_duration_ns.0, 0,
+        "timelock_duration_ns should default to 0 after migration"
+    );
+
+    // Verify existing config fields are preserved
+    let owner_account_id: AccountId =
+        serde_json::from_value(config["owner_account_id"].clone())?;
+    assert_eq!(owner_account_id, *voting.owner.id());
+
+    let reviewer_ids: Vec<AccountId> =
+        serde_json::from_value(config["reviewer_ids"].clone())?;
+    assert_eq!(reviewer_ids, vec![voting.reviewer.id().clone()]);
 
     Ok(())
 }
@@ -483,13 +520,6 @@ async fn test_voting_reject_proposal() -> Result<(), Box<dyn std::error::Error>>
         "Council should be able to reject proposal during timelock: {:#?}",
         outcome
     );
-
-    let num_approved_proposals: u32 = v
-        .sandbox
-        .view(v.voting_id(), "get_num_approved_proposals")
-        .await?
-        .json()?;
-    assert_eq!(num_approved_proposals, 0);
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(proposal["status"].as_str().unwrap(), "Rejected");

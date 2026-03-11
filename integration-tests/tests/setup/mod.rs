@@ -17,6 +17,7 @@ pub const TIMELOCK_DURATION_SECONDS: u64 = 60;
 pub const LOCKUP_WASM_FILEPATH: &str = "../res/local/lockup_contract.wasm";
 pub const VENEAR_WASM_FILEPATH: &str = "../res/local/venear_contract.wasm";
 pub const VOTING_WASM_FILEPATH: &str = "../res/local/voting_contract.wasm";
+pub const PREVIOUS_VOTING_WASM_FILEPATH: &str = "../res/release/1_0_2/voting_contract.wasm";
 pub const SANDBOX_CONTRACT_WASM_FILEPATH: &str =
     "../res/local/sandbox_staking_whitelist_contract.wasm";
 
@@ -50,6 +51,7 @@ pub struct VenearTestWorkspaceBuilder {
     pub min_lockup_deposit: NearToken,
     pub annual_growth_rate_ns: Fraction,
     pub deploy_voting: bool,
+    pub use_previous_voting_wasm: bool,
     pub voting_duration_ns: u64,
     pub timelock_duration_ns: u64,
     pub max_number_of_voting_options: u8,
@@ -72,6 +74,7 @@ impl Default for VenearTestWorkspaceBuilder {
                 denominator: 10u128.pow(30).into(),
             },
             deploy_voting: false,
+            use_previous_voting_wasm: false,
             voting_duration_ns: VOTING_DURATION_SECONDS * 1_000_000_000,
             timelock_duration_ns: TIMELOCK_DURATION_SECONDS * 1_000_000_000,
             max_number_of_voting_options: 16,
@@ -247,7 +250,12 @@ impl VenearTestWorkspaceBuilder {
         );
 
         let voting = if self.deploy_voting {
-            let voting_wasm = std::fs::read(VOTING_WASM_FILEPATH)?;
+            let voting_wasm_path = if self.use_previous_voting_wasm {
+                PREVIOUS_VOTING_WASM_FILEPATH
+            } else {
+                VOTING_WASM_FILEPATH
+            };
+            let voting_wasm = std::fs::read(voting_wasm_path)?;
 
             let contract = sandbox.dev_create_account().await?;
 
@@ -327,6 +335,12 @@ impl VenearTestWorkspaceBuilder {
 
     pub fn with_voting(mut self) -> Self {
         self.deploy_voting = true;
+        self
+    }
+
+    pub fn with_previous_voting(mut self) -> Self {
+        self.deploy_voting = true;
+        self.use_previous_voting_wasm = true;
         self
     }
 }
