@@ -12,6 +12,7 @@ use std::str::FromStr;
 
 pub const UNLOCK_DURATION_SECONDS: u64 = 60;
 pub const VOTING_DURATION_SECONDS: u64 = 60;
+pub const TIMELOCK_DURATION_SECONDS: u64 = 60;
 
 pub const LOCKUP_WASM_FILEPATH: &str = "../res/local/lockup_contract.wasm";
 pub const VENEAR_WASM_FILEPATH: &str = "../res/local/venear_contract.wasm";
@@ -38,6 +39,7 @@ pub struct VotingTestWorkspace {
     pub contract: Account,
     pub owner: Account,
     pub reviewer: Account,
+    pub council: Account,
     pub guardian: Account,
 }
 
@@ -49,6 +51,7 @@ pub struct VenearTestWorkspaceBuilder {
     pub annual_growth_rate_ns: Fraction,
     pub deploy_voting: bool,
     pub voting_duration_ns: u64,
+    pub timelock_duration_ns: u64,
     pub max_number_of_voting_options: u8,
     pub base_proposal_fee: NearToken,
     pub vote_storage_fee: NearToken,
@@ -70,6 +73,7 @@ impl Default for VenearTestWorkspaceBuilder {
             },
             deploy_voting: false,
             voting_duration_ns: VOTING_DURATION_SECONDS * 1_000_000_000,
+            timelock_duration_ns: TIMELOCK_DURATION_SECONDS * 1_000_000_000,
             max_number_of_voting_options: 16,
             base_proposal_fee: NearToken::from_millinear(100),
             vote_storage_fee: NearToken::from_yoctonear(125 * 10u128.pow(19)),
@@ -248,6 +252,7 @@ impl VenearTestWorkspaceBuilder {
             let contract = sandbox.dev_create_account().await?;
 
             let reviewer = sandbox.dev_create_account().await?;
+            let council = sandbox.dev_create_account().await?;
             let owner = sandbox.dev_create_account().await?;
             let guardian = sandbox.dev_create_account().await?;
 
@@ -261,6 +266,8 @@ impl VenearTestWorkspaceBuilder {
                     "base_proposal_fee": self.base_proposal_fee,
                     "vote_storage_fee": self.vote_storage_fee,
                     "guardians": &[guardian.id()],
+                    "council_ids": &[council.id()],
+                    "timelock_duration_ns": self.timelock_duration_ns.to_string(),
                 },
             });
 
@@ -281,6 +288,7 @@ impl VenearTestWorkspaceBuilder {
                 contract,
                 owner,
                 reviewer,
+                council,
                 guardian,
             })
         } else {

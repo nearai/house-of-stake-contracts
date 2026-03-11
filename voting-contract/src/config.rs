@@ -8,14 +8,20 @@ pub struct Config {
     /// The account ID of the veNEAR contract.
     pub venear_account_id: AccountId,
 
-    /// The account ID that can approve or reject proposals.
+    /// The account IDs that can approve proposals.
     pub reviewer_ids: Vec<AccountId>,
+
+    /// The account IDs of the council members who can veto proposals during the timelock period.
+    pub council_ids: Vec<AccountId>,
 
     /// The account ID that can upgrade the current contract and modify the config.
     pub owner_account_id: AccountId,
 
     /// The maximum duration of the voting period in nanoseconds.
     pub voting_duration_ns: U64,
+
+    /// The duration of the timelock period in nanoseconds after voting ends.
+    pub timelock_duration_ns: U64,
 
     /// The maximum number of voting options per proposal.
     pub max_number_of_voting_options: u8,

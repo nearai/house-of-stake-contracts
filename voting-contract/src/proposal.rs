@@ -6,9 +6,27 @@ use near_sdk::Promise;
 
 pub type ProposalId = u32;
 
+/// The old proposal structure (V1) that includes the `rejected` field.
+#[derive(Clone)]
+#[near(serializers=[borsh])]
+pub struct ProposalV1 {
+    pub id: ProposalId,
+    pub creation_time_ns: U64,
+    pub proposer_id: AccountId,
+    pub reviewer_id: Option<AccountId>,
+    pub voting_start_time_ns: Option<U64>,
+    pub voting_duration_ns: U64,
+    pub rejected: bool,
+    pub snapshot_and_state: Option<SnapshotAndState>,
+    pub votes: Vec<VoteStats>,
+    pub total_votes: VoteStats,
+    pub status: ProposalStatus,
+}
+
 #[derive(Clone)]
 #[near(serializers=[borsh])]
 pub enum VProposal {
+    V1(ProposalV1),
     Current(Proposal),
 }
 
@@ -21,6 +39,19 @@ impl From<Proposal> for VProposal {
 impl From<VProposal> for Proposal {
     fn from(value: VProposal) -> Self {
         match value {
+            VProposal::V1(v1) => Proposal {
+                id: v1.id,
+                creation_time_ns: v1.creation_time_ns,
+                proposer_id: v1.proposer_id,
+                reviewer_id: v1.reviewer_id,
+                voting_start_time_ns: v1.voting_start_time_ns,
+                voting_duration_ns: v1.voting_duration_ns,
+                timelock_duration_ns: U64(0),
+                snapshot_and_state: v1.snapshot_and_state,
+                votes: v1.votes,
+                total_votes: v1.total_votes,
+                status: v1.status,
+            },
             VProposal::Current(current) => current,
         }
     }
@@ -42,8 +73,8 @@ pub struct Proposal {
     pub voting_start_time_ns: Option<U64>,
     /// The voting duration in nanoseconds, generated from the config.
     pub voting_duration_ns: U64,
-    /// The flag indicating if the proposal was rejected by the reviewer.
-    pub rejected: bool,
+    /// The duration of the timelock period in nanoseconds, stored per-proposal from config.
+    pub timelock_duration_ns: U64,
     /// The snapshot of the contract state and global state. Fetched when the proposal is approved.
     pub snapshot_and_state: Option<SnapshotAndState>,
     /// Aggregated votes per voting option.
@@ -68,9 +99,9 @@ pub struct ProposalInfo {
 #[derive(Clone, Copy, PartialEq)]
 #[near(serializers=[borsh, json])]
 pub enum ProposalStatus {
-    /// The proposal was created and is waiting for the approver to approve or reject it.
+    /// The proposal was created and is waiting for the approver to approve it.
     Created,
-    /// The proposal was rejected by the approver.
+    /// The proposal was rejected (vetoed) by the council during the timelock period.
     Rejected,
     /// The proposal was approved by the approver and is waiting for the voting to start.
     Approved,
@@ -78,6 +109,8 @@ pub enum ProposalStatus {
     Voting,
     /// The proposal voting is finished and the results are available.
     Finished,
+    /// The voting has ended and the proposal is in the timelock period awaiting potential council veto.
+    Timelock,
 }
 
 /// The snapshot of the Merkle tree and the global state at the moment when the proposal was
@@ -125,9 +158,20 @@ impl Proposal {
             ProposalStatus::Created | ProposalStatus::Rejected | ProposalStatus::Finished => {
                 return;
             }
-            ProposalStatus::Approved | ProposalStatus::Voting => {
-                if timestamp.0 >= self.voting_start_time_ns.unwrap().0 + self.voting_duration_ns.0 {
+            ProposalStatus::Timelock => {
+                let voting_end =
+                    self.voting_start_time_ns.unwrap().0 + self.voting_duration_ns.0;
+                if timestamp.0 >= voting_end + self.timelock_duration_ns.0 {
                     self.status = ProposalStatus::Finished;
+                }
+            }
+            ProposalStatus::Approved | ProposalStatus::Voting => {
+                let voting_end =
+                    self.voting_start_time_ns.unwrap().0 + self.voting_duration_ns.0;
+                if timestamp.0 >= voting_end + self.timelock_duration_ns.0 {
+                    self.status = ProposalStatus::Finished;
+                } else if timestamp.0 >= voting_end {
+                    self.status = ProposalStatus::Timelock;
                 } else if timestamp >= self.voting_start_time_ns.unwrap() {
                     self.status = ProposalStatus::Voting;
                 }
@@ -172,7 +216,7 @@ impl Contract {
             reviewer_id: None,
             voting_start_time_ns: None,
             voting_duration_ns: self.config.voting_duration_ns,
-            rejected: false,
+            timelock_duration_ns: self.config.timelock_duration_ns,
             snapshot_and_state: None,
             votes: vec![VoteStats::default(); num_voting_options],
             total_votes: VoteStats::default(),

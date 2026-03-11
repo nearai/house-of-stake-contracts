@@ -49,21 +49,20 @@ impl Contract {
             )
     }
 
-    /// Rejects the proposal.
+    /// Rejects (vetoes) the proposal during the timelock period.
     /// Requires 1 yocto attached to the call.
-    /// Can only be called by the reviewers.
+    /// Can only be called by the council members.
     #[payable]
     pub fn reject_proposal(&mut self, proposal_id: ProposalId) {
         assert_one_yocto();
         self.assert_not_paused();
-        self.assert_called_by_reviewer();
+        self.assert_called_by_council();
         let mut proposal = self.internal_expect_proposal_updated(proposal_id);
 
-        if proposal.status != ProposalStatus::Created {
-            env::panic_str("Proposal is not in the Created status");
+        if proposal.status != ProposalStatus::Timelock {
+            env::panic_str("Proposal can only be rejected during the timelock period");
         }
 
-        proposal.rejected = true;
         proposal.reviewer_id = Some(env::predecessor_account_id());
         proposal.status = ProposalStatus::Rejected;
 
@@ -130,6 +129,15 @@ impl Contract {
                 .reviewer_ids
                 .contains(&env::predecessor_account_id()),
             "Only the reviewers can call this method"
+        );
+    }
+
+    pub fn assert_called_by_council(&self) {
+        require!(
+            self.config
+                .council_ids
+                .contains(&env::predecessor_account_id()),
+            "Only the council can call this method"
         );
     }
 }
