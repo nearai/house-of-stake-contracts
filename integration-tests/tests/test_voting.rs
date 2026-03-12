@@ -1,6 +1,9 @@
 mod setup;
 
-use crate::setup::{VenearTestWorkspace, VenearTestWorkspaceBuilder, VOTING_WASM_FILEPATH};
+use crate::setup::{
+    VenearTestWorkspace, VenearTestWorkspaceBuilder, NS_IN_SECOND, TIMELOCK_DURATION_SECONDS,
+    VOTING_DURATION_SECONDS, VOTING_WASM_FILEPATH,
+};
 use near_sdk::json_types::U64;
 use near_sdk::{Gas, NearToken};
 use near_workspaces::AccountId;
@@ -88,12 +91,15 @@ async fn test_upgrade_voting() -> Result<(), Box<dyn std::error::Error>> {
     let voting = v.voting.as_ref().unwrap();
     let user_a = v.sandbox.dev_create_account().await?;
 
-    // Verify old config has no council_ids
-    let config: serde_json::Value =
-        v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
+    // Verify old config
+    let config: serde_json::Value = v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
     assert!(
         config.get("council_ids").is_none(),
         "Old contract should not have council_ids"
+    );
+    assert!(
+        config.get("timelock_duration_ns").is_none(),
+        "Old contract should not have timelock_duration_ns"
     );
 
     // Regular user should not be able to upgrade
@@ -101,13 +107,10 @@ async fn test_upgrade_voting() -> Result<(), Box<dyn std::error::Error>> {
         attempt_voting_upgrade(&user_a, &v).await.is_err(),
         "User should not be able to upgrade the contract"
     );
-
-    // Owner upgrades to new version
     attempt_voting_upgrade(&voting.owner, &v).await?;
 
     // Verify migrated config has new fields with defaults
-    let config: serde_json::Value =
-        v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
+    let config: serde_json::Value = v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
 
     let council_ids: Vec<AccountId> = serde_json::from_value(config["council_ids"].clone())?;
     assert!(
@@ -115,20 +118,17 @@ async fn test_upgrade_voting() -> Result<(), Box<dyn std::error::Error>> {
         "council_ids should default to empty"
     );
 
-    let timelock_duration_ns: U64 =
-        serde_json::from_value(config["timelock_duration_ns"].clone())?;
+    let timelock_duration_ns: U64 = serde_json::from_value(config["timelock_duration_ns"].clone())?;
     assert_eq!(
         timelock_duration_ns.0, 0,
         "timelock_duration_ns should default to 0 after migration"
     );
 
     // Verify existing config fields are preserved
-    let owner_account_id: AccountId =
-        serde_json::from_value(config["owner_account_id"].clone())?;
+    let owner_account_id: AccountId = serde_json::from_value(config["owner_account_id"].clone())?;
     assert_eq!(owner_account_id, *voting.owner.id());
 
-    let reviewer_ids: Vec<AccountId> =
-        serde_json::from_value(config["reviewer_ids"].clone())?;
+    let reviewer_ids: Vec<AccountId> = serde_json::from_value(config["reviewer_ids"].clone())?;
     assert_eq!(reviewer_ids, vec![voting.reviewer.id().clone()]);
 
     Ok(())
@@ -373,23 +373,15 @@ async fn test_voting() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(proposal["total_votes"]["total_votes"].as_u64().unwrap(), 2);
 
     // Fast forward past voting end
-    let start: u64 = proposal["voting_start_time_ns"]
+    let voting_start: u64 = proposal["voting_start_time_ns"]
         .as_str()
         .unwrap()
         .parse()
         .unwrap();
-    let voting_duration: u64 = proposal["voting_duration_ns"]
-        .as_str()
-        .unwrap()
-        .parse()
-        .unwrap();
-    let timelock_duration: u64 = proposal["timelock_duration_ns"]
-        .as_str()
-        .unwrap()
-        .parse()
-        .unwrap();
+    let voting_end = voting_start + VOTING_DURATION_SECONDS * NS_IN_SECOND;
+    let timelock_end = voting_end + TIMELOCK_DURATION_SECONDS * NS_IN_SECOND;
 
-    v.fast_forward(start + voting_duration + 1_000_000_000, 100, 20)
+    v.fast_forward(voting_end, VOTING_DURATION_SECONDS, 10)
         .await?;
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(proposal["status"].as_str().unwrap(), "Timelock");
@@ -414,12 +406,8 @@ async fn test_voting() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Fast forward past timelock end → Finished
-    v.fast_forward(
-        start + voting_duration + timelock_duration + 1_000_000_000,
-        100,
-        40,
-    )
-    .await?;
+    v.fast_forward(timelock_end, TIMELOCK_DURATION_SECONDS, 10)
+        .await?;
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(proposal["status"].as_str().unwrap(), "Finished");
 
@@ -439,23 +427,18 @@ async fn test_voting_reject_proposal() -> Result<(), Box<dyn std::error::Error>>
     // Approve the proposal and wait for voting to end (enter timelock)
     approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
 
-    let voting_end_ts = {
+    let voting_start: u64 = {
         let proposal = v.get_proposal(proposal_id).await?;
-        let start: u64 = proposal["voting_start_time_ns"]
+        proposal["voting_start_time_ns"]
             .as_str()
             .unwrap()
             .parse()
-            .unwrap();
-        let duration: u64 = proposal["voting_duration_ns"]
-            .as_str()
             .unwrap()
-            .parse()
-            .unwrap();
-        start + duration
     };
+    let voting_end = voting_start + VOTING_DURATION_SECONDS * NS_IN_SECOND;
 
     // Fast forward past voting end but before timelock expires
-    v.fast_forward(voting_end_ts + 1_000_000_000, 100, 20)
+    v.fast_forward(voting_end, VOTING_DURATION_SECONDS, 10)
         .await?;
 
     let proposal = v.get_proposal(proposal_id).await?;

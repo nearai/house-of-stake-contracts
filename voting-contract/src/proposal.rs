@@ -101,7 +101,7 @@ pub struct ProposalInfo {
 pub enum ProposalStatus {
     /// The proposal was created and is waiting for the approver to approve it.
     Created,
-    /// The proposal was rejected (vetoed) by the council during the timelock period.
+    /// The proposal was rejected by the council during the timelock period.
     Rejected,
     /// The proposal was approved by the approver and is waiting for the voting to start.
     Approved,
@@ -158,22 +158,20 @@ impl Proposal {
             ProposalStatus::Created | ProposalStatus::Rejected | ProposalStatus::Finished => {
                 return;
             }
-            ProposalStatus::Timelock => {
-                let voting_end =
-                    self.voting_start_time_ns.unwrap().0 + self.voting_duration_ns.0;
-                if timestamp.0 >= voting_end + self.timelock_duration_ns.0 {
-                    self.status = ProposalStatus::Finished;
-                }
-            }
             ProposalStatus::Approved | ProposalStatus::Voting => {
-                let voting_end =
-                    self.voting_start_time_ns.unwrap().0 + self.voting_duration_ns.0;
+                let voting_end = self.voting_start_time_ns.unwrap().0 + self.voting_duration_ns.0;
                 if timestamp.0 >= voting_end + self.timelock_duration_ns.0 {
                     self.status = ProposalStatus::Finished;
                 } else if timestamp.0 >= voting_end {
                     self.status = ProposalStatus::Timelock;
                 } else if timestamp >= self.voting_start_time_ns.unwrap() {
                     self.status = ProposalStatus::Voting;
+                }
+            }
+            ProposalStatus::Timelock => {
+                let voting_end = self.voting_start_time_ns.unwrap().0 + self.voting_duration_ns.0;
+                if timestamp.0 >= voting_end + self.timelock_duration_ns.0 {
+                    self.status = ProposalStatus::Finished;
                 }
             }
         }

@@ -10,6 +10,7 @@ use serde_json::json;
 use sha2::Digest;
 use std::str::FromStr;
 
+pub const NS_IN_SECOND: u64 = 1_000_000_000;
 pub const UNLOCK_DURATION_SECONDS: u64 = 60;
 pub const VOTING_DURATION_SECONDS: u64 = 60;
 pub const TIMELOCK_DURATION_SECONDS: u64 = 60;
@@ -62,7 +63,7 @@ pub struct VenearTestWorkspaceBuilder {
 impl Default for VenearTestWorkspaceBuilder {
     fn default() -> Self {
         Self {
-            unlock_duration_ns: UNLOCK_DURATION_SECONDS * 1_000_000_000,
+            unlock_duration_ns: UNLOCK_DURATION_SECONDS * NS_IN_SECOND,
             local_deposit: NearToken::from_millinear(100),
             min_lockup_deposit: NearToken::from_millinear(2000),
             // 6% annual growth rate, expressed as a fraction per nanosecond
@@ -75,8 +76,8 @@ impl Default for VenearTestWorkspaceBuilder {
             },
             deploy_voting: false,
             use_previous_voting_wasm: false,
-            voting_duration_ns: VOTING_DURATION_SECONDS * 1_000_000_000,
-            timelock_duration_ns: TIMELOCK_DURATION_SECONDS * 1_000_000_000,
+            voting_duration_ns: VOTING_DURATION_SECONDS * NS_IN_SECOND,
+            timelock_duration_ns: TIMELOCK_DURATION_SECONDS * NS_IN_SECOND,
             max_number_of_voting_options: 16,
             base_proposal_fee: NearToken::from_millinear(100),
             vote_storage_fee: NearToken::from_yoctonear(125 * 10u128.pow(19)),
