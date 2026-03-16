@@ -44,6 +44,7 @@ impl From<VProposal> for Proposal {
                 creation_time_ns: v1.creation_time_ns,
                 proposer_id: v1.proposer_id,
                 reviewer_id: v1.reviewer_id,
+                rejecter_id: None,
                 voting_start_time_ns: v1.voting_start_time_ns,
                 voting_duration_ns: v1.voting_duration_ns,
                 timelock_duration_ns: U64(0),
@@ -67,8 +68,10 @@ pub struct Proposal {
     pub creation_time_ns: U64,
     /// The account ID of the proposer.
     pub proposer_id: AccountId,
-    /// The account ID of the reviewer, who approved or rejected the proposal.
+    /// The account ID of the reviewer, who approved the proposal.
     pub reviewer_id: Option<AccountId>,
+    /// The account ID of the council member who rejected (vetoed) the proposal.
+    pub rejecter_id: Option<AccountId>,
     /// The timestamp when the voting starts, provided by the reviewer.
     pub voting_start_time_ns: Option<U64>,
     /// The voting duration in nanoseconds, generated from the config.
@@ -212,6 +215,7 @@ impl Contract {
             creation_time_ns: env::block_timestamp().into(),
             proposer_id,
             reviewer_id: None,
+            rejecter_id: None,
             voting_start_time_ns: None,
             voting_duration_ns: self.config.voting_duration_ns,
             timelock_duration_ns: self.config.timelock_duration_ns,

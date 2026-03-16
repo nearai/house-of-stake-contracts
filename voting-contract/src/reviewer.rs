@@ -63,7 +63,7 @@ impl Contract {
             env::panic_str("Proposal can only be rejected during the timelock period");
         }
 
-        proposal.reviewer_id = Some(env::predecessor_account_id());
+        proposal.rejecter_id = Some(env::predecessor_account_id());
         proposal.status = ProposalStatus::Rejected;
 
         events::emit::approve_proposal_action(

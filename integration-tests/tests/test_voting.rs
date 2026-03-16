@@ -506,6 +506,12 @@ async fn test_voting_reject_proposal() -> Result<(), Box<dyn std::error::Error>>
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(proposal["status"].as_str().unwrap(), "Rejected");
+    // rejecter_id should be the council member who vetoed
+    assert_eq!(
+        proposal["rejecter_id"].as_str().unwrap(),
+        v.voting.as_ref().unwrap().council.id().as_str(),
+        "rejecter_id should be set to the council member"
+    );
 
     Ok(())
 }
