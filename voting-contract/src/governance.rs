@@ -107,6 +107,18 @@ impl Contract {
         self.assert_owner();
         self.config.timelock_duration_ns = (timelock_duration_sec as u64 * 10u64.pow(9)).into();
     }
+
+    /// Updates the proposal expiration duration in seconds.
+    /// Set to 0 to disable proposal expiration.
+    /// Can only be called by the owner.
+    /// Requires 1 yocto NEAR.
+    #[payable]
+    pub fn set_proposal_expiration(&mut self, proposal_expiration_sec: u32) {
+        assert_one_yocto();
+        self.assert_owner();
+        self.config.proposal_expiration_ns =
+            (proposal_expiration_sec as u64 * 10u64.pow(9)).into();
+    }
 }
 
 impl Contract {

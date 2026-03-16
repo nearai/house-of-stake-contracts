@@ -1,8 +1,8 @@
 mod setup;
 
 use crate::setup::{
-    VenearTestWorkspace, VenearTestWorkspaceBuilder, NS_IN_SECOND, TIMELOCK_DURATION_SECONDS,
-    VOTING_DURATION_SECONDS, VOTING_WASM_FILEPATH,
+    VenearTestWorkspace, VenearTestWorkspaceBuilder, NS_IN_SECOND, PROPOSAL_EXPIRATION_SECONDS,
+    TIMELOCK_DURATION_SECONDS, VOTING_DURATION_SECONDS, VOTING_WASM_FILEPATH,
 };
 use near_sdk::json_types::U64;
 use near_sdk::{Gas, NearToken};
@@ -1307,6 +1307,53 @@ async fn test_voting_pause() -> Result<(), Box<dyn std::error::Error>> {
     assert!(
         outcome.is_failure(),
         "Council should not be able to reject proposal while paused: {:#?}",
+        outcome
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_voting_proposal_expiration() -> Result<(), Box<dyn std::error::Error>> {
+    let v = VenearTestWorkspaceBuilder::default()
+        .with_voting()
+        .build()
+        .await?;
+    let user_a = v.create_account_with_lockup().await?;
+    let proposal_id = create_proposal(&v, &user_a).await?;
+    let proposal = v.get_proposal(proposal_id).await?;
+
+    // Fast-forward past the expiration window
+    let creation_time_ns: u64 = proposal["creation_time_ns"].as_str().unwrap().parse()?;
+    let expiration_timestamp = creation_time_ns + PROPOSAL_EXPIRATION_SECONDS * NS_IN_SECOND;
+    v.fast_forward(expiration_timestamp, PROPOSAL_EXPIRATION_SECONDS, 20)
+        .await?;
+
+    let proposal = v.get_proposal(proposal_id).await?;
+    assert_eq!(
+        proposal["status"].as_str().unwrap(),
+        "Expired",
+        "Proposal should be Expired after expiration window"
+    );
+
+    // Attempt to approve
+    let outcome = v
+        .voting
+        .as_ref()
+        .unwrap()
+        .reviewer
+        .call(v.voting_id(), "approve_proposal")
+        .args_json(json!({
+            "proposal_id": proposal_id,
+            "voting_start_time_sec": None::<u32>,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(250))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_failure(),
+        "Should not be able to approve an expired proposal: {:#?}",
         outcome
     );
 

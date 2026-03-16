@@ -31,6 +31,9 @@ impl Contract {
             ProposalStatus::Rejected => {
                 env::panic_str("Proposal is rejected");
             }
+            ProposalStatus::Expired => {
+                env::panic_str("Proposal is expired");
+            }
             ProposalStatus::Finished | ProposalStatus::Timelock => {
                 env::panic_str("Voting is finished");
             }

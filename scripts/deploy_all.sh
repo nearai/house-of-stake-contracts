@@ -44,6 +44,9 @@ VOTING_DURATION_NS="${VOTING_DURATION_SEC}000000000"
 # 10 minutes for testing
 : "${TIMELOCK_DURATION_SEC:=600}"
 TIMELOCK_DURATION_NS="${TIMELOCK_DURATION_SEC}000000000"
+# 7 days for proposal expiration
+: "${PROPOSAL_EXPIRATION_SEC:=600}"
+PROPOSAL_EXPIRATION_NS="${PROPOSAL_EXPIRATION_SEC}000000000"
 # 0.1 NEAR
 : ${BASE_PROPOSAL_FEE:="100000000000000000000000"}
 # 0.00125 NEAR (we probably need less)
@@ -116,7 +119,8 @@ near --quiet contract deploy $VOTING_ACCOUNT_ID use-file res/$CONTRACTS_SOURCE/v
     "vote_storage_fee": "'$VOTE_STORAGE_FEE'",
     "guardians": ["'$GUARDIAN_ACCOUNT_ID'"],
     "council_ids": ["'$COUNCIL_ACCOUNT_ID'"],
-    "timelock_duration_ns": "'$TIMELOCK_DURATION_NS'"
+    "timelock_duration_ns": "'$TIMELOCK_DURATION_NS'",
+    "proposal_expiration_ns": "'$PROPOSAL_EXPIRATION_NS'"
   }
 }' prepaid-gas '10.0 Tgas' attached-deposit '0 NEAR' network-config $CHAIN_ID sign-with-keychain send
 

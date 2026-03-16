@@ -55,6 +55,7 @@ impl Contract {
                 proposed_new_owner_account_id: old.config.proposed_new_owner_account_id,
                 council_ids: vec![],
                 timelock_duration_ns: U64(0),
+                proposal_expiration_ns: U64(0),
             },
             proposals: old.proposals,
             proposal_metadata: old.proposal_metadata,

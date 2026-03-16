@@ -14,6 +14,7 @@ pub const NS_IN_SECOND: u64 = 1_000_000_000;
 pub const UNLOCK_DURATION_SECONDS: u64 = 60;
 pub const VOTING_DURATION_SECONDS: u64 = 60;
 pub const TIMELOCK_DURATION_SECONDS: u64 = 60;
+pub const PROPOSAL_EXPIRATION_SECONDS: u64 = 60;
 
 pub const LOCKUP_WASM_FILEPATH: &str = "../res/local/lockup_contract.wasm";
 pub const VENEAR_WASM_FILEPATH: &str = "../res/local/venear_contract.wasm";
@@ -58,6 +59,7 @@ pub struct VenearTestWorkspaceBuilder {
     pub max_number_of_voting_options: u8,
     pub base_proposal_fee: NearToken,
     pub vote_storage_fee: NearToken,
+    pub proposal_expiration_ns: u64,
 }
 
 impl Default for VenearTestWorkspaceBuilder {
@@ -81,6 +83,7 @@ impl Default for VenearTestWorkspaceBuilder {
             max_number_of_voting_options: 16,
             base_proposal_fee: NearToken::from_millinear(100),
             vote_storage_fee: NearToken::from_yoctonear(125 * 10u128.pow(19)),
+            proposal_expiration_ns: PROPOSAL_EXPIRATION_SECONDS * NS_IN_SECOND,
         }
     }
 }
@@ -277,6 +280,7 @@ impl VenearTestWorkspaceBuilder {
                     "guardians": &[guardian.id()],
                     "council_ids": &[council.id()],
                     "timelock_duration_ns": self.timelock_duration_ns.to_string(),
+                    "proposal_expiration_ns": self.proposal_expiration_ns.to_string(),
                 },
             });
 

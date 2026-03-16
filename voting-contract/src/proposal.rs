@@ -48,6 +48,7 @@ impl From<VProposal> for Proposal {
                 voting_start_time_ns: v1.voting_start_time_ns,
                 voting_duration_ns: v1.voting_duration_ns,
                 timelock_duration_ns: U64(0),
+                expiration_ns: U64(0),
                 snapshot_and_state: v1.snapshot_and_state,
                 votes: v1.votes,
                 total_votes: v1.total_votes,
@@ -78,6 +79,8 @@ pub struct Proposal {
     pub voting_duration_ns: U64,
     /// The duration of the timelock period in nanoseconds, stored per-proposal from config.
     pub timelock_duration_ns: U64,
+    /// The deadline in nanoseconds by which the proposal must be approved. 0 means no expiration.
+    pub expiration_ns: U64,
     /// The snapshot of the contract state and global state. Fetched when the proposal is approved.
     pub snapshot_and_state: Option<SnapshotAndState>,
     /// Aggregated votes per voting option.
@@ -114,6 +117,8 @@ pub enum ProposalStatus {
     Finished,
     /// The voting has ended and the proposal is in the timelock period awaiting potential council veto.
     Timelock,
+    /// The proposal expired before being approved by a reviewer.
+    Expired,
 }
 
 /// The snapshot of the Merkle tree and the global state at the moment when the proposal was
@@ -158,8 +163,13 @@ impl VoteStats {
 impl Proposal {
     pub fn update(&mut self, timestamp: TimestampNs) {
         match self.status {
-            ProposalStatus::Created | ProposalStatus::Rejected | ProposalStatus::Finished => {
+            ProposalStatus::Rejected | ProposalStatus::Finished | ProposalStatus::Expired => {
                 return;
+            }
+            ProposalStatus::Created => {
+                if self.expiration_ns.0 > 0 && timestamp.0 >= self.expiration_ns.0 {
+                    self.status = ProposalStatus::Expired;
+                }
             }
             ProposalStatus::Approved | ProposalStatus::Voting => {
                 let voting_end = self.voting_start_time_ns.unwrap().0 + self.voting_duration_ns.0;
@@ -210,15 +220,22 @@ impl Contract {
 
         events::emit::create_proposal_action("create_proposal", &proposer_id, proposal_id);
 
+        let creation_time_ns: u64 = env::block_timestamp();
+        let expiration_ns = if self.config.proposal_expiration_ns.0 > 0 {
+            U64(creation_time_ns + self.config.proposal_expiration_ns.0)
+        } else {
+            U64(0)
+        };
         let proposal = Proposal {
             id: proposal_id,
-            creation_time_ns: env::block_timestamp().into(),
+            creation_time_ns: creation_time_ns.into(),
             proposer_id,
             reviewer_id: None,
             rejecter_id: None,
             voting_start_time_ns: None,
             voting_duration_ns: self.config.voting_duration_ns,
             timelock_duration_ns: self.config.timelock_duration_ns,
+            expiration_ns,
             snapshot_and_state: None,
             votes: vec![VoteStats::default(); num_voting_options],
             total_votes: VoteStats::default(),
