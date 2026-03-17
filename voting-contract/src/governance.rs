@@ -87,6 +87,38 @@ impl Contract {
         self.assert_owner();
         self.config.guardians = guardians;
     }
+
+    /// Updates the list of council member account IDs who can veto proposals during timelock.
+    /// Can only be called by the owner.
+    /// Requires 1 yocto NEAR.
+    #[payable]
+    pub fn set_council_ids(&mut self, council_ids: Vec<AccountId>) {
+        assert_one_yocto();
+        self.assert_owner();
+        self.config.council_ids = council_ids;
+    }
+
+    /// Updates the timelock duration in seconds.
+    /// Can only be called by the owner.
+    /// Requires 1 yocto NEAR.
+    #[payable]
+    pub fn set_timelock_duration(&mut self, timelock_duration_sec: u32) {
+        assert_one_yocto();
+        self.assert_owner();
+        self.config.timelock_duration_ns = (timelock_duration_sec as u64 * 10u64.pow(9)).into();
+    }
+
+    /// Updates the proposal expiration duration in seconds.
+    /// Set to 0 to disable proposal expiration.
+    /// Can only be called by the owner.
+    /// Requires 1 yocto NEAR.
+    #[payable]
+    pub fn set_proposal_expiration(&mut self, proposal_expiration_sec: u32) {
+        assert_one_yocto();
+        self.assert_owner();
+        self.config.proposal_expiration_ns =
+            (proposal_expiration_sec as u64 * 10u64.pow(9)).into();
+    }
 }
 
 impl Contract {

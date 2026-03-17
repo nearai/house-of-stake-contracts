@@ -1,6 +1,9 @@
 mod setup;
 
-use crate::setup::{VenearTestWorkspace, VenearTestWorkspaceBuilder, VOTING_WASM_FILEPATH};
+use crate::setup::{
+    VenearTestWorkspace, VenearTestWorkspaceBuilder, NS_IN_SECOND, PROPOSAL_EXPIRATION_SECONDS,
+    TIMELOCK_DURATION_SECONDS, VOTING_DURATION_SECONDS, VOTING_WASM_FILEPATH,
+};
 use near_sdk::json_types::U64;
 use near_sdk::{Gas, NearToken};
 use near_workspaces::AccountId;
@@ -26,24 +29,6 @@ async fn attempt_voting_upgrade(
         )
         .into());
     }
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_upgrade_voting() -> Result<(), Box<dyn std::error::Error>> {
-    let v = VenearTestWorkspaceBuilder::default()
-        .with_voting()
-        .build()
-        .await?;
-    let user_a = v.sandbox.dev_create_account().await?;
-
-    assert!(
-        attempt_voting_upgrade(&user_a, &v).await.is_err(),
-        "User should not be able to upgrade the contract"
-    );
-
-    attempt_voting_upgrade(&v.voting.as_ref().unwrap().owner, &v).await?;
 
     Ok(())
 }
@@ -93,6 +78,58 @@ async fn approve_proposal(
     if !outcome.is_success() {
         return Err(format!("Failed to approve proposal: {:#?}", outcome.outcomes()).into());
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_upgrade_voting() -> Result<(), Box<dyn std::error::Error>> {
+    let v = VenearTestWorkspaceBuilder::default()
+        .with_previous_voting()
+        .build()
+        .await?;
+    let voting = v.voting.as_ref().unwrap();
+    let user_a = v.sandbox.dev_create_account().await?;
+
+    // Verify old config
+    let config: serde_json::Value = v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
+    assert!(
+        config.get("council_ids").is_none(),
+        "Old contract should not have council_ids"
+    );
+    assert!(
+        config.get("timelock_duration_ns").is_none(),
+        "Old contract should not have timelock_duration_ns"
+    );
+
+    // Regular user should not be able to upgrade
+    assert!(
+        attempt_voting_upgrade(&user_a, &v).await.is_err(),
+        "User should not be able to upgrade the contract"
+    );
+    attempt_voting_upgrade(&voting.owner, &v).await?;
+
+    // Verify migrated config has new fields with defaults
+    let config: serde_json::Value = v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
+
+    let council_ids: Vec<AccountId> = serde_json::from_value(config["council_ids"].clone())?;
+    assert!(
+        council_ids.is_empty(),
+        "council_ids should default to empty"
+    );
+
+    let timelock_duration_ns: U64 = serde_json::from_value(config["timelock_duration_ns"].clone())?;
+    assert_eq!(
+        timelock_duration_ns.0, 0,
+        "timelock_duration_ns should default to 0 after migration"
+    );
+
+    // Verify existing config fields are preserved
+    let owner_account_id: AccountId = serde_json::from_value(config["owner_account_id"].clone())?;
+    assert_eq!(owner_account_id, *voting.owner.id());
+
+    let reviewer_ids: Vec<AccountId> = serde_json::from_value(config["reviewer_ids"].clone())?;
+    assert_eq!(reviewer_ids, vec![voting.reviewer.id().clone()]);
 
     Ok(())
 }
@@ -335,6 +372,45 @@ async fn test_voting() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(proposal["votes"][2]["total_votes"].as_u64().unwrap(), 1);
     assert_eq!(proposal["total_votes"]["total_votes"].as_u64().unwrap(), 2);
 
+    // Fast forward past voting end
+    let voting_start: u64 = proposal["voting_start_time_ns"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let voting_end = voting_start + VOTING_DURATION_SECONDS * NS_IN_SECOND;
+    let timelock_end = voting_end + TIMELOCK_DURATION_SECONDS * NS_IN_SECOND;
+
+    v.fast_forward(voting_end, VOTING_DURATION_SECONDS, 10)
+        .await?;
+    let proposal = v.get_proposal(proposal_id).await?;
+    assert_eq!(proposal["status"].as_str().unwrap(), "Timelock");
+
+    // Voting on a Timelock proposal should fail
+    let outcome = user_b
+        .call(v.voting_id(), "vote")
+        .args_json(json!({
+            "proposal_id": proposal_id,
+            "vote": 0,
+            "merkle_proof": user_b_merkle_proof,
+            "v_account": user_b_v_account,
+        }))
+        .deposit(NearToken::from_millinear(15))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_failure(),
+        "Should not be able to vote during Timelock: {:#?}",
+        outcome
+    );
+
+    // Fast forward past timelock end → Finished
+    v.fast_forward(timelock_end, TIMELOCK_DURATION_SECONDS, 10)
+        .await?;
+    let proposal = v.get_proposal(proposal_id).await?;
+    assert_eq!(proposal["status"].as_str().unwrap(), "Finished");
+
     Ok(())
 }
 
@@ -347,6 +423,32 @@ async fn test_voting_reject_proposal() -> Result<(), Box<dyn std::error::Error>>
     let user_a = v.create_account_with_lockup().await?;
 
     let proposal_id = create_proposal(&v, &user_a).await?;
+
+    // Approve the proposal and wait for voting to end (enter timelock)
+    approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
+
+    let voting_start: u64 = {
+        let proposal = v.get_proposal(proposal_id).await?;
+        proposal["voting_start_time_ns"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let voting_end = voting_start + VOTING_DURATION_SECONDS * NS_IN_SECOND;
+
+    // Fast forward past voting end but before timelock expires
+    v.fast_forward(voting_end, VOTING_DURATION_SECONDS, 10)
+        .await?;
+
+    let proposal = v.get_proposal(proposal_id).await?;
+    assert_eq!(
+        proposal["status"].as_str().unwrap(),
+        "Timelock",
+        "Proposal should be in Timelock status"
+    );
+
+    // Regular user cannot reject during timelock
     let outcome = user_a
         .call(v.voting_id(), "reject_proposal")
         .args_json(json!({
@@ -362,6 +464,7 @@ async fn test_voting_reject_proposal() -> Result<(), Box<dyn std::error::Error>>
         outcome
     );
 
+    // Reviewer cannot reject proposals
     let outcome = v
         .voting
         .as_ref()
@@ -376,20 +479,39 @@ async fn test_voting_reject_proposal() -> Result<(), Box<dyn std::error::Error>>
         .transact()
         .await?;
     assert!(
-        outcome.is_success(),
-        "Reviewer should be able to reject proposal: {:#?}",
+        outcome.is_failure(),
+        "Reviewer should not be able to reject proposal: {:#?}",
         outcome
     );
 
-    let num_approved_proposals: u32 = v
-        .sandbox
-        .view(v.voting_id(), "get_num_approved_proposals")
-        .await?
-        .json()?;
-    assert_eq!(num_approved_proposals, 0);
+    // Council can reject (veto) during timelock
+    let outcome = v
+        .voting
+        .as_ref()
+        .unwrap()
+        .council
+        .call(v.voting_id(), "reject_proposal")
+        .args_json(json!({
+            "proposal_id": proposal_id,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(250))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_success(),
+        "Council should be able to reject proposal during timelock: {:#?}",
+        outcome
+    );
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(proposal["status"].as_str().unwrap(), "Rejected");
+    // rejecter_id should be the council member who vetoed
+    assert_eq!(
+        proposal["rejecter_id"].as_str().unwrap(),
+        v.voting.as_ref().unwrap().council.id().as_str(),
+        "rejecter_id should be set to the council member"
+    );
 
     Ok(())
 }
@@ -632,6 +754,90 @@ async fn test_voting_governance() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Note, vote storage fee cannot be changed without contract upgrade
+
+    // Council IDs
+    let original_council_ids: Vec<AccountId> =
+        serde_json::from_value(original_config["council_ids"].clone())?;
+    let new_council_ids: Vec<AccountId> = vec!["new_council_1".parse()?, "new_council_2".parse()?];
+    assert_ne!(original_council_ids, new_council_ids);
+
+    let outcome = user
+        .call(v.voting_id(), "set_council_ids")
+        .args_json(json!({
+            "council_ids": new_council_ids,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_failure(),
+        "Regular user should not be able to change council_ids: {:#?}",
+        outcome
+    );
+
+    let outcome = voting_owner
+        .call(v.voting_id(), "set_council_ids")
+        .args_json(json!({
+            "council_ids": new_council_ids,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_success(),
+        "Owner should be able to change council_ids: {:#?}",
+        outcome
+    );
+
+    let new_config: serde_json::Value =
+        v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
+    let council_ids: Vec<AccountId> = serde_json::from_value(new_config["council_ids"].clone())?;
+    assert_eq!(council_ids, new_council_ids);
+
+    // Timelock duration
+    let original_timelock_duration_ns: U64 =
+        serde_json::from_value(original_config["timelock_duration_ns"].clone())?;
+    let new_timelock_duration_sec: u32 = 7200;
+    let new_timelock_duration_ns: U64 = (new_timelock_duration_sec as u64 * 10u64.pow(9)).into();
+    assert_ne!(original_timelock_duration_ns, new_timelock_duration_ns);
+
+    let outcome = user
+        .call(v.voting_id(), "set_timelock_duration")
+        .args_json(json!({
+            "timelock_duration_sec": new_timelock_duration_sec,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_failure(),
+        "Regular user should not be able to change timelock_duration: {:#?}",
+        outcome
+    );
+
+    let outcome = voting_owner
+        .call(v.voting_id(), "set_timelock_duration")
+        .args_json(json!({
+            "timelock_duration_sec": new_timelock_duration_sec,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_success(),
+        "Owner should be able to change timelock_duration: {:#?}",
+        outcome
+    );
+
+    let new_config: serde_json::Value =
+        v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
+    let timelock_duration_ns: U64 =
+        serde_json::from_value(new_config["timelock_duration_ns"].clone())?;
+    assert_eq!(timelock_duration_ns, new_timelock_duration_ns);
 
     // Guardians
 
@@ -1084,8 +1290,12 @@ async fn test_voting_pause() -> Result<(), Box<dyn std::error::Error>> {
         "Reviewer should not be able to approve proposal while paused"
     );
 
-    // Attempt to reject a proposal while paused
-    let outcome = voting_owner
+    // Attempt to reject a proposal while paused (council call, but contract is paused)
+    let outcome = v
+        .voting
+        .as_ref()
+        .unwrap()
+        .council
         .call(v.voting_id(), "reject_proposal")
         .args_json(json!({
             "proposal_id": proposal_id_2,
@@ -1096,7 +1306,54 @@ async fn test_voting_pause() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     assert!(
         outcome.is_failure(),
-        "Reviewer should not be able to reject proposal while paused: {:#?}",
+        "Council should not be able to reject proposal while paused: {:#?}",
+        outcome
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_voting_proposal_expiration() -> Result<(), Box<dyn std::error::Error>> {
+    let v = VenearTestWorkspaceBuilder::default()
+        .with_voting()
+        .build()
+        .await?;
+    let user_a = v.create_account_with_lockup().await?;
+    let proposal_id = create_proposal(&v, &user_a).await?;
+    let proposal = v.get_proposal(proposal_id).await?;
+
+    // Fast-forward past the expiration window
+    let creation_time_ns: u64 = proposal["creation_time_ns"].as_str().unwrap().parse()?;
+    let expiration_timestamp = creation_time_ns + PROPOSAL_EXPIRATION_SECONDS * NS_IN_SECOND;
+    v.fast_forward(expiration_timestamp, PROPOSAL_EXPIRATION_SECONDS, 20)
+        .await?;
+
+    let proposal = v.get_proposal(proposal_id).await?;
+    assert_eq!(
+        proposal["status"].as_str().unwrap(),
+        "Expired",
+        "Proposal should be Expired after expiration window"
+    );
+
+    // Attempt to approve
+    let outcome = v
+        .voting
+        .as_ref()
+        .unwrap()
+        .reviewer
+        .call(v.voting_id(), "approve_proposal")
+        .args_json(json!({
+            "proposal_id": proposal_id,
+            "voting_start_time_sec": None::<u32>,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(250))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_failure(),
+        "Should not be able to approve an expired proposal: {:#?}",
         outcome
     );
 

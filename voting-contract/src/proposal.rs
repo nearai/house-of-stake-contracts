@@ -6,9 +6,27 @@ use near_sdk::Promise;
 
 pub type ProposalId = u32;
 
+/// The old proposal structure (V1) that includes the `rejected` field.
+#[derive(Clone)]
+#[near(serializers=[borsh])]
+pub struct ProposalV1 {
+    pub id: ProposalId,
+    pub creation_time_ns: U64,
+    pub proposer_id: AccountId,
+    pub reviewer_id: Option<AccountId>,
+    pub voting_start_time_ns: Option<U64>,
+    pub voting_duration_ns: U64,
+    pub rejected: bool,
+    pub snapshot_and_state: Option<SnapshotAndState>,
+    pub votes: Vec<VoteStats>,
+    pub total_votes: VoteStats,
+    pub status: ProposalStatus,
+}
+
 #[derive(Clone)]
 #[near(serializers=[borsh])]
 pub enum VProposal {
+    V1(ProposalV1),
     Current(Proposal),
 }
 
@@ -21,6 +39,21 @@ impl From<Proposal> for VProposal {
 impl From<VProposal> for Proposal {
     fn from(value: VProposal) -> Self {
         match value {
+            VProposal::V1(v1) => Proposal {
+                id: v1.id,
+                creation_time_ns: v1.creation_time_ns,
+                proposer_id: v1.proposer_id,
+                reviewer_id: v1.reviewer_id,
+                rejecter_id: None,
+                voting_start_time_ns: v1.voting_start_time_ns,
+                voting_duration_ns: v1.voting_duration_ns,
+                timelock_duration_ns: U64(0),
+                expiration_ns: U64(0),
+                snapshot_and_state: v1.snapshot_and_state,
+                votes: v1.votes,
+                total_votes: v1.total_votes,
+                status: v1.status,
+            },
             VProposal::Current(current) => current,
         }
     }
@@ -36,14 +69,18 @@ pub struct Proposal {
     pub creation_time_ns: U64,
     /// The account ID of the proposer.
     pub proposer_id: AccountId,
-    /// The account ID of the reviewer, who approved or rejected the proposal.
+    /// The account ID of the reviewer, who approved the proposal.
     pub reviewer_id: Option<AccountId>,
+    /// The account ID of the council member who rejected (vetoed) the proposal.
+    pub rejecter_id: Option<AccountId>,
     /// The timestamp when the voting starts, provided by the reviewer.
     pub voting_start_time_ns: Option<U64>,
     /// The voting duration in nanoseconds, generated from the config.
     pub voting_duration_ns: U64,
-    /// The flag indicating if the proposal was rejected by the reviewer.
-    pub rejected: bool,
+    /// The duration of the timelock period in nanoseconds, stored per-proposal from config.
+    pub timelock_duration_ns: U64,
+    /// The deadline in nanoseconds by which the proposal must be approved. 0 means no expiration.
+    pub expiration_ns: U64,
     /// The snapshot of the contract state and global state. Fetched when the proposal is approved.
     pub snapshot_and_state: Option<SnapshotAndState>,
     /// Aggregated votes per voting option.
@@ -68,9 +105,9 @@ pub struct ProposalInfo {
 #[derive(Clone, Copy, PartialEq)]
 #[near(serializers=[borsh, json])]
 pub enum ProposalStatus {
-    /// The proposal was created and is waiting for the approver to approve or reject it.
+    /// The proposal was created and is waiting for the approver to approve it.
     Created,
-    /// The proposal was rejected by the approver.
+    /// The proposal was rejected by the council during the timelock period.
     Rejected,
     /// The proposal was approved by the approver and is waiting for the voting to start.
     Approved,
@@ -78,6 +115,10 @@ pub enum ProposalStatus {
     Voting,
     /// The proposal voting is finished and the results are available.
     Finished,
+    /// The voting has ended and the proposal is in the timelock period awaiting potential council veto.
+    Timelock,
+    /// The proposal expired before being approved by a reviewer.
+    Expired,
 }
 
 /// The snapshot of the Merkle tree and the global state at the moment when the proposal was
@@ -122,14 +163,28 @@ impl VoteStats {
 impl Proposal {
     pub fn update(&mut self, timestamp: TimestampNs) {
         match self.status {
-            ProposalStatus::Created | ProposalStatus::Rejected | ProposalStatus::Finished => {
+            ProposalStatus::Rejected | ProposalStatus::Finished | ProposalStatus::Expired => {
                 return;
             }
+            ProposalStatus::Created => {
+                if self.expiration_ns.0 > 0 && timestamp.0 >= self.expiration_ns.0 {
+                    self.status = ProposalStatus::Expired;
+                }
+            }
             ProposalStatus::Approved | ProposalStatus::Voting => {
-                if timestamp.0 >= self.voting_start_time_ns.unwrap().0 + self.voting_duration_ns.0 {
+                let voting_end = self.voting_start_time_ns.unwrap().0 + self.voting_duration_ns.0;
+                if timestamp.0 >= voting_end + self.timelock_duration_ns.0 {
                     self.status = ProposalStatus::Finished;
+                } else if timestamp.0 >= voting_end {
+                    self.status = ProposalStatus::Timelock;
                 } else if timestamp >= self.voting_start_time_ns.unwrap() {
                     self.status = ProposalStatus::Voting;
+                }
+            }
+            ProposalStatus::Timelock => {
+                let voting_end = self.voting_start_time_ns.unwrap().0 + self.voting_duration_ns.0;
+                if timestamp.0 >= voting_end + self.timelock_duration_ns.0 {
+                    self.status = ProposalStatus::Finished;
                 }
             }
         }
@@ -165,14 +220,22 @@ impl Contract {
 
         events::emit::create_proposal_action("create_proposal", &proposer_id, proposal_id);
 
+        let creation_time_ns: u64 = env::block_timestamp();
+        let expiration_ns = if self.config.proposal_expiration_ns.0 > 0 {
+            U64(creation_time_ns + self.config.proposal_expiration_ns.0)
+        } else {
+            U64(0)
+        };
         let proposal = Proposal {
             id: proposal_id,
-            creation_time_ns: env::block_timestamp().into(),
+            creation_time_ns: creation_time_ns.into(),
             proposer_id,
             reviewer_id: None,
+            rejecter_id: None,
             voting_start_time_ns: None,
             voting_duration_ns: self.config.voting_duration_ns,
-            rejected: false,
+            timelock_duration_ns: self.config.timelock_duration_ns,
+            expiration_ns,
             snapshot_and_state: None,
             votes: vec![VoteStats::default(); num_voting_options],
             total_votes: VoteStats::default(),

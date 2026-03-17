@@ -10,12 +10,16 @@ use serde_json::json;
 use sha2::Digest;
 use std::str::FromStr;
 
+pub const NS_IN_SECOND: u64 = 1_000_000_000;
 pub const UNLOCK_DURATION_SECONDS: u64 = 60;
 pub const VOTING_DURATION_SECONDS: u64 = 60;
+pub const TIMELOCK_DURATION_SECONDS: u64 = 60;
+pub const PROPOSAL_EXPIRATION_SECONDS: u64 = 60;
 
 pub const LOCKUP_WASM_FILEPATH: &str = "../res/local/lockup_contract.wasm";
 pub const VENEAR_WASM_FILEPATH: &str = "../res/local/venear_contract.wasm";
 pub const VOTING_WASM_FILEPATH: &str = "../res/local/voting_contract.wasm";
+pub const PREVIOUS_VOTING_WASM_FILEPATH: &str = "../res/release/1_0_2/voting_contract.wasm";
 pub const SANDBOX_CONTRACT_WASM_FILEPATH: &str =
     "../res/local/sandbox_staking_whitelist_contract.wasm";
 
@@ -38,6 +42,7 @@ pub struct VotingTestWorkspace {
     pub contract: Account,
     pub owner: Account,
     pub reviewer: Account,
+    pub council: Account,
     pub guardian: Account,
 }
 
@@ -48,16 +53,19 @@ pub struct VenearTestWorkspaceBuilder {
     pub min_lockup_deposit: NearToken,
     pub annual_growth_rate_ns: Fraction,
     pub deploy_voting: bool,
+    pub use_previous_voting_wasm: bool,
     pub voting_duration_ns: u64,
+    pub timelock_duration_ns: u64,
     pub max_number_of_voting_options: u8,
     pub base_proposal_fee: NearToken,
     pub vote_storage_fee: NearToken,
+    pub proposal_expiration_ns: u64,
 }
 
 impl Default for VenearTestWorkspaceBuilder {
     fn default() -> Self {
         Self {
-            unlock_duration_ns: UNLOCK_DURATION_SECONDS * 1_000_000_000,
+            unlock_duration_ns: UNLOCK_DURATION_SECONDS * NS_IN_SECOND,
             local_deposit: NearToken::from_millinear(100),
             min_lockup_deposit: NearToken::from_millinear(2000),
             // 6% annual growth rate, expressed as a fraction per nanosecond
@@ -69,10 +77,13 @@ impl Default for VenearTestWorkspaceBuilder {
                 denominator: 10u128.pow(30).into(),
             },
             deploy_voting: false,
-            voting_duration_ns: VOTING_DURATION_SECONDS * 1_000_000_000,
+            use_previous_voting_wasm: false,
+            voting_duration_ns: VOTING_DURATION_SECONDS * NS_IN_SECOND,
+            timelock_duration_ns: TIMELOCK_DURATION_SECONDS * NS_IN_SECOND,
             max_number_of_voting_options: 16,
             base_proposal_fee: NearToken::from_millinear(100),
             vote_storage_fee: NearToken::from_yoctonear(125 * 10u128.pow(19)),
+            proposal_expiration_ns: PROPOSAL_EXPIRATION_SECONDS * NS_IN_SECOND,
         }
     }
 }
@@ -243,11 +254,17 @@ impl VenearTestWorkspaceBuilder {
         );
 
         let voting = if self.deploy_voting {
-            let voting_wasm = std::fs::read(VOTING_WASM_FILEPATH)?;
+            let voting_wasm_path = if self.use_previous_voting_wasm {
+                PREVIOUS_VOTING_WASM_FILEPATH
+            } else {
+                VOTING_WASM_FILEPATH
+            };
+            let voting_wasm = std::fs::read(voting_wasm_path)?;
 
             let contract = sandbox.dev_create_account().await?;
 
             let reviewer = sandbox.dev_create_account().await?;
+            let council = sandbox.dev_create_account().await?;
             let owner = sandbox.dev_create_account().await?;
             let guardian = sandbox.dev_create_account().await?;
 
@@ -261,6 +278,9 @@ impl VenearTestWorkspaceBuilder {
                     "base_proposal_fee": self.base_proposal_fee,
                     "vote_storage_fee": self.vote_storage_fee,
                     "guardians": &[guardian.id()],
+                    "council_ids": &[council.id()],
+                    "timelock_duration_ns": self.timelock_duration_ns.to_string(),
+                    "proposal_expiration_ns": self.proposal_expiration_ns.to_string(),
                 },
             });
 
@@ -281,6 +301,7 @@ impl VenearTestWorkspaceBuilder {
                 contract,
                 owner,
                 reviewer,
+                council,
                 guardian,
             })
         } else {
@@ -319,6 +340,12 @@ impl VenearTestWorkspaceBuilder {
 
     pub fn with_voting(mut self) -> Self {
         self.deploy_voting = true;
+        self
+    }
+
+    pub fn with_previous_voting(mut self) -> Self {
+        self.deploy_voting = true;
+        self.use_previous_voting_wasm = true;
         self
     }
 }
