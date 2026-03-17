@@ -29,7 +29,6 @@ impl Contract {
         }
 
         events::emit::approve_proposal_action(
-            "proposal_approve",
             &env::predecessor_account_id(),
             proposal_id,
             voting_start_time_sec,
@@ -66,12 +65,7 @@ impl Contract {
         proposal.rejecter_id = Some(env::predecessor_account_id());
         proposal.status = ProposalStatus::Rejected;
 
-        events::emit::approve_proposal_action(
-            "proposal_reject",
-            &env::predecessor_account_id(),
-            proposal_id,
-            None,
-        );
+        events::emit::reject_proposal_action(&env::predecessor_account_id(), proposal_id);
 
         self.internal_set_proposal(proposal);
     }
