@@ -645,9 +645,6 @@ pub struct Config {
     /// The maximum duration of the voting period in nanoseconds.
     pub voting_duration_ns: U64,
 
-    /// The maximum number of voting options per proposal.
-    pub max_number_of_voting_options: u8,
-
     /// The base fee in addition to the storage fee required to create a proposal.
     pub base_proposal_fee: NearToken,
 
@@ -672,9 +669,6 @@ pub struct ProposalMetadata {
 
     /// The link to the proposal.
     pub link: Option<String>,
-
-    /// The voting options for the proposal.
-    pub voting_options: Vec<String>,
 }
 
 /// The proposal structure that contains all the information about a proposal.
@@ -715,14 +709,18 @@ pub struct ProposalInfo {
 pub enum ProposalStatus {
     /// The proposal was created and is waiting for the approver to approve or reject it.
     Created,
-    /// The proposal was rejected by the approver.
+    /// The proposal was rejected by the council during the timelock period.
     Rejected,
-    /// The proposal was approved by the approver and is waiting for the voting to start.
-    Approved,
     /// The proposal is in the voting phase.
     Voting,
-    /// The proposal voting is finished and the results are available.
-    Finished,
+    /// The proposal voting has finished, quorum was met and approval threshold was met.
+    Succeeded,
+    /// The voting has ended and the proposal is in the timelock period awaiting potential council veto.
+    Timelock,
+    /// The proposal expired before being approved by a reviewer.
+    Expired,
+    /// The proposal voting has finished, but quorum was not met or approval threshold was not met.
+    Defeated,
 }
 
 /// The snapshot of the Merkle tree and the global state at the moment when the proposal was
@@ -790,12 +788,6 @@ pub fn set_base_proposal_fee(&mut self, base_proposal_fee: NearToken);
 #[payable]
 pub fn set_vote_storage_fee(&mut self, _vote_storage_fee: NearToken);
 
-/// Updates the maximum number of voting options per proposal.
-/// Can only be called by the owner.
-/// Requires 1 yocto NEAR.
-#[payable]
-pub fn set_max_number_of_voting_options(&mut self, max_number_of_voting_options: u8);
-
 /// Proposes the new owner account ID.
 /// Can only be called by the owner.
 /// Requires 1 yocto NEAR.
@@ -852,15 +844,11 @@ pub fn get_num_approved_proposals(&self) -> u32;
 pub fn get_approved_proposals(&self, from_index: u32, limit: Option<u32>) -> Vec<ProposalInfo>;
 
 /// Approves the proposal to start the voting process.
-/// An optional voting start time in seconds can be provided to delay the start of the voting.
+/// Voting starts immediately upon approval.
 /// Requires 1 yocto attached to the call.
 /// Can only be called by the reviewers.
 #[payable]
-pub fn approve_proposal(
-    &mut self,
-    proposal_id: ProposalId,
-    voting_start_time_sec: Option<u32>,
-) -> Promise;
+pub fn approve_proposal(&mut self, proposal_id: ProposalId) -> Promise;
 
 /// Rejects the proposal.
 /// Requires 1 yocto attached to the call.
@@ -875,7 +863,6 @@ pub fn on_get_snapshot(
     #[callback] snapshot_and_state: (MerkleTreeSnapshot, VGlobalState),
     reviewer_id: AccountId,
     proposal_id: ProposalId,
-    voting_start_time_sec: Option<u32>,
 ) -> ProposalInfo;
 
 /// Private method to migrate the contract state during the contract upgrade.
@@ -901,7 +888,7 @@ pub fn upgrade();
 pub fn vote(
     &mut self,
     proposal_id: ProposalId,
-    vote: u8,
+    vote: VoteOption,
     merkle_proof: MerkleProof,
     v_account: VAccount,
 );

@@ -23,9 +23,6 @@ pub struct Config {
     /// The duration of the timelock period in nanoseconds after voting ends.
     pub timelock_duration_ns: U64,
 
-    /// The maximum number of voting options per proposal.
-    pub max_number_of_voting_options: u8,
-
     /// The base fee in addition to the storage fee required to create a proposal.
     pub base_proposal_fee: NearToken,
 
@@ -42,6 +39,16 @@ pub struct Config {
 
     /// Proposed new owner account ID. The account has to accept ownership.
     pub proposed_new_owner_account_id: Option<AccountId>,
+
+    /// Quorum threshold in basis points (e.g. 3500 = 35% of total veNEAR supply).
+    pub quorum_threshold_bps: u16,
+
+    /// Absolute minimum veNEAR required for quorum, regardless of BPS calculation.
+    pub quorum_floor: NearToken,
+
+    /// Approval threshold in basis points (e.g. 5000 = 50%, 6667 ≈ 66.67%).
+    /// Applied as: for_votes / (for_votes + against_votes) >= approval_threshold_bps / 10000.
+    pub approval_threshold_bps: u16,
 }
 
 #[near]

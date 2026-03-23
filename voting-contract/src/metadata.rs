@@ -1,8 +1,19 @@
 use crate::*;
 
+/// Old metadata format (v1) that includes voting_options.
+#[derive(Clone)]
+#[near(serializers=[borsh])]
+pub struct ProposalMetadataV1 {
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub link: Option<String>,
+    pub voting_options: Vec<String>,
+}
+
 #[derive(Clone)]
 #[near(serializers=[borsh])]
 pub enum VProposalMetadata {
+    V1(ProposalMetadataV1),
     Current(ProposalMetadata),
 }
 
@@ -15,6 +26,11 @@ impl From<ProposalMetadata> for VProposalMetadata {
 impl From<VProposalMetadata> for ProposalMetadata {
     fn from(value: VProposalMetadata) -> Self {
         match value {
+            VProposalMetadata::V1(v1) => ProposalMetadata {
+                title: v1.title,
+                description: v1.description,
+                link: v1.link,
+            },
             VProposalMetadata::Current(current) => current,
         }
     }
@@ -32,7 +48,4 @@ pub struct ProposalMetadata {
 
     /// The link to the proposal.
     pub link: Option<String>,
-
-    /// The voting options for the proposal.
-    pub voting_options: Vec<String>,
 }

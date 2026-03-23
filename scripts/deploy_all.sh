@@ -114,7 +114,6 @@ near --quiet contract deploy $VOTING_ACCOUNT_ID use-file res/$CONTRACTS_SOURCE/v
     "reviewer_ids": ["'$REVIEWER_ACCOUNT_ID'"],
     "owner_account_id": "'$OWNER_ACCOUNT_ID'",
     "voting_duration_ns": "'$VOTING_DURATION_NS'",
-    "max_number_of_voting_options": 16,
     "base_proposal_fee": "'$BASE_PROPOSAL_FEE'",
     "vote_storage_fee": "'$VOTE_STORAGE_FEE'",
     "guardians": ["'$GUARDIAN_ACCOUNT_ID'"],

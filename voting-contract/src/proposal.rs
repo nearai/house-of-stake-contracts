@@ -6,6 +6,15 @@ use near_sdk::Promise;
 
 pub type ProposalId = u32;
 
+/// The fixed voting options for proposals.
+#[derive(Clone, Copy, PartialEq)]
+#[near(serializers=[borsh, json])]
+pub enum VoteOption {
+    For,
+    Against,
+    Abstain,
+}
+
 /// The old proposal structure (V1) that includes the `rejected` field.
 #[derive(Clone)]
 #[near(serializers=[borsh])]
@@ -53,6 +62,9 @@ impl From<VProposal> for Proposal {
                 votes: v1.votes,
                 total_votes: v1.total_votes,
                 status: v1.status,
+                quorum_threshold_bps: 0,
+                quorum_floor: NearToken::from_yoctonear(0),
+                approval_threshold_bps: 0,
             },
             VProposal::Current(current) => current,
         }
@@ -73,7 +85,7 @@ pub struct Proposal {
     pub reviewer_id: Option<AccountId>,
     /// The account ID of the council member who rejected (vetoed) the proposal.
     pub rejecter_id: Option<AccountId>,
-    /// The timestamp when the voting starts, provided by the reviewer.
+    /// The timestamp when the voting starts.
     pub voting_start_time_ns: Option<U64>,
     /// The voting duration in nanoseconds, generated from the config.
     pub voting_duration_ns: U64,
@@ -89,6 +101,12 @@ pub struct Proposal {
     pub total_votes: VoteStats,
     /// The status of the proposal. It's optional and can be computed from the proposal itself.
     pub status: ProposalStatus,
+    /// Quorum threshold in basis points.
+    pub quorum_threshold_bps: u16,
+    /// Absolute minimum veNEAR required for quorum.
+    pub quorum_floor: NearToken,
+    /// Approval threshold in basis points.
+    pub approval_threshold_bps: u16,
 }
 
 /// The proposal information structure that contains the proposal and its metadata.
@@ -102,23 +120,23 @@ pub struct ProposalInfo {
 }
 
 /// The status of the proposal
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[near(serializers=[borsh, json])]
 pub enum ProposalStatus {
     /// The proposal was created and is waiting for the approver to approve it.
     Created,
     /// The proposal was rejected by the council during the timelock period.
     Rejected,
-    /// The proposal was approved by the approver and is waiting for the voting to start.
-    Approved,
     /// The proposal is in the voting phase.
     Voting,
-    /// The proposal voting is finished and the results are available.
-    Finished,
+    /// The proposal voting has finished, quorum was met and approval threshold was met.
+    Succeeded,
     /// The voting has ended and the proposal is in the timelock period awaiting potential council veto.
     Timelock,
     /// The proposal expired before being approved by a reviewer.
     Expired,
+    /// The proposal voting has finished, but quorum was not met or approval threshold was not met.
+    Defeated,
 }
 
 /// The snapshot of the Merkle tree and the global state at the moment when the proposal was
@@ -163,7 +181,10 @@ impl VoteStats {
 impl Proposal {
     pub fn update(&mut self, timestamp: TimestampNs) {
         match self.status {
-            ProposalStatus::Rejected | ProposalStatus::Finished | ProposalStatus::Expired => {
+            ProposalStatus::Rejected
+            | ProposalStatus::Succeeded
+            | ProposalStatus::Expired
+            | ProposalStatus::Defeated => {
                 return;
             }
             ProposalStatus::Created => {
@@ -171,22 +192,55 @@ impl Proposal {
                     self.status = ProposalStatus::Expired;
                 }
             }
-            ProposalStatus::Approved | ProposalStatus::Voting => {
+            ProposalStatus::Voting | ProposalStatus::Timelock => {
                 let voting_end = self.voting_start_time_ns.unwrap().0 + self.voting_duration_ns.0;
                 if timestamp.0 >= voting_end + self.timelock_duration_ns.0 {
-                    self.status = ProposalStatus::Finished;
+                    self.status = self.compute_final_status();
                 } else if timestamp.0 >= voting_end {
-                    self.status = ProposalStatus::Timelock;
-                } else if timestamp >= self.voting_start_time_ns.unwrap() {
-                    self.status = ProposalStatus::Voting;
+                    // Only enter timelock if proposal would succeed
+                    let final_status = self.compute_final_status();
+                    self.status = if final_status == ProposalStatus::Succeeded {
+                        ProposalStatus::Timelock
+                    } else {
+                        final_status
+                    };
                 }
             }
-            ProposalStatus::Timelock => {
-                let voting_end = self.voting_start_time_ns.unwrap().0 + self.voting_duration_ns.0;
-                if timestamp.0 >= voting_end + self.timelock_duration_ns.0 {
-                    self.status = ProposalStatus::Finished;
-                }
-            }
+        }
+    }
+
+    pub fn compute_final_status(&self) -> ProposalStatus {
+        // Quorum check
+        let total_supply = self
+            .snapshot_and_state
+            .as_ref()
+            .unwrap()
+            .total_venear
+            .as_yoctonear();
+        let bps_quorum = total_supply * (self.quorum_threshold_bps as u128) / 10_000;
+        let quorum_required = std::cmp::max(bps_quorum, self.quorum_floor.as_yoctonear());
+        let quorum_met = self.total_votes.total_venear.as_yoctonear() >= quorum_required;
+
+        // Approval threshold check: votes[0] = For, votes[1] = Against
+        let for_power = self
+            .votes
+            .first()
+            .map(|v| v.total_venear.as_yoctonear())
+            .unwrap_or(0);
+        let against_power = self
+            .votes
+            .get(1)
+            .map(|v| v.total_venear.as_yoctonear())
+            .unwrap_or(0);
+        let denominator = for_power + against_power;
+        // Cross-multiply to avoid division: for * 10000 >= threshold * (for + against)
+        let approval_met = denominator > 0
+            && for_power * 10_000 >= (self.approval_threshold_bps as u128) * denominator;
+
+        if quorum_met && approval_met {
+            ProposalStatus::Succeeded
+        } else {
+            ProposalStatus::Defeated
         }
     }
 }
@@ -200,20 +254,6 @@ impl Contract {
     pub fn create_proposal(&mut self, metadata: ProposalMetadata) -> ProposalId {
         self.assert_not_paused();
         let attached_deposit = env::attached_deposit();
-        let num_voting_options = metadata.voting_options.len();
-
-        require!(
-            num_voting_options >= 2,
-            "Requires at least 2 voting options"
-        );
-
-        require!(
-            num_voting_options <= self.config.max_number_of_voting_options as usize,
-            format!(
-                "Too many voting options, max is {}",
-                self.config.max_number_of_voting_options
-            )
-        );
 
         let proposer_id = env::predecessor_account_id();
         let proposal_id = self.proposals.len();
@@ -237,9 +277,12 @@ impl Contract {
             timelock_duration_ns: self.config.timelock_duration_ns,
             expiration_ns,
             snapshot_and_state: None,
-            votes: vec![VoteStats::default(); num_voting_options],
+            votes: vec![VoteStats::default(); 3],
             total_votes: VoteStats::default(),
             status: ProposalStatus::Created,
+            quorum_threshold_bps: 0,
+            quorum_floor: NearToken::from_yoctonear(0),
+            approval_threshold_bps: 0,
         };
         let storage_usage = env::storage_usage();
         self.proposals.push(proposal.into());
