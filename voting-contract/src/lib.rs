@@ -2,7 +2,7 @@ mod config;
 mod governance;
 mod metadata;
 mod pause;
-mod proposal;
+pub mod proposal;
 mod reviewer;
 mod upgrade;
 mod votes;

@@ -1,4 +1,4 @@
-use crate::proposal::{Proposal, ProposalStatus, SnapshotAndState};
+use crate::proposal::{Proposal, ProposalStatus, SnapshotAndState, VoteOption};
 use crate::*;
 use common::{events, near_add, near_sub};
 use near_sdk::Promise;
@@ -13,7 +13,7 @@ impl Contract {
     pub fn vote(
         &mut self,
         proposal_id: ProposalId,
-        vote: u8,
+        vote: VoteOption,
         merkle_proof: MerkleProof,
         v_account: VAccount,
     ) {
@@ -25,7 +25,7 @@ impl Contract {
 
         match proposal.status {
             ProposalStatus::Voting => {}
-            ProposalStatus::Created | ProposalStatus::Approved => {
+            ProposalStatus::Created => {
                 env::panic_str("Voting is not started yet");
             }
             ProposalStatus::Rejected => {
@@ -34,7 +34,7 @@ impl Contract {
             ProposalStatus::Expired => {
                 env::panic_str("Proposal is expired");
             }
-            ProposalStatus::Finished | ProposalStatus::Timelock => {
+            ProposalStatus::Succeeded | ProposalStatus::Defeated | ProposalStatus::Timelock => {
                 env::panic_str("Voting is finished");
             }
         }
@@ -65,9 +65,10 @@ impl Contract {
         );
         require!(!account_balance.is_zero(), "Account has no veNEAR balance");
 
+        let vote_index = vote as u8;
         let previous_vote = self.votes.get(&(account_id.clone(), proposal_id)).cloned();
         require!(
-            previous_vote != Some(vote),
+            previous_vote != Some(vote_index),
             "Already voted for the same option"
         );
         let mut storage_added = self.config.vote_storage_fee;
@@ -85,11 +86,7 @@ impl Contract {
                 &account_balance,
             );
         }
-        require!(
-            (vote as usize) < proposal.votes.len(),
-            "Vote option is out of bounds"
-        );
-        proposal.votes[vote as usize].add_vote(account_balance);
+        proposal.votes[vote_index as usize].add_vote(account_balance);
         proposal.total_votes.add_vote(account_balance);
 
         require!(
@@ -110,11 +107,12 @@ impl Contract {
             "add_vote",
             &account_id,
             proposal_id,
-            vote,
+            vote_index,
             &account_balance,
         );
 
-        self.votes.insert((account_id.clone(), proposal_id), vote);
+        self.votes
+            .insert((account_id.clone(), proposal_id), vote_index);
         self.internal_set_proposal(proposal);
     }
 

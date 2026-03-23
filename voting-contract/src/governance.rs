@@ -43,16 +43,6 @@ impl Contract {
         self.config.base_proposal_fee = base_proposal_fee;
     }
 
-    /// Updates the maximum number of voting options per proposal.
-    /// Can only be called by the owner.
-    /// Requires 1 yocto NEAR.
-    #[payable]
-    pub fn set_max_number_of_voting_options(&mut self, max_number_of_voting_options: u8) {
-        assert_one_yocto();
-        self.assert_owner();
-        self.config.max_number_of_voting_options = max_number_of_voting_options;
-    }
-
     /// Proposes the new owner account ID.
     /// Can only be called by the owner.
     /// Requires 1 yocto NEAR.
@@ -118,6 +108,44 @@ impl Contract {
         self.assert_owner();
         self.config.proposal_expiration_ns =
             (proposal_expiration_sec as u64 * 10u64.pow(9)).into();
+    }
+
+    /// Updates the quorum threshold in basis points (e.g. 3500 = 35%).
+    /// Can only be called by the owner.
+    /// Requires 1 yocto NEAR.
+    #[payable]
+    pub fn set_quorum_threshold_bps(&mut self, quorum_threshold_bps: u16) {
+        assert_one_yocto();
+        self.assert_owner();
+        require!(
+            quorum_threshold_bps <= 10_000,
+            "Quorum threshold must be <= 10000 bps"
+        );
+        self.config.quorum_threshold_bps = quorum_threshold_bps;
+    }
+
+    /// Updates the quorum floor (absolute minimum veNEAR required for quorum).
+    /// Can only be called by the owner.
+    /// Requires 1 yocto NEAR.
+    #[payable]
+    pub fn set_quorum_floor(&mut self, quorum_floor: NearToken) {
+        assert_one_yocto();
+        self.assert_owner();
+        self.config.quorum_floor = quorum_floor;
+    }
+
+    /// Updates the approval threshold in basis points (e.g. 5000 = 50%, 6667 = ~66.67%).
+    /// Can only be called by the owner.
+    /// Requires 1 yocto NEAR.
+    #[payable]
+    pub fn set_approval_threshold_bps(&mut self, approval_threshold_bps: u16) {
+        assert_one_yocto();
+        self.assert_owner();
+        require!(
+            approval_threshold_bps <= 10_000,
+            "Approval threshold must be <= 10000 bps"
+        );
+        self.config.approval_threshold_bps = approval_threshold_bps;
     }
 }
 

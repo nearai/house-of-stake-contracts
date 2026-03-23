@@ -3,22 +3,16 @@ use crate::*;
 use common::global_state::{GlobalState, VGlobalState};
 use common::{events, TimestampNs};
 use near_sdk::{assert_one_yocto, ext_contract, Gas, Promise};
-use std::ops::Mul;
 
 pub const GAS_FOR_ON_GET_SNAPSHOT: Gas = Gas::from_tgas(30);
 
 #[near]
 impl Contract {
     /// Approves the proposal to start the voting process.
-    /// An optional voting start time in seconds can be provided to delay the start of the voting.
     /// Requires 1 yocto attached to the call.
     /// Can only be called by the reviewers.
     #[payable]
-    pub fn approve_proposal(
-        &mut self,
-        proposal_id: ProposalId,
-        voting_start_time_sec: Option<u32>,
-    ) -> Promise {
+    pub fn approve_proposal(&mut self, proposal_id: ProposalId) -> Promise {
         assert_one_yocto();
         self.assert_not_paused();
         self.assert_called_by_reviewer();
@@ -28,11 +22,7 @@ impl Contract {
             env::panic_str("Proposal is not in the Created status");
         }
 
-        events::emit::approve_proposal_action(
-            &env::predecessor_account_id(),
-            proposal_id,
-            voting_start_time_sec,
-        );
+        events::emit::approve_proposal_action(&env::predecessor_account_id(), proposal_id);
 
         ext_venear::ext(self.config.venear_account_id.clone())
             .with_unused_gas_weight(1)
@@ -40,11 +30,7 @@ impl Contract {
             .then(
                 ext_self::ext(env::current_account_id())
                     .with_static_gas(GAS_FOR_ON_GET_SNAPSHOT)
-                    .on_get_snapshot(
-                        env::predecessor_account_id(),
-                        proposal_id,
-                        voting_start_time_sec,
-                    ),
+                    .on_get_snapshot(env::predecessor_account_id(), proposal_id),
             )
     }
 
@@ -77,7 +63,6 @@ impl Contract {
         #[callback] snapshot_and_state: (MerkleTreeSnapshot, VGlobalState),
         reviewer_id: AccountId,
         proposal_id: ProposalId,
-        voting_start_time_sec: Option<u32>,
     ) -> ProposalInfo {
         self.assert_not_paused();
         let mut proposal = self.internal_expect_proposal_updated(proposal_id);
@@ -89,15 +74,7 @@ impl Contract {
         let timestamp: TimestampNs = env::block_timestamp().into();
 
         proposal.reviewer_id = Some(reviewer_id);
-        proposal.voting_start_time_ns = Some(
-            voting_start_time_sec
-                .map(|v| u64::from(v).mul(10u64.pow(9)).into())
-                .unwrap_or(timestamp),
-        );
-        require!(
-            proposal.voting_start_time_ns.unwrap() >= timestamp,
-            "Voting start time is in the past."
-        );
+        proposal.voting_start_time_ns = Some(timestamp);
 
         let mut global_state: GlobalState = snapshot_and_state.1.into();
         global_state.update(timestamp.into());
@@ -107,7 +84,10 @@ impl Contract {
             total_venear: global_state.total_venear_balance.total(),
             venear_growth_config: global_state.venear_growth_config,
         });
-        proposal.status = ProposalStatus::Approved;
+        proposal.quorum_threshold_bps = self.config.quorum_threshold_bps;
+        proposal.quorum_floor = self.config.quorum_floor;
+        proposal.approval_threshold_bps = self.config.approval_threshold_bps;
+        proposal.status = ProposalStatus::Voting;
         self.approved_proposals.push(proposal_id);
 
         self.internal_set_proposal(proposal.clone());
@@ -145,10 +125,5 @@ trait ExtVenear {
 #[allow(dead_code)]
 #[ext_contract(ext_self)]
 trait ExtSelf {
-    fn on_get_snapshot(
-        &mut self,
-        reviewer_id: AccountId,
-        proposal_id: ProposalId,
-        voting_start_time_sec: Option<u32>,
-    );
+    fn on_get_snapshot(&mut self, reviewer_id: AccountId, proposal_id: ProposalId);
 }

@@ -1,3 +1,5 @@
+pub mod voting_helpers;
+
 #[allow(dead_code)]
 use common::Fraction;
 use common::TimestampNs;
@@ -56,10 +58,12 @@ pub struct VenearTestWorkspaceBuilder {
     pub use_previous_voting_wasm: bool,
     pub voting_duration_ns: u64,
     pub timelock_duration_ns: u64,
-    pub max_number_of_voting_options: u8,
     pub base_proposal_fee: NearToken,
     pub vote_storage_fee: NearToken,
     pub proposal_expiration_ns: u64,
+    pub quorum_threshold_bps: u16,
+    pub quorum_floor: NearToken,
+    pub approval_threshold_bps: u16,
 }
 
 impl Default for VenearTestWorkspaceBuilder {
@@ -80,10 +84,12 @@ impl Default for VenearTestWorkspaceBuilder {
             use_previous_voting_wasm: false,
             voting_duration_ns: VOTING_DURATION_SECONDS * NS_IN_SECOND,
             timelock_duration_ns: TIMELOCK_DURATION_SECONDS * NS_IN_SECOND,
-            max_number_of_voting_options: 16,
             base_proposal_fee: NearToken::from_millinear(100),
             vote_storage_fee: NearToken::from_yoctonear(125 * 10u128.pow(19)),
             proposal_expiration_ns: PROPOSAL_EXPIRATION_SECONDS * NS_IN_SECOND,
+            quorum_threshold_bps: 3500,
+            quorum_floor: NearToken::from_near(10),
+            approval_threshold_bps: 5000,
         }
     }
 }
@@ -268,21 +274,40 @@ impl VenearTestWorkspaceBuilder {
             let owner = sandbox.dev_create_account().await?;
             let guardian = sandbox.dev_create_account().await?;
 
-            let args = json!({
-                "config": {
-                    "venear_account_id": venear.id(),
-                    "reviewer_ids": &[reviewer.id()],
-                    "owner_account_id": owner.id(),
-                    "voting_duration_ns": self.voting_duration_ns.to_string(),
-                    "max_number_of_voting_options": self.max_number_of_voting_options,
-                    "base_proposal_fee": self.base_proposal_fee,
-                    "vote_storage_fee": self.vote_storage_fee,
-                    "guardians": &[guardian.id()],
-                    "council_ids": &[council.id()],
-                    "timelock_duration_ns": self.timelock_duration_ns.to_string(),
-                    "proposal_expiration_ns": self.proposal_expiration_ns.to_string(),
-                },
-            });
+            let args = if self.use_previous_voting_wasm {
+                // Old WASM (v1.0.2) expects max_number_of_voting_options and lacks
+                // council_ids, timelock, expiration, quorum fields.
+                json!({
+                    "config": {
+                        "venear_account_id": venear.id(),
+                        "reviewer_ids": &[reviewer.id()],
+                        "owner_account_id": owner.id(),
+                        "voting_duration_ns": self.voting_duration_ns.to_string(),
+                        "max_number_of_voting_options": 16u8,
+                        "base_proposal_fee": self.base_proposal_fee,
+                        "vote_storage_fee": self.vote_storage_fee,
+                        "guardians": &[guardian.id()],
+                    },
+                })
+            } else {
+                json!({
+                    "config": {
+                        "venear_account_id": venear.id(),
+                        "reviewer_ids": &[reviewer.id()],
+                        "owner_account_id": owner.id(),
+                        "voting_duration_ns": self.voting_duration_ns.to_string(),
+                        "base_proposal_fee": self.base_proposal_fee,
+                        "vote_storage_fee": self.vote_storage_fee,
+                        "guardians": &[guardian.id()],
+                        "council_ids": &[council.id()],
+                        "timelock_duration_ns": self.timelock_duration_ns.to_string(),
+                        "proposal_expiration_ns": self.proposal_expiration_ns.to_string(),
+                        "quorum_threshold_bps": self.quorum_threshold_bps,
+                        "quorum_floor": self.quorum_floor,
+                        "approval_threshold_bps": self.approval_threshold_bps,
+                    },
+                })
+            };
 
             let outcome = contract
                 .batch(contract.id())
@@ -597,6 +622,51 @@ impl VenearTestWorkspace {
         }
 
         Ok(())
+    }
+
+    /// Fast-forward time so that the given proposal reaches the target status.
+    /// Supported targets: Expired, Timelock (past voting end), and Succeeded/Defeated (past timelock end).
+    pub async fn fast_forward_to_proposal_status(
+        &self,
+        proposal_id: u32,
+        target: voting_contract::proposal::ProposalStatus,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use voting_contract::proposal::ProposalStatus;
+
+        let proposal = self.get_proposal(proposal_id).await?;
+
+        let (target_ns, num_blocks) = match target {
+            ProposalStatus::Timelock | ProposalStatus::Succeeded | ProposalStatus::Defeated => {
+                let voting_start: u64 = proposal["voting_start_time_ns"]
+                    .as_str()
+                    .unwrap()
+                    .parse()?;
+                let voting_duration: u64 =
+                    proposal["voting_duration_ns"].as_str().unwrap().parse()?;
+                let timelock_duration: u64 =
+                    proposal["timelock_duration_ns"].as_str().unwrap().parse()?;
+                let voting_end = voting_start + voting_duration;
+                match target {
+                    ProposalStatus::Timelock => (voting_end, voting_duration / NS_IN_SECOND),
+                    _ => {
+                        let timelock_end = voting_end + timelock_duration;
+                        (
+                            timelock_end,
+                            (voting_duration + timelock_duration) / NS_IN_SECOND,
+                        )
+                    }
+                }
+            }
+            ProposalStatus::Expired => {
+                let expiration: u64 = proposal["expiration_ns"].as_str().unwrap().parse()?;
+                let creation: u64 = proposal["creation_time_ns"].as_str().unwrap().parse()?;
+                let expiration_secs = (expiration - creation) / NS_IN_SECOND;
+                (expiration, expiration_secs)
+            }
+            _ => panic!("Unsupported target status: {target:?}"),
+        };
+
+        self.fast_forward(target_ns, num_blocks, 20).await
     }
 
     pub fn voting_id(&self) -> &AccountId {

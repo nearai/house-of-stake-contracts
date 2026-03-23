@@ -27,10 +27,9 @@ pub mod emit {
 
     #[derive(Serialize)]
     #[serde(crate = "near_sdk::serde")]
-    pub(crate) struct VotingProposalUpdateData<'a> {
+    pub(crate) struct ApproveProposalData<'a> {
         pub(crate) account_id: &'a AccountId,
         pub(crate) proposal_id: u32,
-        pub(crate) voting_start_time_sec: Option<u32>,
     }
 
     #[derive(Serialize)]
@@ -128,18 +127,13 @@ pub mod emit {
         );
     }
 
-    pub fn approve_proposal_action(
-        account_id: &AccountId,
-        proposal_id: u32,
-        voting_start_time_sec: Option<u32>,
-    ) {
+    pub fn approve_proposal_action(account_id: &AccountId, proposal_id: u32) {
         log_event(
             "venear",
             "proposal_approve",
-            VotingProposalUpdateData {
+            ApproveProposalData {
                 account_id,
                 proposal_id,
-                voting_start_time_sec,
             },
         );
     }
