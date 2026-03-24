@@ -34,7 +34,12 @@ impl Contract {
             ProposalStatus::Expired => {
                 env::panic_str("Proposal is expired");
             }
-            ProposalStatus::Succeeded | ProposalStatus::Defeated | ProposalStatus::Timelock => {
+            ProposalStatus::Succeeded
+            | ProposalStatus::Defeated
+            | ProposalStatus::Timelock
+            | ProposalStatus::Executable
+            | ProposalStatus::InProgress
+            | ProposalStatus::Failed => {
                 env::panic_str("Voting is finished");
             }
         }

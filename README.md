@@ -63,8 +63,9 @@ All contracts are designed to be deployed without access keys, to make sure the 
     veNEAR holders is requested from the veNEAR contract. The voting process starts after the proposal is approved or
     at the specified timestamp during the approval.
   - The duration of the voting process and the set of reviewers can be changed by the owner of the voting contract.
-  - The voting process ends after the duration of the voting process. In the current version there is no action
-    taken by the voting contract after the voting process ends. Only the intent is recorded in the voting contract.
+  - The voting process ends after the duration of the voting process. Proposals without actions are signaling-only.
+    Proposals with actions enter an `Executable` status after timelock, and anyone can trigger on-chain execution
+    (function calls, transfers) by calling `execute_proposal`.
 
 ### Implementation details
 

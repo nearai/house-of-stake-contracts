@@ -30,6 +30,7 @@ pub async fn attempt_voting_upgrade(
 pub async fn create_proposal(
     v: &VenearTestWorkspace,
     user: &near_workspaces::Account,
+    actions: Option<serde_json::Value>,
 ) -> Result<u32, Box<dyn std::error::Error>> {
     let outcome = user
         .call(v.voting_id(), "create_proposal")
@@ -38,6 +39,7 @@ pub async fn create_proposal(
                 "title": "Test Proposal",
                 "description": "This is a test proposal",
             },
+            "actions": actions,
         }))
         .deposit(NearToken::from_millinear(200))
         .gas(Gas::from_tgas(50))
@@ -79,6 +81,21 @@ pub async fn create_proposal_old(
     );
 
     Ok(outcome.json().unwrap())
+}
+
+pub async fn execute_proposal(
+    v: &VenearTestWorkspace,
+    executor: &near_workspaces::Account,
+    proposal_id: u32,
+) -> Result<near_workspaces::result::ExecutionFinalResult, Box<dyn std::error::Error>> {
+    let outcome = executor
+        .call(v.voting_id(), "execute_proposal")
+        .args_json(json!({ "proposal_id": proposal_id }))
+        .gas(Gas::from_tgas(250))
+        .transact()
+        .await?;
+
+    Ok(outcome)
 }
 
 pub async fn approve_proposal(
