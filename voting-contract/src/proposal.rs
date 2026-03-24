@@ -1,10 +1,27 @@
 use crate::metadata::ProposalMetadata;
 use crate::*;
 use common::{events, near_add, near_sub, TimestampNs};
-use near_sdk::json_types::U64;
-use near_sdk::Promise;
+use near_sdk::json_types::{Base64VecU8, U64};
+use near_sdk::{Gas, Promise};
 
 pub type ProposalId = u32;
+
+/// A single action that the voting contract can execute on behalf of a passed proposal.
+#[derive(Clone)]
+#[near(serializers = [borsh, json])]
+pub enum ProposalAction {
+    FunctionCall {
+        receiver_id: AccountId,
+        method_name: String,
+        args: Base64VecU8,
+        deposit: NearToken,
+        gas: Gas,
+    },
+    Transfer {
+        receiver_id: AccountId,
+        amount: NearToken,
+    },
+}
 
 /// The fixed voting options for proposals.
 #[derive(Clone, Copy, PartialEq)]
@@ -65,6 +82,7 @@ impl From<VProposal> for Proposal {
                 quorum_threshold_bps: 0,
                 quorum_floor: NearToken::from_yoctonear(0),
                 approval_threshold_bps: 0,
+                actions: None,
             },
             VProposal::Current(current) => current,
         }
@@ -107,6 +125,8 @@ pub struct Proposal {
     pub quorum_floor: NearToken,
     /// Approval threshold in basis points.
     pub approval_threshold_bps: u16,
+    /// Optional list of on-chain actions to execute when the proposal succeeds.
+    pub actions: Option<Vec<ProposalAction>>,
 }
 
 /// The proposal information structure that contains the proposal and its metadata.
@@ -137,6 +157,12 @@ pub enum ProposalStatus {
     Expired,
     /// The proposal voting has finished, but quorum was not met or approval threshold was not met.
     Defeated,
+    /// The proposal passed and has actions ready for on-chain execution.
+    Executable,
+    /// The proposal actions are being executed (dispatched, awaiting callback).
+    InProgress,
+    /// The proposal's on-chain execution failed.
+    Failed,
 }
 
 /// The snapshot of the Merkle tree and the global state at the moment when the proposal was
@@ -179,12 +205,19 @@ impl VoteStats {
 }
 
 impl Proposal {
+    pub fn has_actions(&self) -> bool {
+        self.actions.as_ref().is_some_and(|a| !a.is_empty())
+    }
+
     pub fn update(&mut self, timestamp: TimestampNs) {
         match self.status {
             ProposalStatus::Rejected
             | ProposalStatus::Succeeded
             | ProposalStatus::Expired
-            | ProposalStatus::Defeated => {
+            | ProposalStatus::Defeated
+            | ProposalStatus::Executable
+            | ProposalStatus::InProgress
+            | ProposalStatus::Failed => {
                 return;
             }
             ProposalStatus::Created => {
@@ -194,15 +227,17 @@ impl Proposal {
             }
             ProposalStatus::Voting | ProposalStatus::Timelock => {
                 let voting_end = self.voting_start_time_ns.unwrap().0 + self.voting_duration_ns.0;
-                if timestamp.0 >= voting_end + self.timelock_duration_ns.0 {
-                    self.status = self.compute_final_status();
-                } else if timestamp.0 >= voting_end {
-                    // Only enter timelock if proposal would succeed
+                let timelock_end = voting_end + self.timelock_duration_ns.0;
+                if timestamp.0 >= voting_end {
                     let final_status = self.compute_final_status();
-                    self.status = if final_status == ProposalStatus::Succeeded {
-                        ProposalStatus::Timelock
-                    } else {
+                    self.status = if final_status != ProposalStatus::Succeeded {
                         final_status
+                    } else if timestamp.0 < timelock_end {
+                        ProposalStatus::Timelock
+                    } else if self.has_actions() {
+                        ProposalStatus::Executable
+                    } else {
+                        ProposalStatus::Succeeded
                     };
                 }
             }
@@ -251,9 +286,18 @@ impl Contract {
     /// The proposal is created by the predecessor account and requires a deposit to cover the
     /// storage and the base proposal fee.
     #[payable]
-    pub fn create_proposal(&mut self, metadata: ProposalMetadata) -> ProposalId {
+    pub fn create_proposal(
+        &mut self,
+        metadata: ProposalMetadata,
+        actions: Option<Vec<ProposalAction>>,
+    ) -> ProposalId {
         self.assert_not_paused();
         let attached_deposit = env::attached_deposit();
+
+        require!(
+            !actions.as_ref().is_some_and(|a| a.is_empty()),
+            "Actions list cannot be empty"
+        );
 
         let proposer_id = env::predecessor_account_id();
         let proposal_id = self.proposals.len();
@@ -283,6 +327,7 @@ impl Contract {
             quorum_threshold_bps: 0,
             quorum_floor: NearToken::from_yoctonear(0),
             approval_threshold_bps: 0,
+            actions,
         };
         let storage_usage = env::storage_usage();
         self.proposals.push(proposal.into());

@@ -188,7 +188,7 @@ async fn test_voting() -> Result<(), Box<dyn std::error::Error>> {
         .json()?;
     assert_eq!(num_proposals, 0);
 
-    let proposal_id = create_proposal(&v, &user_a).await?;
+    let proposal_id = create_proposal(&v, &user_a, None).await?;
     let num_proposals: u32 = v
         .sandbox
         .view(v.voting_id(), "get_num_proposals")
@@ -468,7 +468,7 @@ async fn test_voting_reject_proposal() -> Result<(), Box<dyn std::error::Error>>
     v.transfer_and_lock(&user_a, NearToken::from_near(10))
         .await?;
 
-    let proposal_id = create_proposal(&v, &user_a).await?;
+    let proposal_id = create_proposal(&v, &user_a, None).await?;
     approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
 
     // Vote For so the proposal would succeed and enter Timelock instead of Defeated
@@ -1245,9 +1245,9 @@ async fn test_voting_pause() -> Result<(), Box<dyn std::error::Error>> {
     assert!(!is_paused, "Contract should not be paused");
 
     // Prepare for pause testing
-    let proposal_id = create_proposal(&v, &user_a).await?;
+    let proposal_id = create_proposal(&v, &user_a, None).await?;
     approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
-    let proposal_id_2 = create_proposal(&v, &user_a).await?;
+    let proposal_id_2 = create_proposal(&v, &user_a, None).await?;
     assert_ne!(proposal_id, proposal_id_2);
 
     let (user_a_merkle_proof, user_a_v_account): (serde_json::Value, serde_json::Value) = v
@@ -1402,7 +1402,7 @@ async fn test_voting_proposal_expiration() -> Result<(), Box<dyn std::error::Err
         .build()
         .await?;
     let user_a = v.create_account_with_lockup().await?;
-    let proposal_id = create_proposal(&v, &user_a).await?;
+    let proposal_id = create_proposal(&v, &user_a, None).await?;
 
     // Fast-forward past the expiration window
     v.fast_forward_to_proposal_status(proposal_id, ProposalStatus::Expired)
@@ -1441,7 +1441,7 @@ async fn test_quorum_succeeded() -> Result<(), Box<dyn std::error::Error>> {
     v.transfer_and_lock(&user_b, NearToken::from_near(5))
         .await?;
 
-    let proposal_id = create_proposal(&v, &user_a).await?;
+    let proposal_id = create_proposal(&v, &user_a, None).await?;
     approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
 
     // Both vote For
@@ -1475,7 +1475,7 @@ async fn test_quorum_defeated_insufficient_votes() -> Result<(), Box<dyn std::er
     v.transfer_and_lock(&user_b, NearToken::from_near(10))
         .await?;
 
-    let proposal_id = create_proposal(&v, &user_a).await?;
+    let proposal_id = create_proposal(&v, &user_a, None).await?;
     approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
 
     // Only user_a votes, below 35% quorum threshold
@@ -1511,7 +1511,7 @@ async fn test_quorum_defeated_succeed_failed() -> Result<(), Box<dyn std::error:
     v.transfer_and_lock(&user_b, NearToken::from_near(10))
         .await?;
 
-    let proposal_id = create_proposal(&v, &user_a).await?;
+    let proposal_id = create_proposal(&v, &user_a, None).await?;
     approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
 
     // user_a votes For, user_b votes Against (more power)
@@ -1547,7 +1547,7 @@ async fn test_quorum_with_abstain() -> Result<(), Box<dyn std::error::Error>> {
     v.transfer_and_lock(&user_b, NearToken::from_near(10))
         .await?;
 
-    let proposal_id = create_proposal(&v, &user_a).await?;
+    let proposal_id = create_proposal(&v, &user_a, None).await?;
     approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
 
     // user_a votes For (23% alone < 35% quorum), user_b votes Abstain
@@ -1562,6 +1562,248 @@ async fn test_quorum_with_abstain() -> Result<(), Box<dyn std::error::Error>> {
         serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
         ProposalStatus::Succeeded,
         "Abstain should count for quorum, and For/(For+Against) = 100% >= 50%"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_proposal_with_transfer_action() -> Result<(), Box<dyn std::error::Error>> {
+    let v = VenearTestWorkspaceBuilder::default()
+        .with_voting()
+        .build()
+        .await?;
+    let user_a = v.create_account_with_lockup().await?;
+    let user_b = v.create_account_with_lockup().await?;
+
+    v.transfer_and_lock(&user_a, NearToken::from_near(3))
+        .await?;
+    v.transfer_and_lock(&user_b, NearToken::from_near(10))
+        .await?;
+
+    // Fund the voting contract so it can execute transfers
+    let voting_id: AccountId = v.voting_id().clone();
+    v.sandbox
+        .root_account()?
+        .transfer_near(&voting_id, NearToken::from_near(5))
+        .await?;
+
+    let recipient = v.sandbox.dev_create_account().await?;
+    let recipient_balance_before = recipient.view_account().await?.balance;
+
+    // Create proposal with a Transfer action
+    let proposal_id = create_proposal(
+        &v,
+        &user_a,
+        Some(json!([{
+            "Transfer": {
+                "receiver_id": recipient.id().to_string(),
+                "amount": NearToken::from_near(1).as_yoctonear().to_string(),
+            }
+        }])),
+    )
+    .await?;
+
+    approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
+
+    vote_for_option(&v, &user_a, proposal_id, VoteOption::For).await?;
+    vote_for_option(&v, &user_b, proposal_id, VoteOption::For).await?;
+
+    // Try to execute while still in Voting status — should fail
+    let outcome = execute_proposal(&v, &user_b, proposal_id).await?;
+    assert!(
+        outcome.is_failure(),
+        "Execute should fail when proposal is not Executable"
+    );
+
+    // Should go to Executable (not Succeeded) because it has actions
+    v.fast_forward_to_proposal_status(proposal_id, ProposalStatus::Executable)
+        .await?;
+
+    let proposal = v.get_proposal(proposal_id).await?;
+    assert_eq!(
+        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        ProposalStatus::Executable,
+        "Proposal with actions should be Executable after timelock"
+    );
+
+    // Anyone can execute
+    let outcome = execute_proposal(&v, &user_b, proposal_id).await?;
+    assert!(
+        outcome.is_success(),
+        "Execute proposal failed: {:#?}",
+        outcome
+    );
+
+    // Verify status is now Succeeded
+    let proposal = v.get_proposal(proposal_id).await?;
+    assert_eq!(
+        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        ProposalStatus::Succeeded,
+        "Proposal should be Succeeded after execution"
+    );
+
+    // Verify the transfer happened
+    let recipient_balance_after = recipient.view_account().await?.balance;
+    assert!(
+        recipient_balance_after.as_yoctonear() - recipient_balance_before.as_yoctonear()
+            >= NearToken::from_near(1).as_yoctonear(),
+        "Recipient should have received 1 NEAR"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_proposal_with_function_call_actions() -> Result<(), Box<dyn std::error::Error>> {
+    let v = VenearTestWorkspaceBuilder::default()
+        .with_voting()
+        .build()
+        .await?;
+    let voting = v.voting.as_ref().unwrap();
+    let user_a = v.create_account_with_lockup().await?;
+    let user_b = v.create_account_with_lockup().await?;
+
+    v.transfer_and_lock(&user_a, NearToken::from_near(3))
+        .await?;
+    v.transfer_and_lock(&user_b, NearToken::from_near(10))
+        .await?;
+
+    // Propose transferring ownership to the voting contract itself,
+    // so governance proposals can change its config.
+    voting
+        .owner
+        .call(v.voting_id(), "propose_new_owner_account_id")
+        .args_json(json!({ "new_owner_account_id": v.voting_id() }))
+        .deposit(NearToken::from_yoctonear(1))
+        .transact()
+        .await?;
+
+    // Single proposal with two actions
+    let new_fee = NearToken::from_millinear(500);
+    let fee_args = near_sdk::json_types::Base64VecU8(
+        serde_json::to_vec(&json!({ "base_proposal_fee": new_fee })).unwrap(),
+    );
+    let proposal_id = create_proposal(
+        &v,
+        &user_a,
+        Some(json!([
+            {
+                "FunctionCall": {
+                    "receiver_id": v.voting_id().to_string(),
+                    "method_name": "accept_ownership",
+                    "args": near_sdk::json_types::Base64VecU8(b"{}".to_vec()),
+                    "deposit": "1",
+                    "gas": Gas::from_tgas(5).as_gas().to_string(),
+                }
+            },
+            {
+                "FunctionCall": {
+                    "receiver_id": v.voting_id().to_string(),
+                    "method_name": "set_base_proposal_fee",
+                    "args": fee_args,
+                    "deposit": "1",
+                    "gas": Gas::from_tgas(5).as_gas().to_string(),
+                }
+            }
+        ])),
+    )
+    .await?;
+
+    approve_proposal(&v, &voting.reviewer, proposal_id).await?;
+    vote_for_option(&v, &user_a, proposal_id, VoteOption::For).await?;
+    vote_for_option(&v, &user_b, proposal_id, VoteOption::For).await?;
+
+    v.fast_forward_to_proposal_status(proposal_id, ProposalStatus::Executable)
+        .await?;
+
+    let outcome = execute_proposal(&v, &user_a, proposal_id).await?;
+    assert!(
+        outcome.is_success(),
+        "Execute proposal failed: {:#?}",
+        outcome
+    );
+
+    let proposal = v.get_proposal(proposal_id).await?;
+    assert_eq!(
+        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        ProposalStatus::Succeeded,
+    );
+
+    // Verify both actions executed
+    let config: serde_json::Value = v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
+    assert_eq!(
+        config["owner_account_id"].as_str().unwrap(),
+        v.voting_id().as_str(),
+        "Voting contract should now own itself"
+    );
+    assert_eq!(
+        config["base_proposal_fee"].as_str().unwrap(),
+        new_fee.as_yoctonear().to_string(),
+        "base_proposal_fee should have been updated by the proposal"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_execute_proposal_failure_is_terminal() -> Result<(), Box<dyn std::error::Error>> {
+    let v = VenearTestWorkspaceBuilder::default()
+        .with_voting()
+        .build()
+        .await?;
+    let user_a = v.create_account_with_lockup().await?;
+    let user_b = v.create_account_with_lockup().await?;
+
+    v.transfer_and_lock(&user_a, NearToken::from_near(3))
+        .await?;
+    v.transfer_and_lock(&user_b, NearToken::from_near(10))
+        .await?;
+
+    // Create proposal calling a nonexistent method to trigger failure
+    let proposal_id = create_proposal(
+        &v,
+        &user_a,
+        Some(json!([{
+            "FunctionCall": {
+                "receiver_id": v.voting_id().to_string(),
+                "method_name": "nonexistent_method_that_will_fail",
+                "args": "",
+                "deposit": "0",
+                "gas": Gas::from_tgas(5).as_gas().to_string(),
+            }
+        }])),
+    )
+    .await?;
+
+    approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
+
+    vote_for_option(&v, &user_a, proposal_id, VoteOption::For).await?;
+    vote_for_option(&v, &user_b, proposal_id, VoteOption::For).await?;
+
+    v.fast_forward_to_proposal_status(proposal_id, ProposalStatus::Executable)
+        .await?;
+
+    // Execute — should fail because the method doesn't exist
+    let outcome = execute_proposal(&v, &user_a, proposal_id).await?;
+    assert!(
+        outcome.is_success(),
+        "The execute call should succeed (callback handles failure): {:#?}",
+        outcome
+    );
+
+    let proposal = v.get_proposal(proposal_id).await?;
+    assert_eq!(
+        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        ProposalStatus::Failed,
+        "Proposal should be Failed after execution failure"
+    );
+
+    // Try to execute again — should fail
+    let outcome = execute_proposal(&v, &user_a, proposal_id).await?;
+    assert!(
+        outcome.is_failure(),
+        "Should not be able to execute a Failed proposal"
     );
 
     Ok(())

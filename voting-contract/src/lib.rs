@@ -1,4 +1,5 @@
 mod config;
+mod execute;
 mod governance;
 mod metadata;
 mod pause;

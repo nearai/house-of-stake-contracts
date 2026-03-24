@@ -48,6 +48,20 @@ pub mod emit {
 
     #[derive(Serialize)]
     #[serde(crate = "near_sdk::serde")]
+    pub(crate) struct ExecuteProposalData<'a> {
+        pub(crate) account_id: &'a AccountId,
+        pub(crate) proposal_id: u32,
+    }
+
+    #[derive(Serialize)]
+    #[serde(crate = "near_sdk::serde")]
+    pub(crate) struct ExecuteProposalResultData {
+        pub(crate) proposal_id: u32,
+        pub(crate) success: bool,
+    }
+
+    #[derive(Serialize)]
+    #[serde(crate = "near_sdk::serde")]
     pub(crate) struct FtMintLog<'a> {
         pub(crate) owner_id: &'a AccountId,
         pub(crate) amount: NearToken,
@@ -156,6 +170,28 @@ pub mod emit {
             ProposalData {
                 proposer_id,
                 proposal_id,
+            },
+        );
+    }
+
+    pub fn execute_proposal_action(account_id: &AccountId, proposal_id: u32) {
+        log_event(
+            "venear",
+            "proposal_execute",
+            ExecuteProposalData {
+                account_id,
+                proposal_id,
+            },
+        );
+    }
+
+    pub fn execute_proposal_result(proposal_id: u32, success: bool) {
+        log_event(
+            "venear",
+            "proposal_execute_result",
+            ExecuteProposalResultData {
+                proposal_id,
+                success,
             },
         );
     }

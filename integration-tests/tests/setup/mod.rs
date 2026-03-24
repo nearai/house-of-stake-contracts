@@ -636,7 +636,10 @@ impl VenearTestWorkspace {
         let proposal = self.get_proposal(proposal_id).await?;
 
         let (target_ns, num_blocks) = match target {
-            ProposalStatus::Timelock | ProposalStatus::Succeeded | ProposalStatus::Defeated => {
+            ProposalStatus::Timelock
+            | ProposalStatus::Succeeded
+            | ProposalStatus::Defeated
+            | ProposalStatus::Executable => {
                 let voting_start: u64 = proposal["voting_start_time_ns"]
                     .as_str()
                     .unwrap()
