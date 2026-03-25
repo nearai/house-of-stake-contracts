@@ -29,7 +29,7 @@ async fn test_voting_upgrade() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Lock NEAR so user has veNEAR for voting
-    v.transfer_and_lock(&user_a, NearToken::from_near(10))
+    v.transfer_and_lock(&user_a, NearToken::from_near(1000))
         .await?;
 
     // Proposal 1
@@ -121,7 +121,7 @@ async fn test_voting_upgrade() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(quorum_threshold_bps, 3500);
 
     let quorum_floor: NearToken = serde_json::from_value(config["quorum_floor"].clone())?;
-    assert_eq!(quorum_floor, NearToken::from_near(10));
+    assert_eq!(quorum_floor, NearToken::from_near(1000));
 
     let approval_threshold_bps: u16 =
         serde_json::from_value(config["approval_threshold_bps"].clone())?;
@@ -178,7 +178,7 @@ async fn test_voting() -> Result<(), Box<dyn std::error::Error>> {
     let user_b = v.create_account_with_lockup().await?;
 
     // Lock NEAR so users have enough veNEAR to meet quorum floor
-    v.transfer_and_lock(&user_a, NearToken::from_near(10))
+    v.transfer_and_lock(&user_a, NearToken::from_near(1000))
         .await?;
 
     let num_proposals: u32 = v
@@ -465,7 +465,7 @@ async fn test_voting_reject_proposal() -> Result<(), Box<dyn std::error::Error>>
     let user_a = v.create_account_with_lockup().await?;
 
     // Lock NEAR so user has veNEAR — needed to make proposal pass and enter Timelock
-    v.transfer_and_lock(&user_a, NearToken::from_near(10))
+    v.transfer_and_lock(&user_a, NearToken::from_near(1000))
         .await?;
 
     let proposal_id = create_proposal(&v, &user_a, None).await?;
@@ -1436,9 +1436,9 @@ async fn test_quorum_succeeded() -> Result<(), Box<dyn std::error::Error>> {
     let user_b = v.create_account_with_lockup().await?;
 
     // Lock NEAR to get veNEAR
-    v.transfer_and_lock(&user_a, NearToken::from_near(10))
+    v.transfer_and_lock(&user_a, NearToken::from_near(1000))
         .await?;
-    v.transfer_and_lock(&user_b, NearToken::from_near(5))
+    v.transfer_and_lock(&user_b, NearToken::from_near(500))
         .await?;
 
     let proposal_id = create_proposal(&v, &user_a, None).await?;
@@ -1462,7 +1462,7 @@ async fn test_quorum_succeeded() -> Result<(), Box<dyn std::error::Error>> {
 
 #[tokio::test]
 async fn test_quorum_defeated_insufficient_votes() -> Result<(), Box<dyn std::error::Error>> {
-    // Default quorum_threshold_bps=3500 (35%). user_a holds 3/(3+10)=23% < 35%.
+    // Default quorum_threshold_bps=3500 (35%). user_a holds 300/(300+1000)=23% < 35%.
     let v = VenearTestWorkspaceBuilder::default()
         .with_voting()
         .build()
@@ -1470,9 +1470,9 @@ async fn test_quorum_defeated_insufficient_votes() -> Result<(), Box<dyn std::er
     let user_a = v.create_account_with_lockup().await?;
     let user_b = v.create_account_with_lockup().await?;
 
-    v.transfer_and_lock(&user_a, NearToken::from_near(3))
+    v.transfer_and_lock(&user_a, NearToken::from_near(300))
         .await?;
-    v.transfer_and_lock(&user_b, NearToken::from_near(10))
+    v.transfer_and_lock(&user_b, NearToken::from_near(1000))
         .await?;
 
     let proposal_id = create_proposal(&v, &user_a, None).await?;
@@ -1506,9 +1506,9 @@ async fn test_quorum_defeated_succeed_failed() -> Result<(), Box<dyn std::error:
     let user_a = v.create_account_with_lockup().await?;
     let user_b = v.create_account_with_lockup().await?;
 
-    v.transfer_and_lock(&user_a, NearToken::from_near(5))
+    v.transfer_and_lock(&user_a, NearToken::from_near(500))
         .await?;
-    v.transfer_and_lock(&user_b, NearToken::from_near(10))
+    v.transfer_and_lock(&user_b, NearToken::from_near(1000))
         .await?;
 
     let proposal_id = create_proposal(&v, &user_a, None).await?;
@@ -1533,7 +1533,7 @@ async fn test_quorum_defeated_succeed_failed() -> Result<(), Box<dyn std::error:
 
 #[tokio::test]
 async fn test_quorum_with_abstain() -> Result<(), Box<dyn std::error::Error>> {
-    // Default quorum_threshold_bps=3500 (35%). user_a holds 3/(3+10)=23% < 35%.
+    // Default quorum_threshold_bps=3500 (35%). user_a holds 300/(300+1000)=23% < 35%.
     // user_a alone can't meet quorum, but user_b's Abstain pushes total to 100%.
     let v = VenearTestWorkspaceBuilder::default()
         .with_voting()
@@ -1542,9 +1542,9 @@ async fn test_quorum_with_abstain() -> Result<(), Box<dyn std::error::Error>> {
     let user_a = v.create_account_with_lockup().await?;
     let user_b = v.create_account_with_lockup().await?;
 
-    v.transfer_and_lock(&user_a, NearToken::from_near(3))
+    v.transfer_and_lock(&user_a, NearToken::from_near(300))
         .await?;
-    v.transfer_and_lock(&user_b, NearToken::from_near(10))
+    v.transfer_and_lock(&user_b, NearToken::from_near(1000))
         .await?;
 
     let proposal_id = create_proposal(&v, &user_a, None).await?;
@@ -1576,9 +1576,9 @@ async fn test_proposal_with_transfer_action() -> Result<(), Box<dyn std::error::
     let user_a = v.create_account_with_lockup().await?;
     let user_b = v.create_account_with_lockup().await?;
 
-    v.transfer_and_lock(&user_a, NearToken::from_near(3))
+    v.transfer_and_lock(&user_a, NearToken::from_near(300))
         .await?;
-    v.transfer_and_lock(&user_b, NearToken::from_near(10))
+    v.transfer_and_lock(&user_b, NearToken::from_near(1000))
         .await?;
 
     // Fund the voting contract so it can execute transfers
@@ -1664,9 +1664,9 @@ async fn test_proposal_with_function_call_actions() -> Result<(), Box<dyn std::e
     let user_a = v.create_account_with_lockup().await?;
     let user_b = v.create_account_with_lockup().await?;
 
-    v.transfer_and_lock(&user_a, NearToken::from_near(3))
+    v.transfer_and_lock(&user_a, NearToken::from_near(300))
         .await?;
-    v.transfer_and_lock(&user_b, NearToken::from_near(10))
+    v.transfer_and_lock(&user_b, NearToken::from_near(1000))
         .await?;
 
     // Propose transferring ownership to the voting contract itself,
@@ -1755,9 +1755,9 @@ async fn test_execute_proposal_failure_is_terminal() -> Result<(), Box<dyn std::
     let user_a = v.create_account_with_lockup().await?;
     let user_b = v.create_account_with_lockup().await?;
 
-    v.transfer_and_lock(&user_a, NearToken::from_near(3))
+    v.transfer_and_lock(&user_a, NearToken::from_near(300))
         .await?;
-    v.transfer_and_lock(&user_b, NearToken::from_near(10))
+    v.transfer_and_lock(&user_b, NearToken::from_near(1000))
         .await?;
 
     // Create proposal calling a nonexistent method to trigger failure

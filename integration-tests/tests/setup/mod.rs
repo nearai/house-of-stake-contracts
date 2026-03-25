@@ -88,7 +88,7 @@ impl Default for VenearTestWorkspaceBuilder {
             vote_storage_fee: NearToken::from_yoctonear(125 * 10u128.pow(19)),
             proposal_expiration_ns: PROPOSAL_EXPIRATION_SECONDS * NS_IN_SECOND,
             quorum_threshold_bps: 3500,
-            quorum_floor: NearToken::from_near(10),
+            quorum_floor: NearToken::from_near(1000),
             approval_threshold_bps: 5000,
         }
     }

@@ -11,7 +11,7 @@ const MIGRATE_STATE_GAS: Gas = Gas::from_tgas(50);
 const GET_CONFIG_GAS: Gas = Gas::from_tgas(5);
 
 const DEFAULT_QUORUM_THRESHOLD_BPS: u16 = 3500;
-const DEFAULT_QUORUM_FLOOR_NEAR: u128 = 10;
+const DEFAULT_QUORUM_FLOOR_NEAR: u128 = 1000;
 const DEFAULT_APPROVAL_THRESHOLD_BPS: u16 = 5000;
 
 /// Config from v1.0.2 (without council_ids, timelock, expiration, or quorum).
