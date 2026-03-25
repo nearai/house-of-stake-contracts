@@ -57,6 +57,7 @@ export ROOT_ACCOUNT_ID="$ROOT_ACCOUNT_ID"
 export VENEAR_ACCOUNT_ID="v.$ROOT_ACCOUNT_ID"
 export REVIEWER_ACCOUNT_ID="reviewer.$ROOT_ACCOUNT_ID"
 export VOTING_ACCOUNT_ID="vote.$ROOT_ACCOUNT_ID"
+export VOTING_V2_ACCOUNT_ID="vote2.$ROOT_ACCOUNT_ID"
 export OWNER_ACCOUNT_ID="owner.$ROOT_ACCOUNT_ID"
 export GUARDIAN_ACCOUNT_ID="guardian.$ROOT_ACCOUNT_ID"
 export VOTING_GUARDIAN_ACCOUNT_ID="voting-guardian.$ROOT_ACCOUNT_ID"
@@ -68,6 +69,9 @@ near --quiet account create-account fund-myself $VENEAR_ACCOUNT_ID '2.4 NEAR' au
 
 echo "Creating account $VOTING_ACCOUNT_ID"
 near --quiet account create-account fund-myself $VOTING_ACCOUNT_ID '2.3 NEAR' autogenerate-new-keypair save-to-keychain sign-as $ROOT_ACCOUNT_ID network-config $CHAIN_ID sign-with-keychain send
+
+echo "Creating account $VOTING_V2_ACCOUNT_ID"
+near --quiet account create-account fund-myself $VOTING_V2_ACCOUNT_ID '2.3 NEAR' autogenerate-new-keypair save-to-keychain sign-as $ROOT_ACCOUNT_ID network-config $CHAIN_ID sign-with-keychain send
 
 echo "Creating account $OWNER_ACCOUNT_ID"
 near --quiet account create-account fund-myself $OWNER_ACCOUNT_ID '0.1 NEAR' autogenerate-new-keypair save-to-keychain sign-as $ROOT_ACCOUNT_ID network-config $CHAIN_ID sign-with-keychain send
@@ -123,6 +127,22 @@ near --quiet contract deploy $VOTING_ACCOUNT_ID use-file res/$CONTRACTS_SOURCE/v
   }
 }' prepaid-gas '10.0 Tgas' attached-deposit '0 NEAR' network-config $CHAIN_ID sign-with-keychain send
 
+echo "Deploying and initializing voting v2 contract"
+near --quiet contract deploy $VOTING_V2_ACCOUNT_ID use-file res/$CONTRACTS_SOURCE/voting_contract_v2.wasm with-init-call new json-args '{
+  "config": {
+    "venear_account_id": "'$VENEAR_ACCOUNT_ID'",
+    "reviewer_ids": ["'$REVIEWER_ACCOUNT_ID'"],
+    "owner_account_id": "'$OWNER_ACCOUNT_ID'",
+    "voting_duration_ns": "'$VOTING_DURATION_NS'",
+    "base_proposal_fee": "'$BASE_PROPOSAL_FEE'",
+    "vote_storage_fee": "'$VOTE_STORAGE_FEE'",
+    "guardians": ["'$GUARDIAN_ACCOUNT_ID'"],
+    "council_ids": ["'$COUNCIL_ACCOUNT_ID'"],
+    "timelock_duration_ns": "'$TIMELOCK_DURATION_NS'",
+    "proposal_expiration_ns": "'$PROPOSAL_EXPIRATION_NS'"
+  }
+}' prepaid-gas '10.0 Tgas' attached-deposit '0 NEAR' network-config $CHAIN_ID sign-with-keychain send
+
 echo "Preparing lockup contract on veNEAR"
 near --quiet contract call-function as-transaction $VENEAR_ACCOUNT_ID prepare_lockup_code file-args res/$CONTRACTS_SOURCE/lockup_contract.wasm prepaid-gas '100.0 Tgas' attached-deposit '1.98 NEAR' sign-as $LOCKUP_DEPLOYER_ACCOUNT_ID network-config $CHAIN_ID sign-with-keychain send
 
@@ -137,6 +157,7 @@ echo "Done deploying!"
 echo "Accounts:"
 echo "veNEAR:            $VENEAR_ACCOUNT_ID"
 echo "Voting:            $VOTING_ACCOUNT_ID"
+echo "Voting V2:         $VOTING_V2_ACCOUNT_ID"
 echo "Owner:             $OWNER_ACCOUNT_ID"
 echo "Lockup deployer:   $LOCKUP_DEPLOYER_ACCOUNT_ID"
 echo "Proposal reviewer: $REVIEWER_ACCOUNT_ID"
@@ -147,6 +168,7 @@ echo "Export commands:"
 echo "export ROOT_ACCOUNT_ID=$ROOT_ACCOUNT_ID"
 echo "export VENEAR_ACCOUNT_ID=$VENEAR_ACCOUNT_ID"
 echo "export VOTING_ACCOUNT_ID=$VOTING_ACCOUNT_ID"
+echo "export VOTING_V2_ACCOUNT_ID=$VOTING_V2_ACCOUNT_ID"
 echo "export OWNER_ACCOUNT_ID=$OWNER_ACCOUNT_ID"
 echo "export LOCKUP_DEPLOYER_ACCOUNT_ID=$LOCKUP_DEPLOYER_ACCOUNT_ID"
 echo "export REVIEWER_ACCOUNT_ID=$REVIEWER_ACCOUNT_ID"
