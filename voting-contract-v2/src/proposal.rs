@@ -32,6 +32,17 @@ pub enum VoteOption {
     Abstain,
 }
 
+/// The majority type required for a proposal to pass.
+/// Specified by the reviewer at approval time.
+#[derive(Clone, Copy, PartialEq)]
+#[near(serializers=[borsh, json])]
+pub enum MajorityType {
+    /// Simple majority (e.g. >50%).
+    Simple,
+    /// Strong majority (e.g. >66.67%).
+    Strong,
+}
+
 /// The old proposal structure (V1) that includes the `rejected` field.
 #[derive(Clone)]
 #[near(serializers=[borsh])]

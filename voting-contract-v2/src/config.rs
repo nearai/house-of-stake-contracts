@@ -47,9 +47,13 @@ pub struct Config {
     /// Absolute minimum veNEAR required for quorum, regardless of BPS calculation.
     pub quorum_floor: NearToken,
 
-    /// Approval threshold in basis points (e.g. 5000 = 50%, 6667 ≈ 66.67%).
-    /// Applied as: for_votes / (for_votes + against_votes) >= approval_threshold_bps / 10000.
-    pub approval_threshold_bps: u16,
+    /// Simple majority threshold in basis points (e.g. 5000 = 50%).
+    /// Applied as: for_votes / (for_votes + against_votes) >= threshold / 10000.
+    pub simple_majority_threshold_bps: u16,
+
+    /// Strong (super) majority threshold in basis points (e.g. 6667 ≈ 66.67%).
+    /// Applied as: for_votes / (for_votes + against_votes) >= threshold / 10000.
+    pub strong_majority_threshold_bps: u16,
 }
 
 #[near]

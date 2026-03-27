@@ -133,18 +133,32 @@ impl Contract {
         self.config.quorum_floor = quorum_floor;
     }
 
-    /// Updates the approval threshold in basis points (e.g. 5000 = 50%, 6667 = ~66.67%).
+    /// Updates the simple majority threshold in basis points (e.g. 5000 = 50%).
     /// Can only be called by the owner.
     /// Requires 1 yocto NEAR.
     #[payable]
-    pub fn set_approval_threshold_bps(&mut self, approval_threshold_bps: u16) {
+    pub fn set_simple_majority_threshold_bps(&mut self, simple_majority_threshold_bps: u16) {
         assert_one_yocto();
         self.assert_owner();
         require!(
-            approval_threshold_bps <= 10_000,
-            "Approval threshold must be <= 10000 bps"
+            simple_majority_threshold_bps <= 10_000,
+            "Simple majority threshold must be <= 10000 bps"
         );
-        self.config.approval_threshold_bps = approval_threshold_bps;
+        self.config.simple_majority_threshold_bps = simple_majority_threshold_bps;
+    }
+
+    /// Updates the strong (super) majority threshold in basis points (e.g. 6667 ≈ 66.67%).
+    /// Can only be called by the owner.
+    /// Requires 1 yocto NEAR.
+    #[payable]
+    pub fn set_strong_majority_threshold_bps(&mut self, strong_majority_threshold_bps: u16) {
+        assert_one_yocto();
+        self.assert_owner();
+        require!(
+            strong_majority_threshold_bps <= 10_000,
+            "Strong majority threshold must be <= 10000 bps"
+        );
+        self.config.strong_majority_threshold_bps = strong_majority_threshold_bps;
     }
 }
 

@@ -5,7 +5,7 @@ use crate::setup::{VenearTestWorkspaceBuilder, DEFAULT_BOND_AMOUNT};
 use near_sdk::{Gas, NearToken};
 use near_workspaces::AccountId;
 use serde_json::json;
-use voting_contract_v2::proposal::{ProposalStatus, VoteOption};
+use voting_contract_v2::proposal::{MajorityType, ProposalStatus, VoteOption};
 
 #[tokio::test]
 async fn test_voting_v2() -> Result<(), Box<dyn std::error::Error>> {
@@ -56,12 +56,20 @@ async fn test_voting_v2() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     assert!(
-        approve_proposal(&v, &user_a, proposal_id).await.is_err(),
+        approve_proposal_v2(&v, &user_a, proposal_id, MajorityType::Simple)
+            .await
+            .is_err(),
         "Regular user should not be able to approve the proposal"
     );
 
     let balance_before_approval = user_a.view_account().await?.balance;
-    approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
+    approve_proposal_v2(
+        &v,
+        &v.voting.as_ref().unwrap().reviewer,
+        proposal_id,
+        MajorityType::Simple,
+    )
+    .await?;
     let balance_after_approval = user_a.view_account().await?.balance;
 
     let proposal = v.get_proposal(proposal_id).await?;
@@ -328,7 +336,13 @@ async fn test_voting_v2_reject_proposal() -> Result<(), Box<dyn std::error::Erro
         .await?;
 
     let proposal_id = create_proposal(&v, &user_a, None).await?;
-    approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
+    approve_proposal_v2(
+        &v,
+        &v.voting.as_ref().unwrap().reviewer,
+        proposal_id,
+        MajorityType::Simple,
+    )
+    .await?;
 
     // Vote For so the proposal would succeed and enter Timelock instead of Defeated
     vote_for_option(&v, &user_a, proposal_id, VoteOption::For).await?;
@@ -741,7 +755,14 @@ async fn test_voting_v2_governance() -> Result<(), Box<dyn std::error::Error>> {
 
     let config: serde_json::Value = v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
     assert_eq!(config["quorum_threshold_bps"].as_u64().unwrap(), 3500);
-    assert_eq!(config["approval_threshold_bps"].as_u64().unwrap(), 5000);
+    assert_eq!(
+        config["simple_majority_threshold_bps"].as_u64().unwrap(),
+        5000
+    );
+    assert_eq!(
+        config["strong_majority_threshold_bps"].as_u64().unwrap(),
+        6667
+    );
 
     // Regular user cannot set quorum params
     let outcome = user
@@ -763,8 +784,17 @@ async fn test_voting_v2_governance() -> Result<(), Box<dyn std::error::Error>> {
     assert!(outcome.is_failure());
 
     let outcome = user
-        .call(v.voting_id(), "set_approval_threshold_bps")
-        .args_json(json!({ "approval_threshold_bps": 6667u16 }))
+        .call(v.voting_id(), "set_simple_majority_threshold_bps")
+        .args_json(json!({ "simple_majority_threshold_bps": 6000u16 }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await?;
+    assert!(outcome.is_failure());
+
+    let outcome = user
+        .call(v.voting_id(), "set_strong_majority_threshold_bps")
+        .args_json(json!({ "strong_majority_threshold_bps": 7000u16 }))
         .deposit(NearToken::from_yoctonear(1))
         .gas(Gas::from_tgas(50))
         .transact()
@@ -799,8 +829,8 @@ async fn test_voting_v2_governance() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(floor, new_floor);
 
     let outcome = voting_owner
-        .call(v.voting_id(), "set_approval_threshold_bps")
-        .args_json(json!({ "approval_threshold_bps": 6667u16 }))
+        .call(v.voting_id(), "set_simple_majority_threshold_bps")
+        .args_json(json!({ "simple_majority_threshold_bps": 5100u16 }))
         .deposit(NearToken::from_yoctonear(1))
         .gas(Gas::from_tgas(50))
         .transact()
@@ -808,7 +838,25 @@ async fn test_voting_v2_governance() -> Result<(), Box<dyn std::error::Error>> {
     assert!(outcome.is_success(), "Failed: {:#?}", outcome);
 
     let config: serde_json::Value = v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
-    assert_eq!(config["approval_threshold_bps"].as_u64().unwrap(), 6667);
+    assert_eq!(
+        config["simple_majority_threshold_bps"].as_u64().unwrap(),
+        5100
+    );
+
+    let outcome = voting_owner
+        .call(v.voting_id(), "set_strong_majority_threshold_bps")
+        .args_json(json!({ "strong_majority_threshold_bps": 7500u16 }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await?;
+    assert!(outcome.is_success(), "Failed: {:#?}", outcome);
+
+    let config: serde_json::Value = v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
+    assert_eq!(
+        config["strong_majority_threshold_bps"].as_u64().unwrap(),
+        7500
+    );
 
     // Validation: quorum_threshold_bps > 10000 should fail
     let outcome = voting_owner
@@ -820,10 +868,20 @@ async fn test_voting_v2_governance() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     assert!(outcome.is_failure());
 
-    // Validation: approval_threshold_bps > 10000 should fail
+    // Validation: simple_majority_threshold_bps > 10000 should fail
     let outcome = voting_owner
-        .call(v.voting_id(), "set_approval_threshold_bps")
-        .args_json(json!({ "approval_threshold_bps": 10001u16 }))
+        .call(v.voting_id(), "set_simple_majority_threshold_bps")
+        .args_json(json!({ "simple_majority_threshold_bps": 10001u16 }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await?;
+    assert!(outcome.is_failure());
+
+    // Validation: strong_majority_threshold_bps > 10000 should fail
+    let outcome = voting_owner
+        .call(v.voting_id(), "set_strong_majority_threshold_bps")
+        .args_json(json!({ "strong_majority_threshold_bps": 10001u16 }))
         .deposit(NearToken::from_yoctonear(1))
         .gas(Gas::from_tgas(50))
         .transact()
@@ -1107,7 +1165,13 @@ async fn test_voting_v2_pause() -> Result<(), Box<dyn std::error::Error>> {
 
     // Prepare for pause testing
     let proposal_id = create_proposal(&v, &user_a, None).await?;
-    approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
+    approve_proposal_v2(
+        &v,
+        &v.voting.as_ref().unwrap().reviewer,
+        proposal_id,
+        MajorityType::Simple,
+    )
+    .await?;
     let proposal_id_2 = create_proposal(&v, &user_a, None).await?;
     assert_ne!(proposal_id, proposal_id_2);
 
@@ -1227,9 +1291,14 @@ async fn test_voting_v2_pause() -> Result<(), Box<dyn std::error::Error>> {
 
     // Attempt to approve a proposal while paused
     assert!(
-        approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id_2)
-            .await
-            .is_err(),
+        approve_proposal_v2(
+            &v,
+            &v.voting.as_ref().unwrap().reviewer,
+            proposal_id_2,
+            MajorityType::Simple
+        )
+        .await
+        .is_err(),
         "Reviewer should not be able to approve proposal while paused"
     );
 
@@ -1278,9 +1347,14 @@ async fn test_voting_v2_proposal_expiration() -> Result<(), Box<dyn std::error::
 
     // Attempt to approve — should fail because the proposal is expired
     assert!(
-        approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id)
-            .await
-            .is_err(),
+        approve_proposal_v2(
+            &v,
+            &v.voting.as_ref().unwrap().reviewer,
+            proposal_id,
+            MajorityType::Simple
+        )
+        .await
+        .is_err(),
         "Should not be able to approve an expired proposal"
     );
 
@@ -1317,7 +1391,13 @@ async fn test_v2_quorum_succeeded() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     let proposal_id = create_proposal(&v, &user_a, None).await?;
-    approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
+    approve_proposal_v2(
+        &v,
+        &v.voting.as_ref().unwrap().reviewer,
+        proposal_id,
+        MajorityType::Simple,
+    )
+    .await?;
 
     // Both vote For
     vote_for_option(&v, &user_a, proposal_id, VoteOption::For).await?;
@@ -1351,7 +1431,13 @@ async fn test_v2_quorum_defeated_insufficient_votes() -> Result<(), Box<dyn std:
         .await?;
 
     let proposal_id = create_proposal(&v, &user_a, None).await?;
-    approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
+    approve_proposal_v2(
+        &v,
+        &v.voting.as_ref().unwrap().reviewer,
+        proposal_id,
+        MajorityType::Simple,
+    )
+    .await?;
 
     // Only user_a votes, below 35% quorum threshold
     vote_for_option(&v, &user_a, proposal_id, VoteOption::For).await?;
@@ -1387,7 +1473,13 @@ async fn test_v2_quorum_defeated_succeed_failed() -> Result<(), Box<dyn std::err
         .await?;
 
     let proposal_id = create_proposal(&v, &user_a, None).await?;
-    approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
+    approve_proposal_v2(
+        &v,
+        &v.voting.as_ref().unwrap().reviewer,
+        proposal_id,
+        MajorityType::Simple,
+    )
+    .await?;
 
     // user_a votes For, user_b votes Against (more power)
     vote_for_option(&v, &user_a, proposal_id, VoteOption::For).await?;
@@ -1423,7 +1515,13 @@ async fn test_v2_quorum_with_abstain() -> Result<(), Box<dyn std::error::Error>>
         .await?;
 
     let proposal_id = create_proposal(&v, &user_a, None).await?;
-    approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
+    approve_proposal_v2(
+        &v,
+        &v.voting.as_ref().unwrap().reviewer,
+        proposal_id,
+        MajorityType::Simple,
+    )
+    .await?;
 
     // user_a votes For (23% alone < 35% quorum), user_b votes Abstain
     vote_for_option(&v, &user_a, proposal_id, VoteOption::For).await?;
@@ -1480,7 +1578,13 @@ async fn test_v2_proposal_with_transfer_action() -> Result<(), Box<dyn std::erro
     )
     .await?;
 
-    approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
+    approve_proposal_v2(
+        &v,
+        &v.voting.as_ref().unwrap().reviewer,
+        proposal_id,
+        MajorityType::Simple,
+    )
+    .await?;
 
     vote_for_option(&v, &user_a, proposal_id, VoteOption::For).await?;
     vote_for_option(&v, &user_b, proposal_id, VoteOption::For).await?;
@@ -1587,7 +1691,7 @@ async fn test_v2_proposal_with_function_call_actions() -> Result<(), Box<dyn std
     )
     .await?;
 
-    approve_proposal(&v, &voting.reviewer, proposal_id).await?;
+    approve_proposal_v2(&v, &voting.reviewer, proposal_id, MajorityType::Simple).await?;
     vote_for_option(&v, &user_a, proposal_id, VoteOption::For).await?;
     vote_for_option(&v, &user_b, proposal_id, VoteOption::For).await?;
 
@@ -1653,7 +1757,13 @@ async fn test_v2_execute_proposal_failure_is_terminal() -> Result<(), Box<dyn st
     )
     .await?;
 
-    approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
+    approve_proposal_v2(
+        &v,
+        &v.voting.as_ref().unwrap().reviewer,
+        proposal_id,
+        MajorityType::Simple,
+    )
+    .await?;
 
     vote_for_option(&v, &user_a, proposal_id, VoteOption::For).await?;
     vote_for_option(&v, &user_b, proposal_id, VoteOption::For).await?;
@@ -1787,7 +1897,7 @@ async fn test_bond_zero_amount() -> Result<(), Box<dyn std::error::Error>> {
         "bond_amount should be 0 when configured as zero"
     );
 
-    approve_proposal(&v, &reviewer, proposal_id).await?;
+    approve_proposal_v2(&v, &reviewer, proposal_id, MajorityType::Simple).await?;
     let proposal_after = v.get_proposal(proposal_id).await?;
 
     assert_eq!(proposal_after["status"].as_str().unwrap(), "Voting");
@@ -1796,5 +1906,97 @@ async fn test_bond_zero_amount() -> Result<(), Box<dyn std::error::Error>> {
         "0",
         "bond_amount should remain 0 after approval"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_strong_majority() -> Result<(), Box<dyn std::error::Error>> {
+    let v = VenearTestWorkspaceBuilder::default()
+        .with_voting_v2()
+        .build()
+        .await?;
+    let user_a = v.create_account_with_lockup().await?;
+    let user_b = v.create_account_with_lockup().await?;
+    let user_c = v.create_account_with_lockup().await?;
+
+    // user_a: 600 NEAR, user_b: 400 NEAR, user_c: 201 NEAR
+    v.transfer_and_lock(&user_a, NearToken::from_near(600))
+        .await?;
+    v.transfer_and_lock(&user_b, NearToken::from_near(400))
+        .await?;
+    v.transfer_and_lock(&user_c, NearToken::from_near(201))
+        .await?;
+
+    // --- Proposal 1: Simple majority, 60/40 split — should pass ---
+    let proposal_simple = create_proposal(&v, &user_a, None).await?;
+    approve_proposal_v2(
+        &v,
+        &v.voting.as_ref().unwrap().reviewer,
+        proposal_simple,
+        MajorityType::Simple,
+    )
+    .await?;
+
+    vote_for_option(&v, &user_a, proposal_simple, VoteOption::For).await?;
+    vote_for_option(&v, &user_b, proposal_simple, VoteOption::Against).await?;
+
+    v.fast_forward_to_proposal_status_v2(proposal_simple, ProposalStatus::Succeeded)
+        .await?;
+
+    let proposal = v.get_proposal(proposal_simple).await?;
+    assert_eq!(
+        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        ProposalStatus::Succeeded,
+        "60/40 split should pass simple majority"
+    );
+
+    // --- Proposal 2: Strong majority, 60/40 split — should be defeated ---
+    let proposal_strong_fail = create_proposal(&v, &user_a, None).await?;
+    approve_proposal_v2(
+        &v,
+        &v.voting.as_ref().unwrap().reviewer,
+        proposal_strong_fail,
+        MajorityType::Strong,
+    )
+    .await?;
+
+    vote_for_option(&v, &user_a, proposal_strong_fail, VoteOption::For).await?;
+    vote_for_option(&v, &user_b, proposal_strong_fail, VoteOption::Against).await?;
+
+    v.fast_forward_to_proposal_status_v2(proposal_strong_fail, ProposalStatus::Succeeded)
+        .await?;
+
+    let proposal = v.get_proposal(proposal_strong_fail).await?;
+    assert_eq!(
+        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        ProposalStatus::Defeated,
+        "60/40 split should fail strong majority (~66.67%)"
+    );
+
+    // --- Proposal 3: Strong majority, barely passing — 801 For / 400 Against = 66.69% ---
+    let proposal_strong_pass = create_proposal(&v, &user_a, None).await?;
+    approve_proposal_v2(
+        &v,
+        &v.voting.as_ref().unwrap().reviewer,
+        proposal_strong_pass,
+        MajorityType::Strong,
+    )
+    .await?;
+
+    // user_a (600) + user_c (201) = 801 For, user_b (400) Against → 801/1201 = 66.69%
+    vote_for_option(&v, &user_a, proposal_strong_pass, VoteOption::For).await?;
+    vote_for_option(&v, &user_c, proposal_strong_pass, VoteOption::For).await?;
+    vote_for_option(&v, &user_b, proposal_strong_pass, VoteOption::Against).await?;
+
+    v.fast_forward_to_proposal_status_v2(proposal_strong_pass, ProposalStatus::Succeeded)
+        .await?;
+
+    let proposal = v.get_proposal(proposal_strong_pass).await?;
+    assert_eq!(
+        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        ProposalStatus::Succeeded,
+        "801/1201 (66.69%) should barely pass strong majority"
+    );
+
     Ok(())
 }

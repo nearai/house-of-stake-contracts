@@ -68,6 +68,8 @@ pub struct VenearTestWorkspaceBuilder {
     pub quorum_threshold_bps: u16,
     pub quorum_floor: NearToken,
     pub approval_threshold_bps: u16,
+    pub simple_majority_threshold_bps: u16,
+    pub strong_majority_threshold_bps: u16,
 }
 
 impl Default for VenearTestWorkspaceBuilder {
@@ -96,6 +98,8 @@ impl Default for VenearTestWorkspaceBuilder {
             quorum_threshold_bps: 3500,
             quorum_floor: NearToken::from_near(1000),
             approval_threshold_bps: 5000,
+            simple_majority_threshold_bps: 5000,
+            strong_majority_threshold_bps: 6667,
         }
     }
 }
@@ -312,7 +316,8 @@ impl VenearTestWorkspaceBuilder {
                         "proposal_expiration_ns": self.proposal_expiration_ns.to_string(),
                         "quorum_threshold_bps": self.quorum_threshold_bps,
                         "quorum_floor": self.quorum_floor,
-                        "approval_threshold_bps": self.approval_threshold_bps,
+                        "simple_majority_threshold_bps": self.simple_majority_threshold_bps,
+                        "strong_majority_threshold_bps": self.strong_majority_threshold_bps,
                     },
                 })
             } else {

@@ -1,98 +1,16 @@
-use crate::config::Config;
-use crate::proposal::{Proposal, ProposalStatus, VProposal};
-use crate::StorageKeys;
 use crate::*;
-use near_sdk::borsh::{self, BorshDeserialize};
-use near_sdk::json_types::U64;
-use near_sdk::store::{LookupMap, Vector};
 use near_sdk::Gas;
 
 const MIGRATE_STATE_GAS: Gas = Gas::from_tgas(50);
 const GET_CONFIG_GAS: Gas = Gas::from_tgas(5);
 
-const DEFAULT_QUORUM_THRESHOLD_BPS: u16 = 3500;
-const DEFAULT_QUORUM_FLOOR_NEAR: u128 = 1000;
-const DEFAULT_APPROVAL_THRESHOLD_BPS: u16 = 5000;
-
-/// Config from v1.0.2 (without council_ids, timelock, expiration, or quorum).
-#[derive(BorshDeserialize)]
-#[borsh(crate = "borsh")]
-struct OldConfig {
-    venear_account_id: AccountId,
-    reviewer_ids: Vec<AccountId>,
-    owner_account_id: AccountId,
-    voting_duration_ns: U64,
-    max_number_of_voting_options: u8,
-    bond_amount: NearToken,
-    vote_storage_fee: NearToken,
-    guardians: Vec<AccountId>,
-    proposed_new_owner_account_id: Option<AccountId>,
-}
-
-/// Contract state from v1.0.2.
-/// All proposals are V1(ProposalV1) — the current VProposal enum handles this.
-#[derive(BorshDeserialize)]
-#[borsh(crate = "borsh")]
-struct OldContract {
-    config: OldConfig,
-    proposals: Vector<VProposal>,
-    proposal_metadata: Vector<VProposalMetadata>,
-    votes: LookupMap<(AccountId, ProposalId), u8>,
-    approved_proposals: Vector<ProposalId>,
-    paused: bool,
-}
-
 #[near]
 impl Contract {
-    /// Private method to migrate the contract state from v1.0.2.
+    /// Private method to migrate the contract state
     #[private]
     #[init(ignore_state)]
     pub fn migrate_state() -> Self {
-        let old: OldContract = env::state_read().unwrap();
-        let quorum_floor = NearToken::from_near(DEFAULT_QUORUM_FLOOR_NEAR);
-
-        // Migrate proposals
-        let num = old.proposals.len();
-        let old_list: Vec<VProposal> = (0..num)
-            .map(|i| old.proposals.get(i).unwrap().clone())
-            .collect();
-
-        let mut proposals = Vector::new(StorageKeys::Proposal);
-        for old_vp in old_list {
-            let mut p: Proposal = old_vp.into();
-            p.quorum_threshold_bps = DEFAULT_QUORUM_THRESHOLD_BPS;
-            p.quorum_floor = quorum_floor;
-            p.approval_threshold_bps = DEFAULT_APPROVAL_THRESHOLD_BPS;
-            // Re-evaluate proposals that were Finished (now Succeeded via borsh index 4).
-            if p.status == ProposalStatus::Succeeded {
-                p.status = p.compute_final_status();
-            }
-            proposals.push(VProposal::Current(p));
-        }
-
-        Self {
-            config: Config {
-                venear_account_id: old.config.venear_account_id,
-                reviewer_ids: old.config.reviewer_ids,
-                council_ids: vec![],
-                owner_account_id: old.config.owner_account_id,
-                voting_duration_ns: old.config.voting_duration_ns,
-                timelock_duration_ns: U64(0),
-                bond_amount: old.config.bond_amount,
-                vote_storage_fee: old.config.vote_storage_fee,
-                guardians: old.config.guardians,
-                proposal_expiration_ns: U64(0),
-                proposed_new_owner_account_id: old.config.proposed_new_owner_account_id,
-                quorum_threshold_bps: DEFAULT_QUORUM_THRESHOLD_BPS,
-                quorum_floor,
-                approval_threshold_bps: DEFAULT_APPROVAL_THRESHOLD_BPS,
-            },
-            proposals,
-            proposal_metadata: old.proposal_metadata,
-            votes: old.votes,
-            approved_proposals: old.approved_proposals,
-            paused: old.paused,
-        }
+        env::state_read().unwrap()
     }
 
     /// Returns the version of the contract from the Cargo.toml.

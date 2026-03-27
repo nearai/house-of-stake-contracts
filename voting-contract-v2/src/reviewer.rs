@@ -1,4 +1,4 @@
-use crate::proposal::{ProposalInfo, ProposalStatus, SnapshotAndState};
+use crate::proposal::{MajorityType, ProposalInfo, ProposalStatus, SnapshotAndState};
 use crate::*;
 use common::global_state::{GlobalState, VGlobalState};
 use common::{events, TimestampNs};
@@ -12,7 +12,11 @@ impl Contract {
     /// Requires 1 yocto attached to the call.
     /// Can only be called by the reviewers.
     #[payable]
-    pub fn approve_proposal(&mut self, proposal_id: ProposalId) -> Promise {
+    pub fn approve_proposal(
+        &mut self,
+        proposal_id: ProposalId,
+        majority_type: MajorityType,
+    ) -> Promise {
         assert_one_yocto();
         self.assert_not_paused();
         self.assert_called_by_reviewer();
@@ -39,7 +43,7 @@ impl Contract {
             .then(
                 ext_self::ext(env::current_account_id())
                     .with_static_gas(GAS_FOR_ON_GET_SNAPSHOT)
-                    .on_get_snapshot(env::predecessor_account_id(), proposal_id),
+                    .on_get_snapshot(env::predecessor_account_id(), proposal_id, majority_type),
             )
     }
 
@@ -90,6 +94,7 @@ impl Contract {
         #[callback] snapshot_and_state: (MerkleTreeSnapshot, VGlobalState),
         reviewer_id: AccountId,
         proposal_id: ProposalId,
+        majority_type: MajorityType,
     ) -> ProposalInfo {
         self.assert_not_paused();
         let mut proposal = self.internal_expect_proposal_updated(proposal_id);
@@ -113,7 +118,10 @@ impl Contract {
         });
         proposal.quorum_threshold_bps = self.config.quorum_threshold_bps;
         proposal.quorum_floor = self.config.quorum_floor;
-        proposal.approval_threshold_bps = self.config.approval_threshold_bps;
+        proposal.approval_threshold_bps = match majority_type {
+            MajorityType::Simple => self.config.simple_majority_threshold_bps,
+            MajorityType::Strong => self.config.strong_majority_threshold_bps,
+        };
         proposal.status = ProposalStatus::Voting;
         self.approved_proposals.push(proposal_id);
 
@@ -152,5 +160,10 @@ trait ExtVenear {
 #[allow(dead_code)]
 #[ext_contract(ext_self)]
 trait ExtSelf {
-    fn on_get_snapshot(&mut self, reviewer_id: AccountId, proposal_id: ProposalId);
+    fn on_get_snapshot(
+        &mut self,
+        reviewer_id: AccountId,
+        proposal_id: ProposalId,
+        majority_type: MajorityType,
+    );
 }
