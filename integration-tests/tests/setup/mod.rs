@@ -17,6 +17,7 @@ pub const UNLOCK_DURATION_SECONDS: u64 = 60;
 pub const VOTING_DURATION_SECONDS: u64 = 60;
 pub const TIMELOCK_DURATION_SECONDS: u64 = 60;
 pub const PROPOSAL_EXPIRATION_SECONDS: u64 = 60;
+pub const DEFAULT_BOND_AMOUNT: NearToken = NearToken::from_near(10);
 
 pub const LOCKUP_WASM_FILEPATH: &str = "../res/local/lockup_contract.wasm";
 pub const VENEAR_WASM_FILEPATH: &str = "../res/local/venear_contract.wasm";
@@ -57,9 +58,11 @@ pub struct VenearTestWorkspaceBuilder {
     pub annual_growth_rate_ns: Fraction,
     pub deploy_voting: bool,
     pub use_previous_voting_wasm: bool,
+    pub use_voting_v2: bool,
     pub voting_duration_ns: u64,
     pub timelock_duration_ns: u64,
     pub base_proposal_fee: NearToken,
+    pub bond_amount: NearToken,
     pub vote_storage_fee: NearToken,
     pub proposal_expiration_ns: u64,
     pub quorum_threshold_bps: u16,
@@ -83,9 +86,11 @@ impl Default for VenearTestWorkspaceBuilder {
             },
             deploy_voting: false,
             use_previous_voting_wasm: false,
+            use_voting_v2: false,
             voting_duration_ns: VOTING_DURATION_SECONDS * NS_IN_SECOND,
             timelock_duration_ns: TIMELOCK_DURATION_SECONDS * NS_IN_SECOND,
             base_proposal_fee: NearToken::from_millinear(100),
+            bond_amount: DEFAULT_BOND_AMOUNT,
             vote_storage_fee: NearToken::from_yoctonear(125 * 10u128.pow(19)),
             proposal_expiration_ns: PROPOSAL_EXPIRATION_SECONDS * NS_IN_SECOND,
             quorum_threshold_bps: 3500,
@@ -263,6 +268,8 @@ impl VenearTestWorkspaceBuilder {
         let voting = if self.deploy_voting {
             let voting_wasm_path = if self.use_previous_voting_wasm {
                 PREVIOUS_VOTING_WASM_FILEPATH
+            } else if self.use_voting_v2 {
+                VOTING_V2_WASM_FILEPATH
             } else {
                 VOTING_WASM_FILEPATH
             };
@@ -288,6 +295,24 @@ impl VenearTestWorkspaceBuilder {
                         "base_proposal_fee": self.base_proposal_fee,
                         "vote_storage_fee": self.vote_storage_fee,
                         "guardians": &[guardian.id()],
+                    },
+                })
+            } else if self.use_voting_v2 {
+                json!({
+                    "config": {
+                        "venear_account_id": venear.id(),
+                        "reviewer_ids": &[reviewer.id()],
+                        "council_ids": &[council.id()],
+                        "owner_account_id": owner.id(),
+                        "voting_duration_ns": self.voting_duration_ns.to_string(),
+                        "timelock_duration_ns": self.timelock_duration_ns.to_string(),
+                        "bond_amount": self.bond_amount,
+                        "vote_storage_fee": self.vote_storage_fee,
+                        "guardians": &[guardian.id()],
+                        "proposal_expiration_ns": self.proposal_expiration_ns.to_string(),
+                        "quorum_threshold_bps": self.quorum_threshold_bps,
+                        "quorum_floor": self.quorum_floor,
+                        "approval_threshold_bps": self.approval_threshold_bps,
                     },
                 })
             } else {
@@ -372,6 +397,17 @@ impl VenearTestWorkspaceBuilder {
     pub fn with_previous_voting(mut self) -> Self {
         self.deploy_voting = true;
         self.use_previous_voting_wasm = true;
+        self
+    }
+
+    pub fn with_voting_v2(mut self) -> Self {
+        self.deploy_voting = true;
+        self.use_voting_v2 = true;
+        self
+    }
+
+    pub fn bond_amount(mut self, bond_amount: NearToken) -> Self {
+        self.bond_amount = bond_amount;
         self
     }
 }
@@ -675,6 +711,52 @@ impl VenearTestWorkspace {
 
     pub fn voting_id(&self) -> &AccountId {
         self.voting.as_ref().unwrap().contract.id()
+    }
+
+    pub async fn fast_forward_to_proposal_status_v2(
+        &self,
+        proposal_id: u32,
+        target: voting_contract_v2::proposal::ProposalStatus,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use voting_contract_v2::proposal::ProposalStatus;
+
+        let proposal = self.get_proposal(proposal_id).await?;
+
+        let (target_ns, num_blocks) = match target {
+            ProposalStatus::Timelock
+            | ProposalStatus::Succeeded
+            | ProposalStatus::Defeated
+            | ProposalStatus::Executable => {
+                let voting_start: u64 = proposal["voting_start_time_ns"]
+                    .as_str()
+                    .unwrap()
+                    .parse()?;
+                let voting_duration: u64 =
+                    proposal["voting_duration_ns"].as_str().unwrap().parse()?;
+                let timelock_duration: u64 =
+                    proposal["timelock_duration_ns"].as_str().unwrap().parse()?;
+                let voting_end = voting_start + voting_duration;
+                match target {
+                    ProposalStatus::Timelock => (voting_end, voting_duration / NS_IN_SECOND),
+                    _ => {
+                        let timelock_end = voting_end + timelock_duration;
+                        (
+                            timelock_end,
+                            (voting_duration + timelock_duration) / NS_IN_SECOND,
+                        )
+                    }
+                }
+            }
+            ProposalStatus::Expired => {
+                let expiration: u64 = proposal["expiration_ns"].as_str().unwrap().parse()?;
+                let creation: u64 = proposal["creation_time_ns"].as_str().unwrap().parse()?;
+                let expiration_secs = (expiration - creation) / NS_IN_SECOND;
+                (expiration, expiration_secs)
+            }
+            _ => panic!("Unsupported target status: {target:?}"),
+        };
+
+        self.fast_forward(target_ns, num_blocks, 20).await
     }
 }
 

@@ -83,6 +83,7 @@ impl From<VProposal> for Proposal {
                 quorum_floor: NearToken::from_yoctonear(0),
                 approval_threshold_bps: 0,
                 actions: None,
+                bond_amount: NearToken::from_yoctonear(0),
             },
             VProposal::Current(current) => current,
         }
@@ -127,6 +128,8 @@ pub struct Proposal {
     pub approval_threshold_bps: u16,
     /// Optional list of on-chain actions to execute when the proposal succeeds.
     pub actions: Option<Vec<ProposalAction>>,
+    /// The bond amount deposited by the proposer.
+    pub bond_amount: NearToken,
 }
 
 /// The proposal information structure that contains the proposal and its metadata.
@@ -163,6 +166,8 @@ pub enum ProposalStatus {
     InProgress,
     /// The proposal's on-chain execution failed.
     Failed,
+    /// The proposal was marked as spam by a reviewer.
+    Spam,
 }
 
 /// The snapshot of the Merkle tree and the global state at the moment when the proposal was
@@ -217,7 +222,8 @@ impl Proposal {
             | ProposalStatus::Defeated
             | ProposalStatus::Executable
             | ProposalStatus::InProgress
-            | ProposalStatus::Failed => {
+            | ProposalStatus::Failed
+            | ProposalStatus::Spam => {
                 return;
             }
             ProposalStatus::Created => {
@@ -328,6 +334,7 @@ impl Contract {
             quorum_floor: NearToken::from_yoctonear(0),
             approval_threshold_bps: 0,
             actions,
+            bond_amount: self.config.bond_amount,
         };
         let storage_usage = env::storage_usage();
         self.proposals.push(proposal.into());
@@ -339,7 +346,7 @@ impl Contract {
         let storage_added_cost = env::storage_byte_cost()
             .checked_mul(storage_added as _)
             .unwrap();
-        let required_deposit = near_add(self.config.base_proposal_fee, storage_added_cost);
+        let required_deposit = near_add(self.config.bond_amount, storage_added_cost);
         require!(
             attached_deposit >= required_deposit,
             format!(

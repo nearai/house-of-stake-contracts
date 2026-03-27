@@ -33,14 +33,14 @@ impl Contract {
         self.config.voting_duration_ns = (voting_duration_sec as u64 * 10u64.pow(9)).into();
     }
 
-    /// Updates the base fee required to create a proposal.
+    /// Updates the bond amount required to create a proposal.
     /// Can only be called by the owner.
     /// Requires 1 yocto NEAR.
     #[payable]
-    pub fn set_base_proposal_fee(&mut self, base_proposal_fee: NearToken) {
+    pub fn set_bond_amount(&mut self, bond_amount: NearToken) {
         assert_one_yocto();
         self.assert_owner();
-        self.config.base_proposal_fee = base_proposal_fee;
+        self.config.bond_amount = bond_amount;
     }
 
     /// Proposes the new owner account ID.
@@ -106,8 +106,7 @@ impl Contract {
     pub fn set_proposal_expiration(&mut self, proposal_expiration_sec: u32) {
         assert_one_yocto();
         self.assert_owner();
-        self.config.proposal_expiration_ns =
-            (proposal_expiration_sec as u64 * 10u64.pow(9)).into();
+        self.config.proposal_expiration_ns = (proposal_expiration_sec as u64 * 10u64.pow(9)).into();
     }
 
     /// Updates the quorum threshold in basis points (e.g. 3500 = 35%).

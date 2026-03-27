@@ -23,8 +23,9 @@ pub struct Config {
     /// The duration of the timelock period in nanoseconds after voting ends.
     pub timelock_duration_ns: U64,
 
-    /// The base fee in addition to the storage fee required to create a proposal.
-    pub base_proposal_fee: NearToken,
+    /// The bond amount required to create a proposal. Returned to the proposer upon reviewer
+    /// approval, or forfeited if the proposal is marked as spam. Claimable for expired proposals.
+    pub bond_amount: NearToken,
 
     /// Storage fee required to store a vote for an active proposal. It can be refunded once the
     /// proposal is finalized.

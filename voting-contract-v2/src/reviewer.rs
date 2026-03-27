@@ -16,13 +16,22 @@ impl Contract {
         assert_one_yocto();
         self.assert_not_paused();
         self.assert_called_by_reviewer();
-        let proposal = self.internal_expect_proposal_updated(proposal_id);
+        let mut proposal = self.internal_expect_proposal_updated(proposal_id);
 
         if proposal.status != ProposalStatus::Created {
             env::panic_str("Proposal is not in the Created status");
         }
 
         events::emit::approve_proposal_action(&env::predecessor_account_id(), proposal_id);
+
+        // Return bond if set
+        let bond = proposal.bond_amount;
+        let proposer_id = proposal.proposer_id.clone();
+        if bond.as_yoctonear() > 0 {
+            proposal.bond_amount = NearToken::from_yoctonear(0);
+            self.internal_set_proposal(proposal);
+            Promise::new(proposer_id).transfer(bond);
+        }
 
         ext_venear::ext(self.config.venear_account_id.clone())
             .with_unused_gas_weight(1)
@@ -53,6 +62,24 @@ impl Contract {
 
         events::emit::reject_proposal_action(&env::predecessor_account_id(), proposal_id);
 
+        self.internal_set_proposal(proposal);
+    }
+
+    /// Marks the proposal as spam, forfeiting the bond.
+    /// Requires 1 yocto attached to the call.
+    /// Can only be called by the reviewers.
+    #[payable]
+    pub fn mark_as_spam(&mut self, proposal_id: ProposalId) {
+        assert_one_yocto();
+        self.assert_not_paused();
+        self.assert_called_by_reviewer();
+        let mut proposal = self.internal_expect_proposal_updated(proposal_id);
+
+        if proposal.status != ProposalStatus::Created {
+            env::panic_str("Proposal can only be marked as spam while in Created status");
+        }
+
+        proposal.status = ProposalStatus::Spam;
         self.internal_set_proposal(proposal);
     }
 

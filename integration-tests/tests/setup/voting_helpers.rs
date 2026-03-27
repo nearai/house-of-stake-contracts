@@ -1,5 +1,4 @@
 use super::{VenearTestWorkspace, VOTING_WASM_FILEPATH};
-use voting_contract::proposal::VoteOption;
 use near_sdk::{Gas, NearToken};
 use serde_json::json;
 
@@ -41,7 +40,7 @@ pub async fn create_proposal(
             },
             "actions": actions,
         }))
-        .deposit(NearToken::from_millinear(200))
+        .deposit(NearToken::from_millinear(10_100))
         .gas(Gas::from_tgas(50))
         .transact()
         .await?;
@@ -124,7 +123,7 @@ pub async fn vote_for_option(
     v: &VenearTestWorkspace,
     user: &near_workspaces::Account,
     proposal_id: u32,
-    option: VoteOption,
+    option: impl near_sdk::serde::Serialize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (merkle_proof, v_account): (serde_json::Value, serde_json::Value) = v
         .sandbox
@@ -149,4 +148,34 @@ pub async fn vote_for_option(
     assert!(outcome.is_success(), "Failed to vote: {:#?}", outcome);
 
     Ok(())
+}
+
+pub async fn mark_as_spam(
+    v: &VenearTestWorkspace,
+    caller: &near_workspaces::Account,
+    proposal_id: u32,
+) -> Result<near_workspaces::result::ExecutionFinalResult, Box<dyn std::error::Error>> {
+    let outcome = caller
+        .call(v.voting_id(), "mark_as_spam")
+        .args_json(json!({ "proposal_id": proposal_id }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await?;
+    Ok(outcome)
+}
+
+pub async fn claim_bond(
+    v: &VenearTestWorkspace,
+    caller: &near_workspaces::Account,
+    proposal_id: u32,
+) -> Result<near_workspaces::result::ExecutionFinalResult, Box<dyn std::error::Error>> {
+    let outcome = caller
+        .call(v.voting_id(), "claim_bond")
+        .args_json(json!({ "proposal_id": proposal_id }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await?;
+    Ok(outcome)
 }

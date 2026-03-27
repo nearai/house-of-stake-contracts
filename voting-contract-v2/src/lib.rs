@@ -1,3 +1,4 @@
+mod bond;
 mod config;
 mod execute;
 mod governance;

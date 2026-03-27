@@ -998,7 +998,6 @@ pub async fn test_lockup_delete_after_staking() -> Result<(), Box<dyn std::error
 pub async fn test_ft_on_transfer_error() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default().build().await?;
     let user = v.create_account_with_lockup().await?;
-    let root = v.sandbox.root_account().unwrap();
     let lockup_id = v.get_lockup_account_id(user.id()).await?;
 
     let outcome = user
@@ -1020,7 +1019,6 @@ pub async fn test_ft_on_transfer_error() -> Result<(), Box<dyn std::error::Error
 pub async fn test_ft_on_transfer_success() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default().build().await?;
     let user = v.create_account_with_lockup().await?;
-    let root = v.sandbox.root_account().unwrap();
     let lockup_id = v.get_lockup_account_id(user.id()).await?;
 
     let staking_pool = v.sandbox.dev_create_account().await?;

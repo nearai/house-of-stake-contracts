@@ -42,6 +42,9 @@ impl Contract {
             | ProposalStatus::Failed => {
                 env::panic_str("Voting is finished");
             }
+            ProposalStatus::Spam => {
+                env::panic_str("Proposal is spam");
+            }
         }
 
         // Validate merkle proof
