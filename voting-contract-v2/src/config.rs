@@ -54,6 +54,13 @@ pub struct Config {
     /// Strong (super) majority threshold in basis points (e.g. 6667 ≈ 66.67%).
     /// Applied as: for_votes / (for_votes + against_votes) >= threshold / 10000.
     pub strong_majority_threshold_bps: u16,
+
+    /// The duration of the sandbox pre-voting period in nanoseconds.
+    pub sandbox_duration_ns: U64,
+
+    /// The "For" votes threshold in basis points to graduate from Sandbox to Voting.
+    /// E.g. 3000 = 30% of total veNEAR supply.
+    pub sandbox_threshold_bps: u16,
 }
 
 #[near]

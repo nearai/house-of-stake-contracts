@@ -106,7 +106,7 @@ impl Contract {
         let timestamp: TimestampNs = env::block_timestamp().into();
 
         proposal.reviewer_id = Some(reviewer_id);
-        proposal.voting_start_time_ns = Some(timestamp);
+        proposal.approval_time_ns = Some(timestamp);
 
         let mut global_state: GlobalState = snapshot_and_state.1.into();
         global_state.update(timestamp.into());
@@ -122,7 +122,9 @@ impl Contract {
             MajorityType::Simple => self.config.simple_majority_threshold_bps,
             MajorityType::Strong => self.config.strong_majority_threshold_bps,
         };
-        proposal.status = ProposalStatus::Voting;
+        proposal.sandbox_duration_ns = self.config.sandbox_duration_ns;
+        proposal.sandbox_threshold_bps = self.config.sandbox_threshold_bps;
+        proposal.status = ProposalStatus::Sandbox;
         self.approved_proposals.push(proposal_id);
 
         self.internal_set_proposal(proposal.clone());

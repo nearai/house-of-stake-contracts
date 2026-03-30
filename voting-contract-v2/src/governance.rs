@@ -160,6 +160,30 @@ impl Contract {
         );
         self.config.strong_majority_threshold_bps = strong_majority_threshold_bps;
     }
+
+    /// Updates the sandbox duration in seconds.
+    /// Can only be called by the owner.
+    /// Requires 1 yocto NEAR.
+    #[payable]
+    pub fn set_sandbox_duration(&mut self, sandbox_duration_sec: u32) {
+        assert_one_yocto();
+        self.assert_owner();
+        self.config.sandbox_duration_ns = (sandbox_duration_sec as u64 * 10u64.pow(9)).into();
+    }
+
+    /// Updates the sandbox threshold in basis points (e.g. 3000 = 30%).
+    /// Can only be called by the owner.
+    /// Requires 1 yocto NEAR.
+    #[payable]
+    pub fn set_sandbox_threshold_bps(&mut self, sandbox_threshold_bps: u16) {
+        assert_one_yocto();
+        self.assert_owner();
+        require!(
+            sandbox_threshold_bps <= 10_000,
+            "Sandbox threshold must be <= 10000 bps"
+        );
+        self.config.sandbox_threshold_bps = sandbox_threshold_bps;
+    }
 }
 
 impl Contract {

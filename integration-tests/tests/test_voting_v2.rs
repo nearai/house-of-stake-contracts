@@ -1,7 +1,7 @@
 mod setup;
 
 use crate::setup::voting_helpers::*;
-use crate::setup::{VenearTestWorkspaceBuilder, DEFAULT_BOND_AMOUNT};
+use crate::setup::{VenearTestWorkspaceBuilder, DEFAULT_BOND_AMOUNT, NS_IN_SECOND};
 use near_sdk::{Gas, NearToken};
 use near_workspaces::AccountId;
 use serde_json::json;
@@ -76,7 +76,7 @@ async fn test_voting_v2() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(proposal["total_votes"]["total_votes"].as_u64().unwrap(), 0);
     assert_eq!(
         serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
-        ProposalStatus::Voting
+        ProposalStatus::Sandbox
     );
     assert_eq!(
         proposal["reviewer_id"].as_str().unwrap(),
@@ -135,6 +135,7 @@ async fn test_voting_v2() -> Result<(), Box<dyn std::error::Error>> {
         .await?
         .json()?;
 
+    // Sandbox: Against and Abstain votes should be rejected
     let outcome = user_a
         .call(v.voting_id(), "vote")
         .args_json(json!({
@@ -148,8 +149,76 @@ async fn test_voting_v2() -> Result<(), Box<dyn std::error::Error>> {
         .transact()
         .await?;
     assert!(
+        outcome.is_failure(),
+        "Against vote should fail during Sandbox"
+    );
+
+    let outcome = user_a
+        .call(v.voting_id(), "vote")
+        .args_json(json!({
+            "proposal_id": proposal_id,
+            "vote": VoteOption::Abstain,
+            "merkle_proof": user_a_merkle_proof,
+            "v_account": user_a_v_account,
+        }))
+        .deposit(NearToken::from_millinear(15))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_failure(),
+        "Abstain vote should fail during Sandbox"
+    );
+
+    // Vote For during Sandbox — this graduates to Voting
+    let outcome = user_a
+        .call(v.voting_id(), "vote")
+        .args_json(json!({
+            "proposal_id": proposal_id,
+            "vote": VoteOption::For,
+            "merkle_proof": user_a_merkle_proof,
+            "v_account": user_a_v_account,
+        }))
+        .deposit(NearToken::from_millinear(15))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await?;
+    assert!(
         outcome.is_success(),
-        "user_a: Failed to vote: {:#?}",
+        "user_a: Failed to vote For: {:#?}",
+        outcome
+    );
+
+    // Should have graduated to Voting after this For vote
+    let proposal = v.get_proposal(proposal_id).await?;
+    assert_eq!(
+        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        ProposalStatus::Voting,
+        "Should graduate from Sandbox to Voting after meeting 30% threshold"
+    );
+    // For votes from Sandbox carry over
+    assert_eq!(
+        proposal["votes"][0]["total_votes"].as_u64().unwrap(),
+        1,
+        "For vote from Sandbox should carry over to Voting"
+    );
+
+    // Change vote to Against (now in Voting, change is allowed)
+    let outcome = user_a
+        .call(v.voting_id(), "vote")
+        .args_json(json!({
+            "proposal_id": proposal_id,
+            "vote": VoteOption::Against,
+            "merkle_proof": user_a_merkle_proof,
+            "v_account": user_a_v_account,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_success(),
+        "user_a: Failed to change vote: {:#?}",
         outcome
     );
 
@@ -1193,6 +1262,10 @@ async fn test_voting_v2_pause() -> Result<(), Box<dyn std::error::Error>> {
         .await?
         .json()?;
 
+    // Vote For to graduate from Sandbox to Voting
+    vote_for_option(&v, &user_a, proposal_id, VoteOption::For).await?;
+
+    // Change vote to Against (now in Voting)
     let outcome = user_a
         .call(v.voting_id(), "vote")
         .args_json(json!({
@@ -1201,7 +1274,7 @@ async fn test_voting_v2_pause() -> Result<(), Box<dyn std::error::Error>> {
             "merkle_proof": user_a_merkle_proof,
             "v_account": user_a_v_account,
         }))
-        .deposit(NearToken::from_millinear(15))
+        .deposit(NearToken::from_yoctonear(1))
         .gas(Gas::from_tgas(50))
         .transact()
         .await?;
@@ -1523,7 +1596,9 @@ async fn test_v2_quorum_with_abstain() -> Result<(), Box<dyn std::error::Error>>
     )
     .await?;
 
-    // user_a votes For (23% alone < 35% quorum), user_b votes Abstain
+    // user_b votes For to graduate from Sandbox (1000/1300 = 77% > 30%)
+    vote_for_option(&v, &user_b, proposal_id, VoteOption::For).await?;
+    // user_a votes For (23% alone < 35% quorum), user_b changes to Abstain
     vote_for_option(&v, &user_a, proposal_id, VoteOption::For).await?;
     vote_for_option(&v, &user_b, proposal_id, VoteOption::Abstain).await?;
 
@@ -1822,7 +1897,10 @@ async fn test_v2_mark_as_spam() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let proposal = v.get_proposal(proposal_id).await?;
-    assert_eq!(proposal["status"].as_str().unwrap(), "Spam");
+    assert_eq!(
+        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        ProposalStatus::Spam,
+    );
     assert_ne!(
         proposal["bond_amount"].as_str().unwrap(),
         "0",
@@ -1890,7 +1968,10 @@ async fn test_bond_zero_amount() -> Result<(), Box<dyn std::error::Error>> {
     let proposal_id = create_proposal(&v, &user, None).await?;
     let proposal = v.get_proposal(proposal_id).await?;
 
-    assert_eq!(proposal["status"].as_str().unwrap(), "Created");
+    assert_eq!(
+        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        ProposalStatus::Created,
+    );
     assert_eq!(
         proposal["bond_amount"].as_str().unwrap(),
         "0",
@@ -1900,7 +1981,10 @@ async fn test_bond_zero_amount() -> Result<(), Box<dyn std::error::Error>> {
     approve_proposal_v2(&v, &reviewer, proposal_id, MajorityType::Simple).await?;
     let proposal_after = v.get_proposal(proposal_id).await?;
 
-    assert_eq!(proposal_after["status"].as_str().unwrap(), "Voting");
+    assert_eq!(
+        serde_json::from_value::<ProposalStatus>(proposal_after["status"].clone())?,
+        ProposalStatus::Sandbox,
+    );
     assert_eq!(
         proposal_after["bond_amount"].as_str().unwrap(),
         "0",
@@ -1996,6 +2080,65 @@ async fn test_strong_majority() -> Result<(), Box<dyn std::error::Error>> {
         serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
         ProposalStatus::Succeeded,
         "801/1201 (66.69%) should barely pass strong majority"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_sandbox_expiry_defeated() -> Result<(), Box<dyn std::error::Error>> {
+    let v = VenearTestWorkspaceBuilder::default()
+        .with_voting_v2()
+        .build()
+        .await?;
+    let user_a = v.create_account_with_lockup().await?;
+    let user_b = v.create_account_with_lockup().await?;
+
+    // user_a: 200 NEAR, user_b: 1000 NEAR. Total = 1200. 30% = 360.
+    // user_a voting For (200) won't meet the 360 threshold.
+    v.transfer_and_lock(&user_a, NearToken::from_near(200))
+        .await?;
+    v.transfer_and_lock(&user_b, NearToken::from_near(1000))
+        .await?;
+
+    let proposal_id = create_proposal(&v, &user_a, None).await?;
+    approve_proposal_v2(
+        &v,
+        &v.voting.as_ref().unwrap().reviewer,
+        proposal_id,
+        MajorityType::Simple,
+    )
+    .await?;
+
+    let proposal = v.get_proposal(proposal_id).await?;
+    assert_eq!(
+        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        ProposalStatus::Sandbox,
+    );
+
+    // user_a votes For — 200/1200 = 16.7% < 30%, stays in Sandbox
+    vote_for_option(&v, &user_a, proposal_id, VoteOption::For).await?;
+
+    let proposal = v.get_proposal(proposal_id).await?;
+    assert_eq!(
+        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        ProposalStatus::Sandbox,
+        "Should still be in Sandbox (16.7% < 30%)"
+    );
+
+    // Fast forward past sandbox period end
+    let proposal = v.get_proposal(proposal_id).await?;
+    let approval_time: u64 = proposal["approval_time_ns"].as_str().unwrap().parse()?;
+    let sandbox_duration: u64 = proposal["sandbox_duration_ns"].as_str().unwrap().parse()?;
+    let sandbox_end = approval_time + sandbox_duration;
+    v.fast_forward(sandbox_end, sandbox_duration / NS_IN_SECOND, 20)
+        .await?;
+
+    let proposal = v.get_proposal(proposal_id).await?;
+    assert_eq!(
+        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        ProposalStatus::Defeated,
+        "Sandbox should expire to Defeated when threshold not met"
     );
 
     Ok(())

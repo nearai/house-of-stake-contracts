@@ -82,6 +82,7 @@ impl From<VProposal> for Proposal {
                 proposer_id: v1.proposer_id,
                 reviewer_id: v1.reviewer_id,
                 rejecter_id: None,
+                approval_time_ns: v1.voting_start_time_ns,
                 voting_start_time_ns: v1.voting_start_time_ns,
                 voting_duration_ns: v1.voting_duration_ns,
                 timelock_duration_ns: U64(0),
@@ -95,6 +96,8 @@ impl From<VProposal> for Proposal {
                 approval_threshold_bps: 0,
                 actions: None,
                 bond_amount: NearToken::from_yoctonear(0),
+                sandbox_duration_ns: U64(0),
+                sandbox_threshold_bps: 0,
             },
             VProposal::Current(current) => current,
         }
@@ -115,7 +118,9 @@ pub struct Proposal {
     pub reviewer_id: Option<AccountId>,
     /// The account ID of the council member who rejected (vetoed) the proposal.
     pub rejecter_id: Option<AccountId>,
-    /// The timestamp when the voting starts.
+    /// The timestamp when the proposal was approved by a reviewer (sandbox starts).
+    pub approval_time_ns: Option<U64>,
+    /// The timestamp when the voting starts (set when sandbox graduates to voting).
     pub voting_start_time_ns: Option<U64>,
     /// The voting duration in nanoseconds, generated from the config.
     pub voting_duration_ns: U64,
@@ -141,6 +146,10 @@ pub struct Proposal {
     pub actions: Option<Vec<ProposalAction>>,
     /// The bond amount deposited by the proposer.
     pub bond_amount: NearToken,
+    /// The duration of the sandbox pre-voting period in nanoseconds.
+    pub sandbox_duration_ns: U64,
+    /// The "For" votes threshold in basis points to graduate from Sandbox to Voting.
+    pub sandbox_threshold_bps: u16,
 }
 
 /// The proposal information structure that contains the proposal and its metadata.
@@ -179,6 +188,8 @@ pub enum ProposalStatus {
     Failed,
     /// The proposal was marked as spam by a reviewer.
     Spam,
+    /// Graduates to Voting when the sandbox threshold is met.
+    Sandbox,
 }
 
 /// The snapshot of the Merkle tree and the global state at the moment when the proposal was
@@ -225,6 +236,23 @@ impl Proposal {
         self.actions.as_ref().is_some_and(|a| !a.is_empty())
     }
 
+    /// Returns true if the "For" votes have reached the sandbox threshold.
+    pub fn sandbox_threshold_met(&self) -> bool {
+        let total_supply = self
+            .snapshot_and_state
+            .as_ref()
+            .unwrap()
+            .total_venear
+            .as_yoctonear();
+        let for_power = self
+            .votes
+            .first()
+            .map(|v| v.total_venear.as_yoctonear())
+            .unwrap_or(0);
+        let threshold = total_supply * (self.sandbox_threshold_bps as u128) / 10_000;
+        for_power >= threshold
+    }
+
     pub fn update(&mut self, timestamp: TimestampNs) {
         match self.status {
             ProposalStatus::Rejected
@@ -240,6 +268,12 @@ impl Proposal {
             ProposalStatus::Created => {
                 if self.expiration_ns.0 > 0 && timestamp.0 >= self.expiration_ns.0 {
                     self.status = ProposalStatus::Expired;
+                }
+            }
+            ProposalStatus::Sandbox => {
+                let sandbox_end = self.approval_time_ns.unwrap().0 + self.sandbox_duration_ns.0;
+                if timestamp.0 >= sandbox_end {
+                    self.status = ProposalStatus::Defeated;
                 }
             }
             ProposalStatus::Voting | ProposalStatus::Timelock => {
@@ -333,6 +367,7 @@ impl Contract {
             proposer_id,
             reviewer_id: None,
             rejecter_id: None,
+            approval_time_ns: None,
             voting_start_time_ns: None,
             voting_duration_ns: self.config.voting_duration_ns,
             timelock_duration_ns: self.config.timelock_duration_ns,
@@ -346,6 +381,8 @@ impl Contract {
             approval_threshold_bps: 0,
             actions,
             bond_amount: self.config.bond_amount,
+            sandbox_duration_ns: U64(0),
+            sandbox_threshold_bps: 0,
         };
         let storage_usage = env::storage_usage();
         self.proposals.push(proposal.into());

@@ -1,6 +1,6 @@
 use crate::proposal::{Proposal, ProposalStatus, SnapshotAndState, VoteOption};
 use crate::*;
-use common::{events, near_add, near_sub};
+use common::{events, near_add, near_sub, TimestampNs};
 use near_sdk::Promise;
 
 #[near]
@@ -25,6 +25,11 @@ impl Contract {
 
         match proposal.status {
             ProposalStatus::Voting => {}
+            ProposalStatus::Sandbox => {
+                if vote != VoteOption::For {
+                    env::panic_str("Only 'For' votes are allowed during the sandbox period");
+                }
+            }
             ProposalStatus::Created => {
                 env::panic_str("Voting is not started yet");
             }
@@ -118,6 +123,13 @@ impl Contract {
             vote_index,
             &account_balance,
         );
+
+        // Graduate from Sandbox to Voting if threshold is met
+        if proposal.status == ProposalStatus::Sandbox && proposal.sandbox_threshold_met() {
+            let timestamp: TimestampNs = env::block_timestamp().into();
+            proposal.voting_start_time_ns = Some(timestamp);
+            proposal.status = ProposalStatus::Voting;
+        }
 
         self.votes
             .insert((account_id.clone(), proposal_id), vote_index);

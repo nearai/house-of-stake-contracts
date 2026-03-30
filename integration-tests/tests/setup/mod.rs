@@ -17,6 +17,7 @@ pub const UNLOCK_DURATION_SECONDS: u64 = 60;
 pub const VOTING_DURATION_SECONDS: u64 = 60;
 pub const TIMELOCK_DURATION_SECONDS: u64 = 60;
 pub const PROPOSAL_EXPIRATION_SECONDS: u64 = 60;
+pub const SANDBOX_DURATION_SECONDS: u64 = 60;
 pub const DEFAULT_BOND_AMOUNT: NearToken = NearToken::from_near(10);
 
 pub const LOCKUP_WASM_FILEPATH: &str = "../res/local/lockup_contract.wasm";
@@ -70,6 +71,8 @@ pub struct VenearTestWorkspaceBuilder {
     pub approval_threshold_bps: u16,
     pub simple_majority_threshold_bps: u16,
     pub strong_majority_threshold_bps: u16,
+    pub sandbox_duration_ns: u64,
+    pub sandbox_threshold_bps: u16,
 }
 
 impl Default for VenearTestWorkspaceBuilder {
@@ -100,6 +103,8 @@ impl Default for VenearTestWorkspaceBuilder {
             approval_threshold_bps: 5000,
             simple_majority_threshold_bps: 5000,
             strong_majority_threshold_bps: 6667,
+            sandbox_duration_ns: SANDBOX_DURATION_SECONDS * NS_IN_SECOND,
+            sandbox_threshold_bps: 3000,
         }
     }
 }
@@ -318,6 +323,8 @@ impl VenearTestWorkspaceBuilder {
                         "quorum_floor": self.quorum_floor,
                         "simple_majority_threshold_bps": self.simple_majority_threshold_bps,
                         "strong_majority_threshold_bps": self.strong_majority_threshold_bps,
+                        "sandbox_duration_ns": self.sandbox_duration_ns.to_string(),
+                        "sandbox_threshold_bps": self.sandbox_threshold_bps,
                     },
                 })
             } else {
@@ -726,29 +733,45 @@ impl VenearTestWorkspace {
         use voting_contract_v2::proposal::ProposalStatus;
 
         let proposal = self.get_proposal(proposal_id).await?;
+        let current_status: ProposalStatus =
+            serde_json::from_value(proposal["status"].clone())?;
 
         let (target_ns, num_blocks) = match target {
             ProposalStatus::Timelock
             | ProposalStatus::Succeeded
             | ProposalStatus::Defeated
             | ProposalStatus::Executable => {
-                let voting_start: u64 = proposal["voting_start_time_ns"]
-                    .as_str()
-                    .unwrap()
-                    .parse()?;
-                let voting_duration: u64 =
-                    proposal["voting_duration_ns"].as_str().unwrap().parse()?;
-                let timelock_duration: u64 =
-                    proposal["timelock_duration_ns"].as_str().unwrap().parse()?;
-                let voting_end = voting_start + voting_duration;
-                match target {
-                    ProposalStatus::Timelock => (voting_end, voting_duration / NS_IN_SECOND),
-                    _ => {
-                        let timelock_end = voting_end + timelock_duration;
-                        (
-                            timelock_end,
-                            (voting_duration + timelock_duration) / NS_IN_SECOND,
-                        )
+                // If still in Sandbox, fast forward past sandbox expiry
+                if current_status == ProposalStatus::Sandbox {
+                    let approval_time: u64 = proposal["approval_time_ns"]
+                        .as_str()
+                        .unwrap()
+                        .parse()?;
+                    let sandbox_duration: u64 =
+                        proposal["sandbox_duration_ns"].as_str().unwrap().parse()?;
+                    let sandbox_end = approval_time + sandbox_duration;
+                    (sandbox_end, sandbox_duration / NS_IN_SECOND)
+                } else {
+                    let voting_start: u64 = proposal["voting_start_time_ns"]
+                        .as_str()
+                        .unwrap()
+                        .parse()?;
+                    let voting_duration: u64 =
+                        proposal["voting_duration_ns"].as_str().unwrap().parse()?;
+                    let timelock_duration: u64 =
+                        proposal["timelock_duration_ns"].as_str().unwrap().parse()?;
+                    let voting_end = voting_start + voting_duration;
+                    match target {
+                        ProposalStatus::Timelock => {
+                            (voting_end, voting_duration / NS_IN_SECOND)
+                        }
+                        _ => {
+                            let timelock_end = voting_end + timelock_duration;
+                            (
+                                timelock_end,
+                                (voting_duration + timelock_duration) / NS_IN_SECOND,
+                            )
+                        }
                     }
                 }
             }
