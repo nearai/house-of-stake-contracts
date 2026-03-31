@@ -1,13 +1,13 @@
 [workspace.package]
 version = "1.0.2"
 authors = ["Fastnear Inc <hello@fastnear.com>"]
-edition = "2021"
+edition = "2024"
 repository = "https://github.com/fastnear/house-of-stake-contracts"
 rust-version = "1.85.1"
 license = "MIT OR Apache-2.0"
 
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
     "lockup-contract",
     "venear-contract",

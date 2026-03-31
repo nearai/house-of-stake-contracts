@@ -14,5 +14,7 @@ sha2 = "0.10.8"
 [dev-dependencies]
 common = { path = "../common" }
 voting-contract = { path = "../voting-contract" }
-near-workspaces = { version = "0.18" }
+near-workspaces = { version = "0.22.1" }
 tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json"] }
+base64 = "0.22"
