@@ -52,14 +52,9 @@ impl Contract {
         let quorum_floor = NearToken::from_near(DEFAULT_QUORUM_FLOOR_NEAR);
 
         // Migrate proposals
-        let num = old.proposals.len();
-        let old_list: Vec<VProposal> = (0..num)
-            .map(|i| old.proposals.get(i).unwrap().clone())
-            .collect();
-
         let mut proposals = Vector::new(StorageKeys::Proposal);
-        for old_vp in old_list {
-            let mut p: Proposal = old_vp.into();
+        for old_vp in old.proposals.iter() {
+            let mut p: Proposal = old_vp.clone().into();
             p.quorum_threshold_bps = DEFAULT_QUORUM_THRESHOLD_BPS;
             p.quorum_floor = quorum_floor;
             p.approval_threshold_bps = DEFAULT_APPROVAL_THRESHOLD_BPS;
@@ -107,7 +102,7 @@ impl Contract {
 /// The contract will call `migrate_state` method on the new contract and then return the config,
 /// to verify that the migration was successful.
 #[cfg(target_arch = "wasm32")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn upgrade() {
     env::setup_panic_hook();
     let contract: Contract = env::state_read().unwrap();

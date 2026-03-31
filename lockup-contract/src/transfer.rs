@@ -5,7 +5,7 @@ use near_sdk::{env, require};
 
 #[cfg(target_arch = "wasm32")]
 #[warn(unused_variables)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn ft_on_transfer() {
     env::setup_panic_hook();
     let contract: LockupContract = env::state_read().unwrap();
