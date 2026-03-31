@@ -232,7 +232,7 @@ pub fn set_guardians(&mut self, guardians: Vec<AccountId>);
 pub fn is_paused(&self) -> bool;
 
 /// Pauses the contract.
-/// Can only be called by the guardian.
+/// Can only be called by the guardian or the owner.
 /// Requires 1 yocto NEAR.
 #[payable]
 pub fn pause(&mut self);
@@ -896,7 +896,7 @@ pub fn set_approval_threshold_bps(&mut self, approval_threshold_bps: u16);
 pub fn is_paused(&self) -> bool;
 
 /// Pauses the contract.
-/// Can only be called by the guardian.
+/// Can only be called by the guardian or the owner.
 /// Requires 1 yocto NEAR.
 #[payable]
 pub fn pause(&mut self);
