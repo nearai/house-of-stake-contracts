@@ -51,6 +51,12 @@ PROPOSAL_EXPIRATION_NS="${PROPOSAL_EXPIRATION_SEC}000000000"
 : ${BASE_PROPOSAL_FEE:="100000000000000000000000"}
 # 0.00125 NEAR (we probably need less)
 : ${VOTE_STORAGE_FEE:="1250000000000000000000"}
+# 35% quorum threshold
+: "${QUORUM_THRESHOLD_BPS:=3500}"
+# 1000 NEAR quorum floor
+: ${QUORUM_FLOOR:="1000000000000000000000000000"}
+# 50% approval threshold
+: "${APPROVAL_THRESHOLD_BPS:=5000}"
 
 # Shorter name, so we can fit more
 export ROOT_ACCOUNT_ID="$ROOT_ACCOUNT_ID"
@@ -119,7 +125,10 @@ near --quiet contract deploy $VOTING_ACCOUNT_ID use-file res/$CONTRACTS_SOURCE/v
     "guardians": ["'$GUARDIAN_ACCOUNT_ID'"],
     "council_ids": ["'$COUNCIL_ACCOUNT_ID'"],
     "timelock_duration_ns": "'$TIMELOCK_DURATION_NS'",
-    "proposal_expiration_ns": "'$PROPOSAL_EXPIRATION_NS'"
+    "proposal_expiration_ns": "'$PROPOSAL_EXPIRATION_NS'",
+    "quorum_threshold_bps": '$QUORUM_THRESHOLD_BPS',
+    "quorum_floor": "'$QUORUM_FLOOR'",
+    "approval_threshold_bps": '$APPROVAL_THRESHOLD_BPS'
   }
 }' prepaid-gas '10.0 Tgas' attached-deposit '0 NEAR' network-config $CHAIN_ID sign-with-keychain send
 
