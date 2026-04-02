@@ -11,7 +11,7 @@ pub struct Config {
     /// The account IDs that can approve proposals.
     pub reviewer_ids: Vec<AccountId>,
 
-    /// The account IDs of the council members who can veto proposals during the timelock period.
+    /// The account IDs of the council members who can veto proposals.
     pub council_ids: Vec<AccountId>,
 
     /// The account ID that can upgrade the current contract and modify the config.
@@ -19,9 +19,6 @@ pub struct Config {
 
     /// The maximum duration of the voting period in nanoseconds.
     pub voting_duration_ns: U64,
-
-    /// The duration of the timelock period in nanoseconds after voting ends.
-    pub timelock_duration_ns: U64,
 
     /// The bond amount required to create a proposal. Returned to the proposer upon reviewer
     /// approval, or forfeited if the proposal is marked as spam. Claimable for expired proposals.

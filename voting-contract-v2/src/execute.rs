@@ -7,7 +7,7 @@ const GAS_FOR_ON_EXECUTE_CALLBACK: Gas = Gas::from_tgas(10);
 
 #[near]
 impl Contract {
-    /// Executes the on-chain actions for a proposal that has passed timelock.
+    /// Executes the on-chain actions for a proposal that has passed voting.
     /// Can be called by anyone. The proposal must be in `Executable` status.
     pub fn execute_proposal(&mut self, proposal_id: ProposalId) -> Promise {
         self.assert_not_paused();

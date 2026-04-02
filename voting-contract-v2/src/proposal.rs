@@ -87,7 +87,6 @@ impl From<VProposal> for Proposal {
                 approval_time_ns: v1.voting_start_time_ns,
                 voting_start_time_ns: v1.voting_start_time_ns,
                 voting_duration_ns: v1.voting_duration_ns,
-                timelock_duration_ns: U64(0),
                 expiration_ns: U64(0),
                 snapshot_and_state: v1.snapshot_and_state,
                 votes: v1.votes,
@@ -126,8 +125,6 @@ pub struct Proposal {
     pub voting_start_time_ns: Option<U64>,
     /// The voting duration in nanoseconds, generated from the config.
     pub voting_duration_ns: U64,
-    /// The duration of the timelock period in nanoseconds, stored per-proposal from config.
-    pub timelock_duration_ns: U64,
     /// The deadline in nanoseconds by which the proposal must be approved. 0 means no expiration.
     pub expiration_ns: U64,
     /// The snapshot of the contract state and global state. Fetched when the proposal is approved.
@@ -170,14 +167,12 @@ pub struct ProposalInfo {
 pub enum ProposalStatus {
     /// The proposal was created and is waiting for the approver to approve it.
     Created,
-    /// The proposal was rejected by the council during the timelock period.
+    /// The proposal was rejected (vetoed) by the council during the voting or scheduled period.
     Rejected,
     /// The proposal is in the voting phase.
     Voting,
     /// The proposal voting has finished, quorum was met and approval threshold was met.
     Succeeded,
-    /// The voting has ended and the proposal is in the timelock period awaiting potential council veto.
-    Timelock,
     /// The proposal expired before being approved by a reviewer.
     Expired,
     /// The proposal voting has finished, but quorum was not met or approval threshold was not met.
@@ -292,32 +287,22 @@ impl Proposal {
                     self.status = ProposalStatus::Defeated;
                 }
             }
-            ProposalStatus::Scheduled => {
-                if timestamp.0 >= self.voting_start_time_ns.unwrap().0 {
+            ProposalStatus::Scheduled | ProposalStatus::Voting => {
+                let voting_start = self.voting_start_time_ns.unwrap().0;
+                let voting_end = voting_start + self.voting_duration_ns.0;
+                if timestamp.0 >= voting_end {
+                    let final_status = self.compute_final_status();
+                    self.status = if final_status != ProposalStatus::Succeeded {
+                        final_status
+                    } else if self.has_actions() {
+                        ProposalStatus::Executable
+                    } else {
+                        ProposalStatus::Succeeded
+                    };
+                } else if timestamp.0 >= voting_start {
                     self.status = ProposalStatus::Voting;
-                    self.update_voting(timestamp);
                 }
             }
-            ProposalStatus::Voting | ProposalStatus::Timelock => {
-                self.update_voting(timestamp);
-            }
-        }
-    }
-
-    fn update_voting(&mut self, timestamp: TimestampNs) {
-        let voting_end = self.voting_start_time_ns.unwrap().0 + self.voting_duration_ns.0;
-        let timelock_end = voting_end + self.timelock_duration_ns.0;
-        if timestamp.0 >= voting_end {
-            let final_status = self.compute_final_status();
-            self.status = if final_status != ProposalStatus::Succeeded {
-                final_status
-            } else if timestamp.0 < timelock_end {
-                ProposalStatus::Timelock
-            } else if self.has_actions() {
-                ProposalStatus::Executable
-            } else {
-                ProposalStatus::Succeeded
-            };
         }
     }
 
@@ -396,7 +381,6 @@ impl Contract {
             approval_time_ns: None,
             voting_start_time_ns: None,
             voting_duration_ns: self.config.voting_duration_ns,
-            timelock_duration_ns: self.config.timelock_duration_ns,
             expiration_ns,
             snapshot_and_state: None,
             votes: vec![VoteStats::default(); 3],

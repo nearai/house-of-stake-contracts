@@ -41,7 +41,6 @@ impl Contract {
             }
             ProposalStatus::Succeeded
             | ProposalStatus::Defeated
-            | ProposalStatus::Timelock
             | ProposalStatus::Executable
             | ProposalStatus::InProgress
             | ProposalStatus::Failed => {

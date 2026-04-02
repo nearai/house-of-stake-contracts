@@ -78,7 +78,7 @@ impl Contract {
         self.config.guardians = guardians;
     }
 
-    /// Updates the list of council member account IDs who can veto proposals during timelock.
+    /// Updates the list of council member account IDs who can veto proposals.
     /// Can only be called by the owner.
     /// Requires 1 yocto NEAR.
     #[payable]
@@ -86,16 +86,6 @@ impl Contract {
         assert_one_yocto();
         self.assert_owner();
         self.config.council_ids = council_ids;
-    }
-
-    /// Updates the timelock duration in seconds.
-    /// Can only be called by the owner.
-    /// Requires 1 yocto NEAR.
-    #[payable]
-    pub fn set_timelock_duration(&mut self, timelock_duration_sec: u32) {
-        assert_one_yocto();
-        self.assert_owner();
-        self.config.timelock_duration_ns = (timelock_duration_sec as u64 * 10u64.pow(9)).into();
     }
 
     /// Updates the proposal expiration duration in seconds.

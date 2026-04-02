@@ -47,7 +47,7 @@ impl Contract {
             )
     }
 
-    /// Rejects (vetoes) the proposal during the timelock period.
+    /// Rejects (vetoes) the proposal during the voting or scheduled period.
     /// Requires 1 yocto attached to the call.
     /// Can only be called by the council members.
     #[payable]
@@ -57,8 +57,9 @@ impl Contract {
         self.assert_called_by_council();
         let mut proposal = self.internal_expect_proposal_updated(proposal_id);
 
-        if proposal.status != ProposalStatus::Timelock {
-            env::panic_str("Proposal can only be rejected during the timelock period");
+        match proposal.status {
+            ProposalStatus::Voting | ProposalStatus::Scheduled => {}
+            _ => env::panic_str("Proposal can only be rejected during the voting or scheduled period"),
         }
 
         proposal.rejecter_id = Some(env::predecessor_account_id());

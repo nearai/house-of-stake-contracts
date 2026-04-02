@@ -314,7 +314,6 @@ impl VenearTestWorkspaceBuilder {
                         "council_ids": &[council.id()],
                         "owner_account_id": owner.id(),
                         "voting_duration_ns": self.voting_duration_ns.to_string(),
-                        "timelock_duration_ns": self.timelock_duration_ns.to_string(),
                         "bond_amount": self.bond_amount,
                         "vote_storage_fee": self.vote_storage_fee,
                         "guardians": &[guardian.id()],
@@ -746,8 +745,7 @@ impl VenearTestWorkspace {
                     .unwrap()
                     .parse()?
             }
-            ProposalStatus::Timelock
-            | ProposalStatus::Succeeded
+            ProposalStatus::Succeeded
             | ProposalStatus::Defeated
             | ProposalStatus::Executable => {
                 if current_status == ProposalStatus::Sandbox {
@@ -765,15 +763,7 @@ impl VenearTestWorkspace {
                         .parse()?;
                     let voting_duration: u64 =
                         proposal["voting_duration_ns"].as_str().unwrap().parse()?;
-                    let voting_end = voting_start + voting_duration;
-                    match target {
-                        ProposalStatus::Timelock | ProposalStatus::Defeated => voting_end,
-                        _ => {
-                            let timelock_duration: u64 =
-                                proposal["timelock_duration_ns"].as_str().unwrap().parse()?;
-                            voting_end + timelock_duration
-                        }
-                    }
+                    voting_start + voting_duration
                 }
             }
             ProposalStatus::Expired => {
