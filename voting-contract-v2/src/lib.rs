@@ -41,6 +41,9 @@ pub struct Contract {
     /// The paused contract will not accept new proposals, new votes or updated votes, proposals
     /// cannot be approved or rejected.
     paused: bool,
+    /// Tracks when the last scheduled voting period ends (nanoseconds).
+    /// Used to ensure only one voting is active at a time and votings start on Mondays.
+    last_voting_end_ns: u64,
 }
 
 #[near]
@@ -55,6 +58,7 @@ impl Contract {
             votes: LookupMap::new(StorageKeys::Votes),
             approved_proposals: Vector::new(StorageKeys::ApprovedProposals),
             paused: false,
+            last_voting_end_ns: 0,
         }
     }
 }

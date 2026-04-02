@@ -1,6 +1,6 @@
-use crate::proposal::{Proposal, ProposalStatus, SnapshotAndState, VoteOption};
+use crate::proposal::{next_voting_start_ns, Proposal, ProposalStatus, SnapshotAndState, VoteOption};
 use crate::*;
-use common::{events, near_add, near_sub, TimestampNs};
+use common::{events, near_add, near_sub};
 use near_sdk::Promise;
 
 #[near]
@@ -30,7 +30,7 @@ impl Contract {
                     env::panic_str("Only 'For' votes are allowed during the sandbox period");
                 }
             }
-            ProposalStatus::Created => {
+            ProposalStatus::Created | ProposalStatus::Scheduled => {
                 env::panic_str("Voting is not started yet");
             }
             ProposalStatus::Rejected => {
@@ -124,11 +124,14 @@ impl Contract {
             &account_balance,
         );
 
-        // Graduate from Sandbox to Voting if threshold is met
+        // Schedule voting for the next Monday if sandbox threshold is met
         if proposal.status == ProposalStatus::Sandbox && proposal.sandbox_threshold_met() {
-            let timestamp: TimestampNs = env::block_timestamp().into();
-            proposal.voting_start_time_ns = Some(timestamp);
-            proposal.status = ProposalStatus::Voting;
+            let now_ns = env::block_timestamp();
+            let after_ns = std::cmp::max(now_ns, self.last_voting_end_ns);
+            let scheduled_start = next_voting_start_ns(after_ns);
+            proposal.voting_start_time_ns = Some(scheduled_start.into());
+            proposal.status = ProposalStatus::Scheduled;
+            self.last_voting_end_ns = scheduled_start + proposal.voting_duration_ns.0;
         }
 
         self.votes

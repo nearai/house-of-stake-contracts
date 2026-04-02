@@ -736,12 +736,20 @@ impl VenearTestWorkspace {
         let current_status: ProposalStatus =
             serde_json::from_value(proposal["status"].clone())?;
 
-        let (target_ns, num_blocks) = match target {
+        let block = self.sandbox.view_block().await?;
+        let now = block.timestamp();
+
+        let target_ns: u64 = match target {
+            ProposalStatus::Voting => {
+                proposal["voting_start_time_ns"]
+                    .as_str()
+                    .unwrap()
+                    .parse()?
+            }
             ProposalStatus::Timelock
             | ProposalStatus::Succeeded
             | ProposalStatus::Defeated
             | ProposalStatus::Executable => {
-                // If still in Sandbox, fast forward past sandbox expiry
                 if current_status == ProposalStatus::Sandbox {
                     let approval_time: u64 = proposal["approval_time_ns"]
                         .as_str()
@@ -749,8 +757,7 @@ impl VenearTestWorkspace {
                         .parse()?;
                     let sandbox_duration: u64 =
                         proposal["sandbox_duration_ns"].as_str().unwrap().parse()?;
-                    let sandbox_end = approval_time + sandbox_duration;
-                    (sandbox_end, sandbox_duration / NS_IN_SECOND)
+                    approval_time + sandbox_duration
                 } else {
                     let voting_start: u64 = proposal["voting_start_time_ns"]
                         .as_str()
@@ -758,31 +765,24 @@ impl VenearTestWorkspace {
                         .parse()?;
                     let voting_duration: u64 =
                         proposal["voting_duration_ns"].as_str().unwrap().parse()?;
-                    let timelock_duration: u64 =
-                        proposal["timelock_duration_ns"].as_str().unwrap().parse()?;
                     let voting_end = voting_start + voting_duration;
                     match target {
-                        ProposalStatus::Timelock => {
-                            (voting_end, voting_duration / NS_IN_SECOND)
-                        }
+                        ProposalStatus::Timelock | ProposalStatus::Defeated => voting_end,
                         _ => {
-                            let timelock_end = voting_end + timelock_duration;
-                            (
-                                timelock_end,
-                                (voting_duration + timelock_duration) / NS_IN_SECOND,
-                            )
+                            let timelock_duration: u64 =
+                                proposal["timelock_duration_ns"].as_str().unwrap().parse()?;
+                            voting_end + timelock_duration
                         }
                     }
                 }
             }
             ProposalStatus::Expired => {
-                let expiration: u64 = proposal["expiration_ns"].as_str().unwrap().parse()?;
-                let creation: u64 = proposal["creation_time_ns"].as_str().unwrap().parse()?;
-                let expiration_secs = (expiration - creation) / NS_IN_SECOND;
-                (expiration, expiration_secs)
+                proposal["expiration_ns"].as_str().unwrap().parse()?
             }
             _ => panic!("Unsupported target status: {target:?}"),
         };
+
+        let num_blocks = target_ns.saturating_sub(now) / NS_IN_SECOND;
 
         self.fast_forward(target_ns, num_blocks, 20).await
     }

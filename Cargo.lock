@@ -3385,6 +3385,7 @@ dependencies = [
 name = "voting-contract-v2"
 version = "1.0.2"
 dependencies = [
+ "chrono",
  "common",
  "merkle-tree",
  "near-sdk",

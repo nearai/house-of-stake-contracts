@@ -6,6 +6,8 @@ use near_sdk::{Gas, Promise};
 
 pub type ProposalId = u32;
 
+const NS_PER_DAY: u64 = 86_400_000_000_000;
+
 /// A single action that the voting contract can execute on behalf of a passed proposal.
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
@@ -190,6 +192,8 @@ pub enum ProposalStatus {
     Spam,
     /// Graduates to Voting when the sandbox threshold is met.
     Sandbox,
+    /// The proposal met the sandbox threshold and is scheduled to start voting.
+    Scheduled,
 }
 
 /// The snapshot of the Merkle tree and the global state at the moment when the proposal was
@@ -228,6 +232,18 @@ impl VoteStats {
     pub fn remove_vote(&mut self, venear: NearToken) {
         self.total_votes -= 1;
         self.total_venear = near_sub(self.total_venear, venear);
+    }
+}
+
+/// Returns the next voting start time. In sandbox mode, starts after 120 seconds. Otherwise, starts on the next Monday.
+pub fn next_voting_start_ns(after_ns: u64) -> u64 {
+    if cfg!(feature = "sandbox") {
+        after_ns + 120 * 1_000_000_000
+    } else {
+        let days_since_epoch = after_ns / NS_PER_DAY;
+        let day_of_week = days_since_epoch % 7;
+        let days_until_monday = (10 - day_of_week) % 7 + 1;
+        (days_since_epoch + days_until_monday) * NS_PER_DAY
     }
 }
 
@@ -276,22 +292,32 @@ impl Proposal {
                     self.status = ProposalStatus::Defeated;
                 }
             }
-            ProposalStatus::Voting | ProposalStatus::Timelock => {
-                let voting_end = self.voting_start_time_ns.unwrap().0 + self.voting_duration_ns.0;
-                let timelock_end = voting_end + self.timelock_duration_ns.0;
-                if timestamp.0 >= voting_end {
-                    let final_status = self.compute_final_status();
-                    self.status = if final_status != ProposalStatus::Succeeded {
-                        final_status
-                    } else if timestamp.0 < timelock_end {
-                        ProposalStatus::Timelock
-                    } else if self.has_actions() {
-                        ProposalStatus::Executable
-                    } else {
-                        ProposalStatus::Succeeded
-                    };
+            ProposalStatus::Scheduled => {
+                if timestamp.0 >= self.voting_start_time_ns.unwrap().0 {
+                    self.status = ProposalStatus::Voting;
+                    self.update_voting(timestamp);
                 }
             }
+            ProposalStatus::Voting | ProposalStatus::Timelock => {
+                self.update_voting(timestamp);
+            }
+        }
+    }
+
+    fn update_voting(&mut self, timestamp: TimestampNs) {
+        let voting_end = self.voting_start_time_ns.unwrap().0 + self.voting_duration_ns.0;
+        let timelock_end = voting_end + self.timelock_duration_ns.0;
+        if timestamp.0 >= voting_end {
+            let final_status = self.compute_final_status();
+            self.status = if final_status != ProposalStatus::Succeeded {
+                final_status
+            } else if timestamp.0 < timelock_end {
+                ProposalStatus::Timelock
+            } else if self.has_actions() {
+                ProposalStatus::Executable
+            } else {
+                ProposalStatus::Succeeded
+            };
         }
     }
 
@@ -477,5 +503,60 @@ impl Contract {
     pub fn internal_expect_proposal_updated(&self, proposal_id: ProposalId) -> Proposal {
         self.internal_get_proposal(proposal_id)
             .expect(format!("Proposal {} is not found", proposal_id).as_str())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+
+    fn date_ns(year: i32, month: u32, day: u32) -> u64 {
+        NaiveDate::from_ymd_opt(year, month, day)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp_nanos_opt()
+            .unwrap() as u64
+    }
+
+    #[test]
+    fn test_next_monday_from_each_weekday() {
+        // 2026-04-06 is Monday, next Monday is 2026-04-13
+        let expected = date_ns(2026, 4, 13);
+
+        assert_eq!(next_voting_start_ns(date_ns(2026, 4, 6)), expected); // Monday
+        assert_eq!(next_voting_start_ns(date_ns(2026, 4, 7)), expected); // Tuesday
+        assert_eq!(next_voting_start_ns(date_ns(2026, 4, 8)), expected); // Wednesday
+        assert_eq!(next_voting_start_ns(date_ns(2026, 4, 9)), expected); // Thursday
+        assert_eq!(next_voting_start_ns(date_ns(2026, 4, 10)), expected); // Friday
+        assert_eq!(next_voting_start_ns(date_ns(2026, 4, 11)), expected); // Saturday
+        assert_eq!(next_voting_start_ns(date_ns(2026, 4, 12)), expected); // Sunday
+    }
+
+    #[test]
+    fn test_next_monday_from_time_within_day() {
+        let expected = date_ns(2026, 4, 13);
+        // Monday 12:00:00
+        assert_eq!(
+            next_voting_start_ns(date_ns(2026, 4, 6) + 12 * 3600 * 1_000_000_000),
+            expected
+        );
+        // Monday 23:59:59
+        assert_eq!(
+            next_voting_start_ns(date_ns(2026, 4, 7) - 1_000_000_000),
+            expected
+        );
+        // Sunday 12:00:00
+        assert_eq!(
+            next_voting_start_ns(date_ns(2026, 4, 12) + 12 * 3600 * 1_000_000_000),
+            expected
+        );
+        // Sunday 23:59:59
+        assert_eq!(
+            next_voting_start_ns(date_ns(2026, 4, 13) - 1_000_000_000),
+            expected
+        );
     }
 }
