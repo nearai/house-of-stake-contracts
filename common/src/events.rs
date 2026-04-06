@@ -62,6 +62,19 @@ pub mod emit {
 
     #[derive(Serialize)]
     #[serde(crate = "near_sdk::serde")]
+    pub(crate) struct SpamProposalData<'a> {
+        pub(crate) account_id: &'a AccountId,
+        pub(crate) proposal_id: u32,
+    }
+
+    #[derive(Serialize)]
+    #[serde(crate = "near_sdk::serde")]
+    pub(crate) struct ProposalStatusTransitionData {
+        pub(crate) proposal_id: u32,
+    }
+
+    #[derive(Serialize)]
+    #[serde(crate = "near_sdk::serde")]
     pub(crate) struct FtMintLog<'a> {
         pub(crate) owner_id: &'a AccountId,
         pub(crate) amount: NearToken,
@@ -182,6 +195,33 @@ pub mod emit {
                 account_id,
                 proposal_id,
             },
+        );
+    }
+
+    pub fn spam_proposal_action(account_id: &AccountId, proposal_id: u32) {
+        log_event(
+            "venear",
+            "proposal_spam",
+            SpamProposalData {
+                account_id,
+                proposal_id,
+            },
+        );
+    }
+
+    pub fn proposal_sandbox_action(proposal_id: u32) {
+        log_event(
+            "venear",
+            "proposal_sandbox",
+            ProposalStatusTransitionData { proposal_id },
+        );
+    }
+
+    pub fn proposal_scheduled_action(proposal_id: u32) {
+        log_event(
+            "venear",
+            "proposal_scheduled",
+            ProposalStatusTransitionData { proposal_id },
         );
     }
 

@@ -85,6 +85,9 @@ impl Contract {
         }
 
         proposal.status = ProposalStatus::Spam;
+
+        events::emit::spam_proposal_action(&env::predecessor_account_id(), proposal_id);
+
         self.internal_set_proposal(proposal);
     }
 
@@ -127,6 +130,8 @@ impl Contract {
         proposal.sandbox_threshold_bps = self.config.sandbox_threshold_bps;
         proposal.status = ProposalStatus::Sandbox;
         self.approved_proposals.push(proposal_id);
+
+        events::emit::proposal_sandbox_action(proposal_id);
 
         self.internal_set_proposal(proposal.clone());
 

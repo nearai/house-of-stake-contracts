@@ -131,6 +131,8 @@ impl Contract {
             proposal.voting_start_time_ns = Some(scheduled_start.into());
             proposal.status = ProposalStatus::Scheduled;
             self.last_voting_end_ns = scheduled_start + proposal.voting_duration_ns.0;
+
+            events::emit::proposal_scheduled_action(proposal_id);
         }
 
         self.votes

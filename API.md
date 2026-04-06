@@ -994,3 +994,442 @@ pub fn vote(
 /// Returns the vote of the given account ID and proposal ID.
 pub fn get_vote(&self, account_id: AccountId, proposal_id: ProposalId) -> Option<u8>;
 ```
+
+## Voting v2
+
+### Structures
+
+```rust
+/// The configuration of the voting contract.
+pub struct Config {
+    /// The account ID of the veNEAR contract.
+    pub venear_account_id: AccountId,
+
+    /// The account IDs that can approve proposals.
+    pub reviewer_ids: Vec<AccountId>,
+
+    /// The account IDs of the council members who can veto proposals.
+    pub council_ids: Vec<AccountId>,
+
+    /// The account ID that can upgrade the current contract and modify the config.
+    pub owner_account_id: AccountId,
+
+    /// The maximum duration of the voting period in nanoseconds.
+    pub voting_duration_ns: U64,
+
+    /// The bond amount required to create a proposal. Returned to the proposer upon reviewer
+    /// approval, or forfeited if the proposal is marked as spam. Claimable for expired proposals.
+    pub bond_amount: NearToken,
+
+    /// Storage fee required to store a vote for an active proposal.
+    pub vote_storage_fee: NearToken,
+
+    /// The list of account IDs that can pause the contract.
+    pub guardians: Vec<AccountId>,
+
+    /// The maximum time in nanoseconds a proposal can stay in Created status before expiring.
+    /// 0 means no expiration.
+    pub proposal_expiration_ns: U64,
+
+    /// Proposed new owner account ID. The account has to accept ownership.
+    pub proposed_new_owner_account_id: Option<AccountId>,
+
+    /// Quorum threshold in basis points (e.g. 3500 = 35% of total veNEAR supply).
+    pub quorum_threshold_bps: u16,
+
+    /// Absolute minimum veNEAR required for quorum, regardless of BPS calculation.
+    pub quorum_floor: NearToken,
+
+    /// Simple majority threshold in basis points (e.g. 5000 = 50%).
+    /// Applied as: for_votes / (for_votes + against_votes) >= threshold / 10000.
+    pub simple_majority_threshold_bps: u16,
+
+    /// Strong (super) majority threshold in basis points (e.g. 6667 ≈ 66.67%).
+    /// Applied as: for_votes / (for_votes + against_votes) >= threshold / 10000.
+    pub strong_majority_threshold_bps: u16,
+
+    /// The duration of the sandbox pre-voting period in nanoseconds.
+    pub sandbox_duration_ns: U64,
+
+    /// The "For" votes threshold in basis points to graduate from Sandbox to Voting.
+    /// E.g. 3000 = 30% of total veNEAR supply.
+    pub sandbox_threshold_bps: u16,
+}
+
+/// Metadata for a proposal.
+pub struct ProposalMetadata {
+    /// The title of the proposal.
+    pub title: Option<String>,
+
+    /// The description of the proposal.
+    pub description: Option<String>,
+
+    /// The link to the proposal.
+    pub link: Option<String>,
+}
+
+/// A single action that the voting contract can execute on behalf of a passed proposal.
+pub enum ProposalAction {
+    /// Execute a function call on a target contract.
+    FunctionCall {
+        receiver_id: AccountId,
+        method_name: String,
+        args: Base64VecU8,
+        deposit: NearToken,
+        gas: Gas,
+    },
+    /// Transfer NEAR to a target account.
+    Transfer {
+        receiver_id: AccountId,
+        amount: NearToken,
+    },
+}
+
+/// The fixed voting options for proposals.
+pub enum VoteOption {
+    For,
+    Against,
+    Abstain,
+}
+
+/// The majority type required for a proposal to pass.
+/// Specified by the reviewer at approval time.
+pub enum MajorityType {
+    /// Simple majority (e.g. >50%).
+    Simple,
+    /// Strong majority (e.g. >66.67%).
+    Strong,
+}
+
+/// The proposal structure that contains all the information about a proposal.
+pub struct Proposal {
+    /// The unique identifier of the proposal, generated automatically.
+    pub id: ProposalId,
+    /// The timestamp in nanoseconds when the proposal was created, generated automatically.
+    pub creation_time_ns: U64,
+    /// The account ID of the proposer.
+    pub proposer_id: AccountId,
+    /// The account ID of the reviewer, who approved the proposal.
+    pub reviewer_id: Option<AccountId>,
+    /// The account ID of the council member who rejected (vetoed) the proposal.
+    pub rejecter_id: Option<AccountId>,
+    /// The timestamp when the proposal was approved by a reviewer (sandbox starts).
+    pub approval_time_ns: Option<U64>,
+    /// The timestamp when the voting starts (set when sandbox graduates to voting).
+    pub voting_start_time_ns: Option<U64>,
+    /// The voting duration in nanoseconds, generated from the config.
+    pub voting_duration_ns: U64,
+    /// The deadline in nanoseconds by which the proposal must be approved. 0 means no expiration.
+    pub expiration_ns: U64,
+    /// The snapshot of the contract state and global state. Fetched when the proposal is approved.
+    pub snapshot_and_state: Option<SnapshotAndState>,
+    /// Aggregated votes per voting option.
+    pub votes: Vec<VoteStats>,
+    /// The total aggregated voting information across all voting options.
+    pub total_votes: VoteStats,
+    /// The status of the proposal.
+    pub status: ProposalStatus,
+    /// Quorum threshold in basis points.
+    pub quorum_threshold_bps: u16,
+    /// Absolute minimum veNEAR required for quorum.
+    pub quorum_floor: NearToken,
+    /// Approval threshold in basis points. Set at approval time based on the majority type.
+    pub approval_threshold_bps: u16,
+    /// Optional list of on-chain actions to execute when the proposal succeeds.
+    pub actions: Option<Vec<ProposalAction>>,
+    /// The bond amount deposited by the proposer.
+    pub bond_amount: NearToken,
+    /// The duration of the sandbox pre-voting period in nanoseconds.
+    pub sandbox_duration_ns: U64,
+    /// The "For" votes threshold in basis points to graduate from Sandbox to Voting.
+    pub sandbox_threshold_bps: u16,
+}
+
+/// The proposal information structure that contains the proposal and its metadata.
+pub struct ProposalInfo {
+    #[serde(flatten)]
+    pub proposal: Proposal,
+    #[serde(flatten)]
+    pub metadata: ProposalMetadata,
+}
+
+/// The status of the proposal.
+pub enum ProposalStatus {
+    /// The proposal was created and is waiting for the approver to approve it.
+    Created,
+    /// The proposal was rejected (vetoed) by the council during the voting or scheduled period.
+    Rejected,
+    /// The proposal is in the voting phase.
+    Voting,
+    /// The proposal voting has finished, quorum was met and approval threshold was met.
+    Succeeded,
+    /// The proposal expired before being approved by a reviewer.
+    Expired,
+    /// The proposal voting has finished, but quorum was not met or approval threshold was not met.
+    Defeated,
+    /// The proposal passed and has actions ready for on-chain execution.
+    Executable,
+    /// The proposal actions are being executed (dispatched, awaiting callback).
+    InProgress,
+    /// The proposal's on-chain execution failed.
+    Failed,
+    /// The proposal was marked as spam by a reviewer.
+    Spam,
+    /// The proposal is in the sandbox pre-voting period. Only "For" votes are allowed.
+    /// Graduates to Scheduled when the sandbox threshold is met.
+    Sandbox,
+    /// The proposal met the sandbox threshold and is scheduled to start voting on the next Monday.
+    Scheduled,
+}
+
+/// The snapshot of the Merkle tree and the global state at the moment when the proposal was
+/// approved.
+pub struct SnapshotAndState {
+    /// The snapshot of the Merkle tree at the moment when the proposal was approved.
+    pub snapshot: MerkleTreeSnapshot,
+    /// The timestamp in nanoseconds when the global state was last updated.
+    pub timestamp_ns: TimestampNs,
+    /// The total amount of veNEAR tokens at the moment when the proposal was approved.
+    pub total_venear: NearToken,
+    /// The growth configuration of the veNEAR tokens from the global state.
+    pub venear_growth_config: VenearGrowthConfig,
+}
+
+/// The vote statistics structure that contains the total amount of veNEAR tokens and the total
+/// number of votes.
+pub struct VoteStats {
+    /// The total venear balance at the updated timestamp.
+    pub total_venear: NearToken,
+
+    /// The total number of votes.
+    pub total_votes: u32,
+}
+```
+
+### Methods
+
+```rust
+/// Initializes the contract with the given configuration.
+#[init]
+pub fn new(config: Config) -> Self;
+
+/// Returns the current contract configuration.
+pub fn get_config(&self) -> &Config;
+
+/// Updates the account ID of the veNEAR contract.
+/// Can only be called by the owner.
+/// Requires 1 yocto NEAR.
+#[payable]
+pub fn set_venear_account_id(&mut self, venear_account_id: AccountId);
+
+/// Updates the list of account IDs that can review proposals.
+/// Can only be called by the owner.
+/// Requires 1 yocto NEAR.
+#[payable]
+pub fn set_reviewer_ids(&mut self, reviewer_ids: Vec<AccountId>);
+
+/// Updates the maximum duration of the voting period in seconds.
+/// Can only be called by the owner.
+/// Requires 1 yocto NEAR.
+#[payable]
+pub fn set_voting_duration(&mut self, voting_duration_sec: u32);
+
+/// Updates the bond amount required to create a proposal.
+/// Can only be called by the owner.
+/// Requires 1 yocto NEAR.
+#[payable]
+pub fn set_bond_amount(&mut self, bond_amount: NearToken);
+
+/// Proposes the new owner account ID.
+/// Can only be called by the owner.
+/// Requires 1 yocto NEAR.
+#[payable]
+pub fn propose_new_owner_account_id(&mut self, new_owner_account_id: Option<AccountId>);
+
+/// Accepts the new owner account ID.
+/// Can only be called by the new owner.
+/// Requires 1 yocto NEAR.
+#[payable]
+pub fn accept_ownership(&mut self);
+
+/// Sets the list of account IDs that can pause the contract.
+/// Can only be called by the owner.
+/// Requires 1 yocto NEAR.
+#[payable]
+pub fn set_guardians(&mut self, guardians: Vec<AccountId>);
+
+/// Updates the list of council member account IDs who can veto proposals.
+/// Can only be called by the owner.
+/// Requires 1 yocto NEAR.
+#[payable]
+pub fn set_council_ids(&mut self, council_ids: Vec<AccountId>);
+
+/// Updates the proposal expiration duration in seconds. Set to 0 to disable.
+/// Can only be called by the owner.
+/// Requires 1 yocto NEAR.
+#[payable]
+pub fn set_proposal_expiration(&mut self, proposal_expiration_sec: u32);
+
+/// Updates the quorum threshold in basis points (e.g. 3500 = 35%).
+/// Can only be called by the owner.
+/// Requires 1 yocto NEAR.
+#[payable]
+pub fn set_quorum_threshold_bps(&mut self, quorum_threshold_bps: u16);
+
+/// Updates the quorum floor (absolute minimum veNEAR required for quorum).
+/// Can only be called by the owner.
+/// Requires 1 yocto NEAR.
+#[payable]
+pub fn set_quorum_floor(&mut self, quorum_floor: NearToken);
+
+/// Updates the simple majority threshold in basis points (e.g. 5000 = 50%).
+/// Can only be called by the owner.
+/// Requires 1 yocto NEAR.
+#[payable]
+pub fn set_simple_majority_threshold_bps(&mut self, simple_majority_threshold_bps: u16);
+
+/// Updates the strong (super) majority threshold in basis points (e.g. 6667 ≈ 66.67%).
+/// Can only be called by the owner.
+/// Requires 1 yocto NEAR.
+#[payable]
+pub fn set_strong_majority_threshold_bps(&mut self, strong_majority_threshold_bps: u16);
+
+/// Updates the sandbox duration in seconds.
+/// Can only be called by the owner.
+/// Requires 1 yocto NEAR.
+#[payable]
+pub fn set_sandbox_duration(&mut self, sandbox_duration_sec: u32);
+
+/// Updates the sandbox threshold in basis points (e.g. 3000 = 30%).
+/// Can only be called by the owner.
+/// Requires 1 yocto NEAR.
+#[payable]
+pub fn set_sandbox_threshold_bps(&mut self, sandbox_threshold_bps: u16);
+
+/// Checks if the contract is paused.
+pub fn is_paused(&self) -> bool;
+
+/// Pauses the contract.
+/// Can only be called by the guardian.
+/// Requires 1 yocto NEAR.
+#[payable]
+pub fn pause(&mut self);
+
+/// Unpauses the contract.
+/// Can only be called by the owner.
+/// Requires 1 yocto NEAR.
+#[payable]
+pub fn unpause(&mut self);
+
+/// Creates a new proposal with the given metadata and optional on-chain actions.
+/// The proposal is created by the predecessor account and requires a deposit to cover the
+/// storage and the bond amount.
+/// If actions are provided, the proposal will enter `Executable` status after voting succeeds
+/// instead of `Succeeded`, and anyone can call `execute_proposal` to trigger the actions.
+#[payable]
+pub fn create_proposal(
+    &mut self,
+    metadata: ProposalMetadata,
+    actions: Option<Vec<ProposalAction>>,
+) -> ProposalId;
+
+/// Returns the proposal information by the given proposal ID.
+pub fn get_proposal(&self, proposal_id: ProposalId) -> Option<ProposalInfo>;
+
+/// Returns the number of proposals.
+pub fn get_num_proposals(&self) -> u32;
+
+/// Returns a list of proposals from the given index based on the proposal ID order.
+pub fn get_proposals(&self, from_index: u32, limit: Option<u32>) -> Vec<ProposalInfo>;
+
+/// Returns the number of approved proposals.
+pub fn get_num_approved_proposals(&self) -> u32;
+
+/// Returns a list of approved proposals from the given index based on the approved proposals
+/// order.
+pub fn get_approved_proposals(&self, from_index: u32, limit: Option<u32>) -> Vec<ProposalInfo>;
+
+/// Approves the proposal to enter the sandbox pre-voting period.
+/// The reviewer specifies the majority type (simple or strong) which determines the approval
+/// threshold for the proposal. The bond is returned to the proposer upon approval.
+/// Requires 1 yocto attached to the call.
+/// Can only be called by the reviewers.
+#[payable]
+pub fn approve_proposal(
+    &mut self,
+    proposal_id: ProposalId,
+    majority_type: MajorityType,
+) -> Promise;
+
+/// Rejects (vetoes) the proposal during the voting or scheduled period.
+/// Requires 1 yocto attached to the call.
+/// Can only be called by the council members.
+#[payable]
+pub fn reject_proposal(&mut self, proposal_id: ProposalId);
+
+/// Marks the proposal as spam, forfeiting the bond.
+/// Can only be called while the proposal is in Created status.
+/// Requires 1 yocto attached to the call.
+/// Can only be called by the reviewers.
+#[payable]
+pub fn mark_as_spam(&mut self, proposal_id: ProposalId);
+
+/// Allows the proposer to reclaim their bond from a terminal proposal (non-spam).
+/// Bond is 0 for approved proposals (already returned during approval).
+/// Primary use: expired proposals. Also works as safety-net fallback.
+/// Requires 1 yocto NEAR.
+#[payable]
+pub fn claim_bond(&mut self, proposal_id: ProposalId);
+
+/// Executes the on-chain actions for a proposal that has passed voting.
+/// Can be called by anyone. The proposal must be in `Executable` status.
+/// Actions are executed sequentially. Status moves to `InProgress` during execution,
+/// then to `Succeeded` or `Failed` based on the callback result.
+pub fn execute_proposal(&mut self, proposal_id: ProposalId) -> Promise;
+
+/// Cast a vote for the given proposal and the given voting option.
+/// The caller has to provide a merkle proof and the account state from the snapshot.
+/// The caller should match the account ID in the account state.
+/// During the Sandbox period, only "For" votes are allowed.
+/// Requires a deposit to cover the storage fee or at least 1 yoctoNEAR if changing the vote.
+#[payable]
+pub fn vote(
+    &mut self,
+    proposal_id: ProposalId,
+    vote: VoteOption,
+    merkle_proof: MerkleProof,
+    v_account: VAccount,
+);
+
+/// Returns the vote of the given account ID and proposal ID.
+pub fn get_vote(&self, account_id: AccountId, proposal_id: ProposalId) -> Option<u8>;
+
+/// A callback after the snapshot is received for approving the proposal.
+#[private]
+pub fn on_get_snapshot(
+    &mut self,
+    #[callback] snapshot_and_state: (MerkleTreeSnapshot, VGlobalState),
+    reviewer_id: AccountId,
+    proposal_id: ProposalId,
+    majority_type: MajorityType,
+) -> ProposalInfo;
+
+/// A callback after the proposal actions are executed.
+#[private]
+pub fn on_execute_proposal(&mut self, proposal_id: ProposalId);
+
+/// Private method to migrate the contract state during the contract upgrade.
+#[private]
+#[init(ignore_state)]
+pub fn migrate_state() -> Self;
+
+/// Returns the version of the contract from the Cargo.toml.
+pub fn get_version(&self) -> String;
+
+/// Upgrades the contract to the new version.
+/// Requires the method to be called by the owner.
+/// The input is the new contract code.
+/// The contract will call `migrate_state` method on the new contract and then return the config,
+/// to verify that the migration was successful.
+pub fn upgrade();
+```
