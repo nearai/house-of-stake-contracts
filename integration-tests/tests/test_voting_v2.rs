@@ -1863,7 +1863,7 @@ async fn test_v2_execute_proposal_failure_is_terminal() -> Result<(), Box<dyn st
 }
 
 #[tokio::test]
-async fn test_v2_mark_as_spam() -> Result<(), Box<dyn std::error::Error>> {
+async fn test_v2_slash_proposal() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
         .with_voting_v2()
         .build()
@@ -1871,26 +1871,26 @@ async fn test_v2_mark_as_spam() -> Result<(), Box<dyn std::error::Error>> {
     let user = v.create_account_with_lockup().await?;
     let reviewer = v.voting.as_ref().unwrap().reviewer.clone();
 
-    // Non-reviewer cannot mark as spam
+    // Non-reviewer cannot slash
     let proposal_id = create_proposal(&v, &user, None).await?;
-    let outcome = mark_as_spam(&v, &user, proposal_id).await?;
+    let outcome = slash_proposal(&v, &user, proposal_id).await?;
     assert!(
         outcome.is_failure(),
-        "Non-reviewer should not be able to mark as spam"
+        "Non-reviewer should not be able to slash"
     );
 
-    // Reviewer marks as spam — bond is forfeited
-    let outcome = mark_as_spam(&v, &reviewer, proposal_id).await?;
+    // Reviewer slashes proposal — bond is forfeited
+    let outcome = slash_proposal(&v, &reviewer, proposal_id).await?;
     assert!(
         outcome.is_success(),
-        "mark_as_spam should succeed: {:?}",
+        "slash_proposal should succeed: {:?}",
         outcome.failures()
     );
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
         serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
-        ProposalStatus::Spam,
+        ProposalStatus::Slashed,
     );
     assert_ne!(
         proposal["bond_amount"].as_str().unwrap(),
@@ -1898,9 +1898,9 @@ async fn test_v2_mark_as_spam() -> Result<(), Box<dyn std::error::Error>> {
         "bond_amount should remain non-zero (forfeited)"
     );
 
-    // Cannot claim bond from spam proposal
+    // Cannot claim bond from slashed proposal
     let outcome = claim_bond(&v, &user, proposal_id).await?;
-    assert!(outcome.is_failure(), "Cannot claim bond from spam proposal");
+    assert!(outcome.is_failure(), "Cannot claim bond from slashed proposal");
 
     Ok(())
 }

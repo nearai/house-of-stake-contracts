@@ -20,22 +20,13 @@ impl Contract {
         assert_one_yocto();
         self.assert_not_paused();
         self.assert_called_by_reviewer();
-        let mut proposal = self.internal_expect_proposal_updated(proposal_id);
+        let proposal = self.internal_expect_proposal_updated(proposal_id);
 
         if proposal.status != ProposalStatus::Created {
             env::panic_str("Proposal is not in the Created status");
         }
 
         events::emit::approve_proposal_action(&env::predecessor_account_id(), proposal_id);
-
-        // Return bond if set
-        let bond = proposal.bond_amount;
-        let proposer_id = proposal.proposer_id.clone();
-        if bond.as_yoctonear() > 0 {
-            proposal.bond_amount = NearToken::from_yoctonear(0);
-            self.internal_set_proposal(proposal);
-            Promise::new(proposer_id).transfer(bond);
-        }
 
         ext_venear::ext(self.config.venear_account_id.clone())
             .with_unused_gas_weight(1)
@@ -59,7 +50,9 @@ impl Contract {
 
         match proposal.status {
             ProposalStatus::Voting | ProposalStatus::Scheduled => {}
-            _ => env::panic_str("Proposal can only be rejected during the voting or scheduled period"),
+            _ => env::panic_str(
+                "Proposal can only be rejected during the voting or scheduled period",
+            ),
         }
 
         proposal.rejecter_id = Some(env::predecessor_account_id());
@@ -70,23 +63,23 @@ impl Contract {
         self.internal_set_proposal(proposal);
     }
 
-    /// Marks the proposal as spam, forfeiting the bond.
+    /// Slashes the proposal, forfeiting the bond.
     /// Requires 1 yocto attached to the call.
     /// Can only be called by the reviewers.
     #[payable]
-    pub fn mark_as_spam(&mut self, proposal_id: ProposalId) {
+    pub fn slash_proposal(&mut self, proposal_id: ProposalId) {
         assert_one_yocto();
         self.assert_not_paused();
         self.assert_called_by_reviewer();
         let mut proposal = self.internal_expect_proposal_updated(proposal_id);
 
         if proposal.status != ProposalStatus::Created {
-            env::panic_str("Proposal can only be marked as spam while in Created status");
+            env::panic_str("Proposal can only be slashed while in Created status");
         }
 
-        proposal.status = ProposalStatus::Spam;
+        proposal.status = ProposalStatus::Slashed;
 
-        events::emit::spam_proposal_action(&env::predecessor_account_id(), proposal_id);
+        events::emit::slash_proposal_action(&env::predecessor_account_id(), proposal_id);
 
         self.internal_set_proposal(proposal);
     }
@@ -129,11 +122,19 @@ impl Contract {
         proposal.sandbox_duration_ns = self.config.sandbox_duration_ns;
         proposal.sandbox_threshold_bps = self.config.sandbox_threshold_bps;
         proposal.status = ProposalStatus::Sandbox;
-        self.approved_proposals.push(proposal_id);
 
-        events::emit::proposal_sandbox_action(proposal_id);
+        let bond = proposal.bond_amount;
+        let proposer_id = proposal.proposer_id.clone();
+        proposal.bond_amount = NearToken::from_yoctonear(0);
 
         self.internal_set_proposal(proposal.clone());
+        self.approved_proposals.push(proposal_id);
+
+        if bond.as_yoctonear() > 0 {
+            Promise::new(proposer_id).transfer(bond);
+        }
+
+        events::emit::proposal_sandbox_action(proposal_id);
 
         self.get_proposal(proposal_id).unwrap()
     }

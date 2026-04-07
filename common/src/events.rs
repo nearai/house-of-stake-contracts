@@ -62,7 +62,7 @@ pub mod emit {
 
     #[derive(Serialize)]
     #[serde(crate = "near_sdk::serde")]
-    pub(crate) struct SpamProposalData<'a> {
+    pub(crate) struct SlashProposalData<'a> {
         pub(crate) account_id: &'a AccountId,
         pub(crate) proposal_id: u32,
     }
@@ -198,11 +198,11 @@ pub mod emit {
         );
     }
 
-    pub fn spam_proposal_action(account_id: &AccountId, proposal_id: u32) {
+    pub fn slash_proposal_action(account_id: &AccountId, proposal_id: u32) {
         log_event(
             "venear",
-            "proposal_spam",
-            SpamProposalData {
+            "proposal_slash",
+            SlashProposalData {
                 account_id,
                 proposal_id,
             },

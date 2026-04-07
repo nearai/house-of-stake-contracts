@@ -1018,7 +1018,7 @@ pub struct Config {
     pub voting_duration_ns: U64,
 
     /// The bond amount required to create a proposal. Returned to the proposer upon reviewer
-    /// approval, or forfeited if the proposal is marked as spam. Claimable for expired proposals.
+    /// approval, or forfeited if the proposal is slashed. Claimable for expired proposals.
     pub bond_amount: NearToken,
 
     /// Storage fee required to store a vote for an active proposal.
@@ -1173,8 +1173,8 @@ pub enum ProposalStatus {
     InProgress,
     /// The proposal's on-chain execution failed.
     Failed,
-    /// The proposal was marked as spam by a reviewer.
-    Spam,
+    /// The proposal was slashed by a reviewer.
+    Slashed,
     /// The proposal is in the sandbox pre-voting period. Only "For" votes are allowed.
     /// Graduates to Scheduled when the sandbox threshold is met.
     Sandbox,
@@ -1367,14 +1367,14 @@ pub fn approve_proposal(
 #[payable]
 pub fn reject_proposal(&mut self, proposal_id: ProposalId);
 
-/// Marks the proposal as spam, forfeiting the bond.
+/// Slashes the proposal, forfeiting the bond.
 /// Can only be called while the proposal is in Created status.
 /// Requires 1 yocto attached to the call.
 /// Can only be called by the reviewers.
 #[payable]
-pub fn mark_as_spam(&mut self, proposal_id: ProposalId);
+pub fn slash_proposal(&mut self, proposal_id: ProposalId);
 
-/// Allows the proposer to reclaim their bond from a terminal proposal (non-spam).
+/// Allows the proposer to reclaim their bond from a terminal proposal (non-slashed).
 /// Bond is 0 for approved proposals (already returned during approval).
 /// Primary use: expired proposals. Also works as safety-net fallback.
 /// Requires 1 yocto NEAR.

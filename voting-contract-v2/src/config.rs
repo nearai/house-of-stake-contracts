@@ -21,7 +21,7 @@ pub struct Config {
     pub voting_duration_ns: U64,
 
     /// The bond amount required to create a proposal. Returned to the proposer upon reviewer
-    /// approval, or forfeited if the proposal is marked as spam. Claimable for expired proposals.
+    /// approval, or forfeited if the proposal is slashed. Claimable for expired proposals.
     pub bond_amount: NearToken,
 
     /// Storage fee required to store a vote for an active proposal. It can be refunded once the

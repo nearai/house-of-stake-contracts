@@ -174,13 +174,13 @@ pub async fn vote_for_option(
     Ok(())
 }
 
-pub async fn mark_as_spam(
+pub async fn slash_proposal(
     v: &VenearTestWorkspace,
     caller: &near_workspaces::Account,
     proposal_id: u32,
 ) -> Result<near_workspaces::result::ExecutionFinalResult, Box<dyn std::error::Error>> {
     let outcome = caller
-        .call(v.voting_id(), "mark_as_spam")
+        .call(v.voting_id(), "slash_proposal")
         .args_json(json!({ "proposal_id": proposal_id }))
         .deposit(NearToken::from_yoctonear(1))
         .gas(Gas::from_tgas(50))

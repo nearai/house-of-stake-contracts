@@ -183,8 +183,8 @@ pub enum ProposalStatus {
     InProgress,
     /// The proposal's on-chain execution failed.
     Failed,
-    /// The proposal was marked as spam by a reviewer.
-    Spam,
+    /// The proposal was slashed by a reviewer.
+    Slashed,
     /// Graduates to Voting when the sandbox threshold is met.
     Sandbox,
     /// The proposal met the sandbox threshold and is scheduled to start voting.
@@ -273,7 +273,7 @@ impl Proposal {
             | ProposalStatus::Executable
             | ProposalStatus::InProgress
             | ProposalStatus::Failed
-            | ProposalStatus::Spam => {
+            | ProposalStatus::Slashed => {
                 return;
             }
             ProposalStatus::Created => {

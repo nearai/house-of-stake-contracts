@@ -12,7 +12,7 @@ It contains the following contracts:
   reviewers has to approve the proposal, to start voting process. It uses end-of-the-block snapshots from the veNEAR
   contract to track veNEAR holders at the time of the proposal approving.
 - **voting-contract-v2**: A voting contract (v2). Extends v1 with a sandbox pre-voting period, scheduled Monday voting,
-  bond-based proposal fees, flexible majority types (simple/strong), spam marking, and council veto during voting.
+  bond-based proposal fees, flexible majority types (simple/strong), proposal slashing, and council veto during voting.
 
 ## Design principles
 
@@ -59,7 +59,7 @@ All contracts are designed to be deployed without access keys, to make sure the 
   - The voting contract is controlled by the owner of the voting contract. The owner can be a multi-sig controlled by
     the HoS security team. Eventually, the owner should be changed to be the HoS DAO.
   - The voting contract allows anyone to create a proposal. The caller has to attach a deposit to cover the storage
-    deposit for the proposal and the base fee that prevents proposal spam.
+    deposit for the proposal and the base fee that deters low-quality proposals.
   - The base fee can be changed by the owner of the voting contract.
   - A proposal has to be approved by one of the reviewers. When the proposal is approved, the latest snapshot of the
     veNEAR holders is requested from the veNEAR contract. The voting process starts after the proposal is approved or
@@ -72,14 +72,14 @@ All contracts are designed to be deployed without access keys, to make sure the 
   - The voting v2 contract shares the same base design as v1: independent of a particular veNEAR contract, controlled
     by an owner, and allows anyone to create proposals.
   - The caller has to attach a deposit to cover the storage and a bond amount. The bond is returned upon reviewer
-    approval, or forfeited if the proposal is marked as spam. Proposers can reclaim their bond from expired, defeated,
+    approval, or forfeited if the proposal is slashed. Proposers can reclaim their bond from expired, defeated,
     rejected, failed, or succeeded proposals.
   - A proposal has to be approved by one of the reviewers, who chooses the majority type (simple or strong) which
     determines the approval threshold. When approved, the latest veNEAR snapshot is fetched.
   - Approved proposals enter a sandbox pre-voting period where only "For" votes are allowed. Once the sandbox
     threshold is met, the proposal is scheduled to start full voting on the next Monday.
   - Council members can veto proposals during the voting or scheduled period.
-  - Reviewers can mark proposals as spam while in Created status, forfeiting the proposer's bond.
+  - Reviewers can slash proposals while in Created status, forfeiting the proposer's bond.
   - The voting process ends after the configured duration. Proposals without actions are signaling-only.
     Proposals with actions enter an `Executable` status after voting succeeds, and anyone can trigger on-chain
     execution (function calls, transfers) by calling `execute_proposal`.
