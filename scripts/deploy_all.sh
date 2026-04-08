@@ -49,8 +49,23 @@ TIMELOCK_DURATION_NS="${TIMELOCK_DURATION_SEC}000000000"
 PROPOSAL_EXPIRATION_NS="${PROPOSAL_EXPIRATION_SEC}000000000"
 # 0.1 NEAR
 : ${BASE_PROPOSAL_FEE:="100000000000000000000000"}
+# 0.1 NEAR (bond for v2)
+: ${BOND_AMOUNT:="100000000000000000000000"}
 # 0.00125 NEAR (we probably need less)
 : ${VOTE_STORAGE_FEE:="1250000000000000000000"}
+# 35% quorum threshold
+: "${QUORUM_THRESHOLD_BPS:=3500}"
+# 1000 NEAR quorum floor
+: ${QUORUM_FLOOR:="1000000000000000000000000000"}
+# 50% simple majority
+: "${SIMPLE_MAJORITY_THRESHOLD_BPS:=5000}"
+# 66.67% strong majority
+: "${STRONG_MAJORITY_THRESHOLD_BPS:=6667}"
+# 10 minutes sandbox for testing
+: "${SANDBOX_DURATION_SEC:=600}"
+SANDBOX_DURATION_NS="${SANDBOX_DURATION_SEC}000000000"
+# 30% sandbox threshold
+: "${SANDBOX_THRESHOLD_BPS:=3000}"
 
 # Shorter name, so we can fit more
 export ROOT_ACCOUNT_ID="$ROOT_ACCOUNT_ID"
@@ -68,10 +83,10 @@ echo "Creating account $VENEAR_ACCOUNT_ID"
 near --quiet account create-account fund-myself $VENEAR_ACCOUNT_ID '2.4 NEAR' autogenerate-new-keypair save-to-keychain sign-as $ROOT_ACCOUNT_ID network-config $CHAIN_ID sign-with-keychain send
 
 echo "Creating account $VOTING_ACCOUNT_ID"
-near --quiet account create-account fund-myself $VOTING_ACCOUNT_ID '2.3 NEAR' autogenerate-new-keypair save-to-keychain sign-as $ROOT_ACCOUNT_ID network-config $CHAIN_ID sign-with-keychain send
+near --quiet account create-account fund-myself $VOTING_ACCOUNT_ID '3.9 NEAR' autogenerate-new-keypair save-to-keychain sign-as $ROOT_ACCOUNT_ID network-config $CHAIN_ID sign-with-keychain send
 
 echo "Creating account $VOTING_V2_ACCOUNT_ID"
-near --quiet account create-account fund-myself $VOTING_V2_ACCOUNT_ID '2.3 NEAR' autogenerate-new-keypair save-to-keychain sign-as $ROOT_ACCOUNT_ID network-config $CHAIN_ID sign-with-keychain send
+near --quiet account create-account fund-myself $VOTING_V2_ACCOUNT_ID '4.0 NEAR' autogenerate-new-keypair save-to-keychain sign-as $ROOT_ACCOUNT_ID network-config $CHAIN_ID sign-with-keychain send
 
 echo "Creating account $OWNER_ACCOUNT_ID"
 near --quiet account create-account fund-myself $OWNER_ACCOUNT_ID '0.1 NEAR' autogenerate-new-keypair save-to-keychain sign-as $ROOT_ACCOUNT_ID network-config $CHAIN_ID sign-with-keychain send
@@ -132,13 +147,19 @@ near --quiet contract deploy $VOTING_V2_ACCOUNT_ID use-file res/$CONTRACTS_SOURC
   "config": {
     "venear_account_id": "'$VENEAR_ACCOUNT_ID'",
     "reviewer_ids": ["'$REVIEWER_ACCOUNT_ID'"],
+    "council_ids": ["'$COUNCIL_ACCOUNT_ID'"],
     "owner_account_id": "'$OWNER_ACCOUNT_ID'",
     "voting_duration_ns": "'$VOTING_DURATION_NS'",
-    "base_proposal_fee": "'$BASE_PROPOSAL_FEE'",
+    "bond_amount": "'$BOND_AMOUNT'",
     "vote_storage_fee": "'$VOTE_STORAGE_FEE'",
     "guardians": ["'$GUARDIAN_ACCOUNT_ID'"],
-    "council_ids": ["'$COUNCIL_ACCOUNT_ID'"],
-    "proposal_expiration_ns": "'$PROPOSAL_EXPIRATION_NS'"
+    "proposal_expiration_ns": "'$PROPOSAL_EXPIRATION_NS'",
+    "quorum_threshold_bps": '$QUORUM_THRESHOLD_BPS',
+    "quorum_floor": "'$QUORUM_FLOOR'",
+    "simple_majority_threshold_bps": '$SIMPLE_MAJORITY_THRESHOLD_BPS',
+    "strong_majority_threshold_bps": '$STRONG_MAJORITY_THRESHOLD_BPS',
+    "sandbox_duration_ns": "'$SANDBOX_DURATION_NS'",
+    "sandbox_threshold_bps": '$SANDBOX_THRESHOLD_BPS'
   }
 }' prepaid-gas '10.0 Tgas' attached-deposit '0 NEAR' network-config $CHAIN_ID sign-with-keychain send
 
