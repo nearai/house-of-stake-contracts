@@ -69,20 +69,56 @@ All contracts are designed to be deployed without access keys, to make sure the 
     Proposals with actions enter an `Executable` status after timelock, and anyone can trigger on-chain execution
     (function calls, transfers) by calling `execute_proposal`.
 - **voting v2**
-  - The voting v2 contract shares the same base design as v1: independent of a particular veNEAR contract, controlled
-    by an owner, and allows anyone to create proposals.
-  - The caller has to attach a deposit to cover the storage and a bond amount. The bond is returned upon reviewer
-    approval, or forfeited if the proposal is slashed. Proposers can reclaim their bond from expired, defeated,
-    rejected, failed, or succeeded proposals.
-  - A proposal has to be approved by one of the reviewers, who chooses the majority type (simple or strong) which
-    determines the approval threshold. When approved, the latest veNEAR snapshot is fetched.
-  - Approved proposals enter a sandbox pre-voting period where only "For" votes are allowed. Once the sandbox
-    threshold is met, the proposal is scheduled to start full voting on the next Monday.
-  - Council members can veto proposals during the voting or scheduled period.
-  - Reviewers can slash proposals while in Created status, forfeiting the proposer's bond.
-  - The voting process ends after the configured duration. Proposals without actions are signaling-only.
-    Proposals with actions enter an `Executable` status after voting succeeds, and anyone can trigger on-chain
-    execution (function calls, transfers) by calling `execute_proposal`.
+  - Shares the same base design as v1: independent of a particular veNEAR contract, controlled by an owner,
+    and allows anyone to create proposals.
+  - Key differences from v1: bond-based proposal fees, sandbox pre-voting period, scheduled Monday voting,
+    flexible majority types (simple/strong), council veto without timelock, and reviewer slash action.
+  - See the proposal lifecycle below for the full status flow.
+
+### Voting v2 — Proposal Lifecycle
+
+A proposal in v2 moves through a series of statuses. Each transition is triggered by a specific action or condition:
+
+1. **Created** — Anyone creates a proposal by attaching a deposit (storage + bond).
+   - The proposal sits in `Created` waiting for a reviewer to act.
+   - If no reviewer acts before the expiration period, the proposal becomes `Expired` and the bond is claimable.
+
+2. **Sandbox** — A reviewer approves the proposal, choosing a majority type (simple or strong).
+   - The bond is returned to the proposer upon approval.
+   - A veNEAR snapshot is fetched to determine voting power.
+   - Only "For" votes are allowed during this period — no "Against" or "Abstain".
+   - If "For" votes reach the sandbox threshold (e.g. 30% of total veNEAR), the proposal graduates to `Scheduled`.
+   - If the sandbox duration expires without reaching the threshold, the proposal becomes `Defeated`.
+
+3. **Scheduled** — The proposal is queued to start full voting on the next Monday (00:00 UTC).
+   - Only one proposal can be in active voting at a time. If another proposal is already voting, this one waits
+     for the next available Monday after that voting period ends.
+   - No new votes are cast during this waiting period.
+   - Council members can veto the proposal during this stage, moving it to `Rejected`.
+
+4. **Voting** — Full voting begins on Monday. All vote types are allowed: "For", "Against", "Abstain".
+   - Users vote using their veNEAR balance from the snapshot taken at approval time.
+   - Voters can change their vote during this period.
+   - Council members can still veto the proposal, moving it to `Rejected`.
+   - When the voting duration expires, the result is evaluated:
+     - **Quorum check**: total votes must meet the quorum threshold (% of supply) or the quorum floor (absolute minimum).
+     - **Approval check**: "For" / ("For" + "Against") must meet the majority threshold. "Abstain" votes count toward quorum but not toward approval.
+
+5. **Succeeded** / **Defeated** — Terminal voting outcomes.
+   - **Succeeded**: quorum and approval thresholds both met. If the proposal has no actions, it stays here (signaling-only).
+   - **Defeated**: quorum or approval threshold not met.
+
+6. **Executable** → **InProgress** → **Succeeded** / **Failed** — For proposals with on-chain actions.
+   - **Executable**: voting succeeded and actions are ready. Anyone can call `execute_proposal`.
+   - **InProgress**: actions have been dispatched, awaiting callback results.
+   - **Succeeded**: all actions completed successfully.
+   - **Failed**: one or more actions failed on-chain.
+
+7. **Slashed** — A reviewer marks a `Created` proposal as malicious/spam.
+   - The proposer's bond is forfeited (kept by the contract). Not claimable.
+
+8. **Rejected** — A council member vetoes a proposal during `Scheduled` or `Voting`.
+   - The bond remains claimable by the proposer.
 
 ### Implementation details
 
