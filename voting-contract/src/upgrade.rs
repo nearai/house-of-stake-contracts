@@ -1,11 +1,11 @@
+use crate::StorageKeys;
 use crate::config::Config;
 use crate::proposal::{Proposal, ProposalStatus, VProposal};
-use crate::StorageKeys;
 use crate::*;
+use near_sdk::Gas;
 use near_sdk::borsh::{self, BorshDeserialize};
 use near_sdk::json_types::U64;
 use near_sdk::store::{LookupMap, Vector};
-use near_sdk::Gas;
 
 const MIGRATE_STATE_GAS: Gas = Gas::from_tgas(50);
 const GET_CONFIG_GAS: Gas = Gas::from_tgas(5);
@@ -13,6 +13,16 @@ const GET_CONFIG_GAS: Gas = Gas::from_tgas(5);
 const DEFAULT_QUORUM_THRESHOLD_BPS: u16 = 3500;
 const DEFAULT_QUORUM_FLOOR_NEAR: u128 = 1000;
 const DEFAULT_APPROVAL_THRESHOLD_BPS: u16 = 5000;
+const TIMELOCK_DURATION_NS: u64 = 14 * 24 * 60 * 60 * 1_000_000_000; // 14 days
+const PROPOSAL_EXPIRATION_NS: u64 = 7 * 24 * 60 * 60 * 1_000_000_000; // 7 days
+
+const COUNCIL_MEMBERS: &[&str] = &[
+    "as.near",
+    "c65255255d689f74ae46b0a89f04bbaab94d3a51ab9dc4b79b1e9b61e7cf6816",
+    "e953bb69d1129e4da87b99739373884a0b57d5e64a65fdc868478f22e6c31eac",
+    "fastnear-hos.near",
+    "root.near",
+];
 
 /// Config from v1.0.2 (without council_ids, timelock, expiration, or quorum).
 #[derive(BorshDeserialize)]
@@ -69,14 +79,14 @@ impl Contract {
             config: Config {
                 venear_account_id: old.config.venear_account_id,
                 reviewer_ids: old.config.reviewer_ids,
-                council_ids: vec![],
+                council_ids: COUNCIL_MEMBERS.iter().map(|s| s.parse().unwrap()).collect(),
                 owner_account_id: old.config.owner_account_id,
                 voting_duration_ns: old.config.voting_duration_ns,
-                timelock_duration_ns: U64(0),
+                timelock_duration_ns: U64(TIMELOCK_DURATION_NS),
                 base_proposal_fee: old.config.base_proposal_fee,
                 vote_storage_fee: old.config.vote_storage_fee,
                 guardians: old.config.guardians,
-                proposal_expiration_ns: U64(0),
+                proposal_expiration_ns: U64(PROPOSAL_EXPIRATION_NS),
                 proposed_new_owner_account_id: old.config.proposed_new_owner_account_id,
                 quorum_threshold_bps: DEFAULT_QUORUM_THRESHOLD_BPS,
                 quorum_floor,
