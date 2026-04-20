@@ -64,10 +64,16 @@ All contracts are designed to be deployed without access keys, to make sure the 
   - A proposal has to be approved by one of the reviewers. When the proposal is approved, the latest snapshot of the
     veNEAR holders is requested from the veNEAR contract. The voting process starts after the proposal is approved or
     at the specified timestamp during the approval.
-  - The duration of the voting process and the set of reviewers can be changed by the owner of the voting contract.
-  - The voting process ends after the duration of the voting process. Proposals without actions are signaling-only.
-    Proposals with actions enter an `Executable` status after timelock, and anyone can trigger on-chain execution
-    (function calls, transfers) by calling `execute_proposal`.
+  - Council members can veto (reject) a proposal during the timelock period.
+  - On-chain quorum: proposals require a minimum participation threshold (`quorum_threshold_bps` or `quorum_floor`,
+    whichever is higher) and an approval threshold (`approval_threshold_bps`) to pass.
+  - Proposals that have not been approved by a reviewer expire after a configurable deadline.
+  - The duration of the voting process, the set of reviewers, the council members, the timelock duration, quorum and
+    approval thresholds, and proposal expiration can be changed by the owner of the voting contract.
+  - The voting process ends after the duration of the voting process. Proposals that pass voting enter a timelock
+    period, during which council members can veto. After the timelock expires, signaling-only proposals (without
+    actions) are finalized as `Succeeded`. Proposals with actions enter an `Executable` status, and anyone can
+    trigger on-chain execution (function calls, transfers) by calling `execute_proposal`.
 - **voting v2**
   - Shares the same base design as v1: independent of a particular veNEAR contract, controlled by an owner,
     and allows anyone to create proposals.

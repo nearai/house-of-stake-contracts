@@ -26,7 +26,7 @@ impl Contract {
 /// The contract will call `migrate_state` method on the new contract and then return the config,
 /// to verify that the migration was successful.
 #[cfg(target_arch = "wasm32")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn upgrade() {
     env::setup_panic_hook();
     let contract: Contract = env::state_read().unwrap();

@@ -232,7 +232,7 @@ pub fn set_guardians(&mut self, guardians: Vec<AccountId>);
 pub fn is_paused(&self) -> bool;
 
 /// Pauses the contract.
-/// Can only be called by the guardian.
+/// Can only be called by the guardian or the owner.
 /// Requires 1 yocto NEAR.
 #[payable]
 pub fn pause(&mut self);
@@ -686,6 +686,13 @@ pub struct ProposalMetadata {
     pub link: Option<String>,
 }
 
+/// The fixed voting options for proposals.
+pub enum VoteOption {
+    For,
+    Against,
+    Abstain,
+}
+
 /// A single action that the voting contract can execute on behalf of a passed proposal.
 pub enum ProposalAction {
     /// Execute a function call on a target contract.
@@ -757,7 +764,8 @@ pub enum ProposalStatus {
     Rejected,
     /// The proposal is in the voting phase.
     Voting,
-    /// The proposal voting has finished, quorum was met and approval threshold was met.
+    /// The proposal has passed. Either a signaling-only proposal that completed voting and
+    /// timelock, or a proposal whose on-chain actions were executed successfully.
     Succeeded,
     /// The voting has ended and the proposal is in the timelock period awaiting potential council veto.
     Timelock,
@@ -831,13 +839,6 @@ pub fn set_voting_duration(&mut self, voting_duration_sec: u32);
 #[payable]
 pub fn set_base_proposal_fee(&mut self, base_proposal_fee: NearToken);
 
-/// Updates the storage fee required to store a vote for an active proposal.
-/// Can only be called by the owner.
-/// Requires 1 yocto NEAR.
-/// Will panic if called, because it requires contract upgrade to change the storage fee.
-#[payable]
-pub fn set_vote_storage_fee(&mut self, _vote_storage_fee: NearToken);
-
 /// Proposes the new owner account ID.
 /// Can only be called by the owner.
 /// Requires 1 yocto NEAR.
@@ -896,7 +897,7 @@ pub fn set_approval_threshold_bps(&mut self, approval_threshold_bps: u16);
 pub fn is_paused(&self) -> bool;
 
 /// Pauses the contract.
-/// Can only be called by the guardian.
+/// Can only be called by the guardian or the owner.
 /// Requires 1 yocto NEAR.
 #[payable]
 pub fn pause(&mut self);
@@ -962,6 +963,11 @@ pub fn on_get_snapshot(
     reviewer_id: AccountId,
     proposal_id: ProposalId,
 ) -> ProposalInfo;
+
+/// A callback after the proposal actions have been executed.
+/// Sets the proposal status to `Succeeded` if all actions succeeded, or `Failed` otherwise.
+#[private]
+pub fn on_execute_proposal(&mut self, proposal_id: ProposalId);
 
 /// Private method to migrate the contract state during the contract upgrade.
 #[private]

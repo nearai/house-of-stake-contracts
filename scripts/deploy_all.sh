@@ -57,6 +57,8 @@ PROPOSAL_EXPIRATION_NS="${PROPOSAL_EXPIRATION_SEC}000000000"
 : "${QUORUM_THRESHOLD_BPS:=3500}"
 # 1000 NEAR quorum floor
 : ${QUORUM_FLOOR:="1000000000000000000000000000"}
+# 50% approval threshold
+: "${APPROVAL_THRESHOLD_BPS:=5000}"
 # 50% simple majority
 : "${SIMPLE_MAJORITY_THRESHOLD_BPS:=5000}"
 # 66.67% strong majority
@@ -138,7 +140,10 @@ near --quiet contract deploy $VOTING_ACCOUNT_ID use-file res/$CONTRACTS_SOURCE/v
     "guardians": ["'$GUARDIAN_ACCOUNT_ID'"],
     "council_ids": ["'$COUNCIL_ACCOUNT_ID'"],
     "timelock_duration_ns": "'$TIMELOCK_DURATION_NS'",
-    "proposal_expiration_ns": "'$PROPOSAL_EXPIRATION_NS'"
+    "proposal_expiration_ns": "'$PROPOSAL_EXPIRATION_NS'",
+    "quorum_threshold_bps": '$QUORUM_THRESHOLD_BPS',
+    "quorum_floor": "'$QUORUM_FLOOR'",
+    "approval_threshold_bps": '$APPROVAL_THRESHOLD_BPS'
   }
 }' prepaid-gas '10.0 Tgas' attached-deposit '0 NEAR' network-config $CHAIN_ID sign-with-keychain send
 

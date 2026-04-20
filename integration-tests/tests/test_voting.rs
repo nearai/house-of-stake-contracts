@@ -108,14 +108,33 @@ async fn test_voting_upgrade() -> Result<(), Box<dyn std::error::Error>> {
     // Verify config migration
     let config: serde_json::Value = v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
 
-    let council_ids: Vec<AccountId> = serde_json::from_value(config["council_ids"].clone())?;
-    assert!(
-        council_ids.is_empty(),
-        "council_ids should default to empty"
+    let council_ids: Vec<String> = serde_json::from_value(config["council_ids"].clone())?;
+    assert_eq!(
+        council_ids,
+        vec![
+            "as.near",
+            "c65255255d689f74ae46b0a89f04bbaab94d3a51ab9dc4b79b1e9b61e7cf6816",
+            "e953bb69d1129e4da87b99739373884a0b57d5e64a65fdc868478f22e6c31eac",
+            "fastnear-hos.near",
+            "root.near",
+        ],
+        "council_ids should be set to DAO council members"
     );
 
     let timelock_duration_ns: U64 = serde_json::from_value(config["timelock_duration_ns"].clone())?;
-    assert_eq!(timelock_duration_ns.0, 0);
+    assert_eq!(
+        timelock_duration_ns.0,
+        14 * 24 * 60 * 60 * 1_000_000_000,
+        "timelock should be 14 days"
+    );
+
+    let proposal_expiration_ns: U64 =
+        serde_json::from_value(config["proposal_expiration_ns"].clone())?;
+    assert_eq!(
+        proposal_expiration_ns.0,
+        7 * 24 * 60 * 60 * 1_000_000_000,
+        "proposal expiration should be 7 days"
+    );
 
     let quorum_threshold_bps: u16 = serde_json::from_value(config["quorum_threshold_bps"].clone())?;
     assert_eq!(quorum_threshold_bps, 3500);
