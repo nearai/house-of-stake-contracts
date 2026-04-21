@@ -8,7 +8,7 @@ repository.workspace = true
 license.workspace = true
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib"]
 
 # fields to configure build with WASM reproducibility, according to specs
 # in https://github.com/near/NEPs/blob/master/neps/nep-0330.md

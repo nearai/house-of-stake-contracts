@@ -68,9 +68,14 @@ impl Contract {
             p.quorum_threshold_bps = DEFAULT_QUORUM_THRESHOLD_BPS;
             p.quorum_floor = quorum_floor;
             p.approval_threshold_bps = DEFAULT_APPROVAL_THRESHOLD_BPS;
-            // Re-evaluate proposals that were Finished (now Succeeded via borsh index 4).
-            if p.status == ProposalStatus::Succeeded {
-                p.status = p.compute_final_status();
+            match p.status {
+                ProposalStatus::FinishLegacy => {
+                    p.status = p.compute_final_status();
+                }
+                ProposalStatus::ApprovalLegacy => {
+                    p.status = ProposalStatus::Voting;
+                }
+                _ => {}
             }
             proposals.push(VProposal::Current(p));
         }

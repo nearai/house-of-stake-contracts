@@ -200,9 +200,25 @@ async fn test_voting_upgrade_from_mainnet() -> Result<(), Box<dyn std::error::Er
     assert_eq!(config["quorum_threshold_bps"], 3500);
     assert_eq!(config["quorum_floor"], json!(NearToken::from_near(1000)));
     assert_eq!(config["approval_threshold_bps"], 5000);
-    assert_eq!(config["council_ids"], json!([]));
-    assert_eq!(config["timelock_duration_ns"], "0");
-    assert_eq!(config["proposal_expiration_ns"], "0");
+    assert_eq!(
+        config["council_ids"],
+        json!([
+            "as.near",
+            "c65255255d689f74ae46b0a89f04bbaab94d3a51ab9dc4b79b1e9b61e7cf6816",
+            "e953bb69d1129e4da87b99739373884a0b57d5e64a65fdc868478f22e6c31eac",
+            "fastnear-hos.near",
+            "root.near",
+        ])
+    );
+    // 14 days and 7 days respectively, seeded by migrate_state().
+    assert_eq!(
+        config["timelock_duration_ns"],
+        (14u64 * 24 * 60 * 60 * 1_000_000_000).to_string()
+    );
+    assert_eq!(
+        config["proposal_expiration_ns"],
+        (7u64 * 24 * 60 * 60 * 1_000_000_000).to_string()
+    );
 
     assert_eq!(config["venear_account_id"], old_config["venear_account_id"]);
     assert_eq!(config["reviewer_ids"], old_config["reviewer_ids"]);

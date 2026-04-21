@@ -1,12 +1,12 @@
 mod setup;
 
 use crate::setup::voting_helpers::*;
-use crate::setup::{VenearTestWorkspaceBuilder, NS_IN_SECOND, VOTING_DURATION_SECONDS};
+use crate::setup::{NS_IN_SECOND, VOTING_DURATION_SECONDS, VenearTestWorkspaceBuilder};
+use common::voting::{ProposalStatus, VoteOption};
 use near_sdk::json_types::U64;
 use near_sdk::{Gas, NearToken};
 use near_workspaces::AccountId;
 use serde_json::json;
-use voting_contract::proposal::{ProposalStatus, VoteOption};
 
 #[tokio::test]
 async fn test_voting_upgrade() -> Result<(), Box<dyn std::error::Error>> {
