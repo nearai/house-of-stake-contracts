@@ -11,7 +11,7 @@ pub struct Config {
     /// The account IDs that can approve proposals.
     pub reviewer_ids: Vec<AccountId>,
 
-    /// The account IDs of the council members who can veto proposals during the timelock period.
+    /// The account IDs of the council members who can veto proposals.
     pub council_ids: Vec<AccountId>,
 
     /// The account ID that can upgrade the current contract and modify the config.
@@ -25,6 +25,9 @@ pub struct Config {
 
     /// The base fee in addition to the storage fee required to create a proposal.
     pub base_proposal_fee: NearToken,
+
+    /// The bond amount required to create a v2 proposal.
+    pub bond_amount: NearToken,
 
     /// Storage fee required to store a vote for an active proposal. It can be refunded once the
     /// proposal is finalized.
@@ -46,9 +49,21 @@ pub struct Config {
     /// Absolute minimum veNEAR required for quorum, regardless of BPS calculation.
     pub quorum_floor: NearToken,
 
-    /// Approval threshold in basis points (e.g. 5000 = 50%, 6667 ≈ 66.67%).
+    /// Approval threshold in basis points for the classic flow (e.g. 5000 = 50%).
     /// Applied as: for_votes / (for_votes + against_votes) >= approval_threshold_bps / 10000.
     pub approval_threshold_bps: u16,
+
+    /// Simple majority threshold in basis points for v2 proposals (e.g. 5000 = 50%).
+    pub simple_majority_threshold_bps: u16,
+
+    /// Strong (super) majority threshold in basis points for v2 proposals (e.g. 6667 ≈ 66.67%).
+    pub strong_majority_threshold_bps: u16,
+
+    /// The duration of the sandbox pre-voting period in nanoseconds for v2 proposals.
+    pub sandbox_duration_ns: U64,
+
+    /// The "For" votes threshold to graduate a v2 proposal from Sandbox to Scheduled.
+    pub sandbox_threshold_bps: u16,
 }
 
 #[near]

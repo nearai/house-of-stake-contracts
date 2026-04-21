@@ -1,191 +1,12 @@
 mod setup;
 
 use crate::setup::voting_helpers::*;
-use crate::setup::{VenearTestWorkspaceBuilder, NS_IN_SECOND, VOTING_DURATION_SECONDS};
+use crate::setup::{NS_IN_SECOND, VOTING_DURATION_SECONDS, VenearTestWorkspaceBuilder};
 use near_sdk::json_types::U64;
 use near_sdk::{Gas, NearToken};
 use near_workspaces::AccountId;
 use serde_json::json;
 use voting_contract::proposal::{ProposalStatus, VoteOption};
-
-#[tokio::test]
-async fn test_voting_upgrade() -> Result<(), Box<dyn std::error::Error>> {
-    let v = VenearTestWorkspaceBuilder::default()
-        .with_previous_voting()
-        .build()
-        .await?;
-    let voting = v.voting.as_ref().unwrap();
-    let user_a = v.create_account_with_lockup().await?;
-
-    // Verify old config
-    let config: serde_json::Value = v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
-    assert!(
-        config.get("council_ids").is_none(),
-        "Old contract should not have council_ids"
-    );
-    assert!(
-        config.get("timelock_duration_ns").is_none(),
-        "Old contract should not have timelock_duration_ns"
-    );
-
-    // Lock NEAR so user has veNEAR for voting
-    v.transfer_and_lock(&user_a, NearToken::from_near(1000))
-        .await?;
-
-    // Proposal 1
-    let proposal_id1 = create_proposal_old(&v, &user_a).await?;
-    approve_proposal(&v, &voting.reviewer, proposal_id1).await?;
-
-    let (merkle_proof, v_account): (serde_json::Value, serde_json::Value) = v
-        .sandbox
-        .view(v.venear.id(), "get_proof")
-        .args_json(json!({ "account_id": user_a.id() }))
-        .await?
-        .json()?;
-
-    user_a
-        .call(v.voting_id(), "vote")
-        .args_json(json!({
-            "proposal_id": proposal_id1,
-            "vote": 0,
-            "merkle_proof": merkle_proof,
-            "v_account": v_account,
-        }))
-        .deposit(NearToken::from_millinear(15))
-        .gas(Gas::from_tgas(50))
-        .transact()
-        .await?
-        .into_result()?;
-
-    // Fast forward past voting end
-    let proposal = v.get_proposal(proposal_id1).await?;
-    let voting_start: u64 = proposal["voting_start_time_ns"].as_str().unwrap().parse()?;
-    let voting_end = voting_start + VOTING_DURATION_SECONDS * NS_IN_SECOND;
-    v.fast_forward(voting_end, VOTING_DURATION_SECONDS, 10)
-        .await?;
-
-    let proposal = v.get_proposal(proposal_id1).await?;
-    assert_eq!(proposal["status"].as_str().unwrap(), "Finished");
-
-    // Save vote data before migration for later comparison
-    let pre_migration_votes = proposal["votes"].clone();
-
-    // Proposal 2 no votes
-    let proposal_id2 = create_proposal_old(&v, &user_a).await?;
-    approve_proposal(&v, &voting.reviewer, proposal_id2).await?;
-
-    let proposal = v.get_proposal(proposal_id2).await?;
-    let voting_start2: u64 = proposal["voting_start_time_ns"].as_str().unwrap().parse()?;
-    let voting_end2 = voting_start2 + VOTING_DURATION_SECONDS * NS_IN_SECOND;
-    v.fast_forward(voting_end2, VOTING_DURATION_SECONDS, 10)
-        .await?;
-
-    let proposal = v.get_proposal(proposal_id2).await?;
-    assert_eq!(proposal["status"].as_str().unwrap(), "Finished");
-
-    // Proposal 3
-    let proposal_id3 = create_proposal_old(&v, &user_a).await?;
-    voting
-        .reviewer
-        .call(v.voting_id(), "reject_proposal")
-        .args_json(json!({ "proposal_id": proposal_id3 }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(50))
-        .transact()
-        .await?
-        .into_result()?;
-
-    let proposal = v.get_proposal(proposal_id3).await?;
-    assert_eq!(proposal["status"].as_str().unwrap(), "Rejected");
-
-    // Upgrade
-    assert!(
-        attempt_voting_upgrade(&user_a, &v).await.is_err(),
-        "User should not be able to upgrade the contract"
-    );
-    attempt_voting_upgrade(&voting.owner, &v).await?;
-
-    // Verify config migration
-    let config: serde_json::Value = v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
-
-    let council_ids: Vec<String> = serde_json::from_value(config["council_ids"].clone())?;
-    assert_eq!(
-        council_ids,
-        vec![
-            "as.near",
-            "c65255255d689f74ae46b0a89f04bbaab94d3a51ab9dc4b79b1e9b61e7cf6816",
-            "e953bb69d1129e4da87b99739373884a0b57d5e64a65fdc868478f22e6c31eac",
-            "fastnear-hos.near",
-            "root.near",
-        ],
-        "council_ids should be set to DAO council members"
-    );
-
-    let timelock_duration_ns: U64 = serde_json::from_value(config["timelock_duration_ns"].clone())?;
-    assert_eq!(
-        timelock_duration_ns.0,
-        14 * 24 * 60 * 60 * 1_000_000_000,
-        "timelock should be 14 days"
-    );
-
-    let proposal_expiration_ns: U64 =
-        serde_json::from_value(config["proposal_expiration_ns"].clone())?;
-    assert_eq!(
-        proposal_expiration_ns.0,
-        7 * 24 * 60 * 60 * 1_000_000_000,
-        "proposal expiration should be 7 days"
-    );
-
-    let quorum_threshold_bps: u16 = serde_json::from_value(config["quorum_threshold_bps"].clone())?;
-    assert_eq!(quorum_threshold_bps, 3500);
-
-    let quorum_floor: NearToken = serde_json::from_value(config["quorum_floor"].clone())?;
-    assert_eq!(quorum_floor, NearToken::from_near(1000));
-
-    let approval_threshold_bps: u16 =
-        serde_json::from_value(config["approval_threshold_bps"].clone())?;
-    assert_eq!(approval_threshold_bps, 5000);
-
-    let owner_account_id: AccountId = serde_json::from_value(config["owner_account_id"].clone())?;
-    assert_eq!(owner_account_id, *voting.owner.id());
-
-    // Verify proposal migration
-    let proposal = v.get_proposal(proposal_id1).await?;
-    let status: ProposalStatus = serde_json::from_value(proposal["status"].clone())?;
-    assert_eq!(
-        status,
-        ProposalStatus::Succeeded,
-        "Finished proposal should become Succeeded after migration"
-    );
-    assert_eq!(proposal["quorum_threshold_bps"].as_u64().unwrap(), 3500);
-    assert_eq!(proposal["approval_threshold_bps"].as_u64().unwrap(), 5000);
-
-    // Verify vote data preserved exactly after migration
-    assert_eq!(
-        proposal["votes"], pre_migration_votes,
-        "Vote data should be identical after migration"
-    );
-
-    // Proposal 2: was Finished with no votes → Defeated (quorum not met)
-    let proposal = v.get_proposal(proposal_id2).await?;
-    let status: ProposalStatus = serde_json::from_value(proposal["status"].clone())?;
-    assert_eq!(
-        status,
-        ProposalStatus::Defeated,
-        "Finished proposal with no votes should become Defeated after migration"
-    );
-
-    // Proposal 3: was Rejected → stays Rejected
-    let proposal = v.get_proposal(proposal_id3).await?;
-    let status: ProposalStatus = serde_json::from_value(proposal["status"].clone())?;
-    assert_eq!(
-        status,
-        ProposalStatus::Rejected,
-        "Rejected proposal should stay Rejected after migration"
-    );
-
-    Ok(())
-}
 
 #[tokio::test]
 async fn test_voting() -> Result<(), Box<dyn std::error::Error>> {
@@ -1372,6 +1193,7 @@ async fn test_voting_pause() -> Result<(), Box<dyn std::error::Error>> {
                 "title": "Test Proposal",
                 "description": "This is a test proposal",
             },
+            "flow": "Classic",
         }))
         .deposit(NearToken::from_millinear(200))
         .gas(Gas::from_tgas(50))

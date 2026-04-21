@@ -1,4 +1,6 @@
-use crate::proposal::{Proposal, ProposalStatus, SnapshotAndState, VoteOption};
+use crate::proposal::{
+    Proposal, ProposalFlow, ProposalStatus, SnapshotAndState, VoteOption, next_voting_start_ns,
+};
 use crate::*;
 use common::{events, near_add, near_sub};
 use near_sdk::Promise;
@@ -25,15 +27,17 @@ impl Contract {
 
         match proposal.status {
             ProposalStatus::Voting => {}
-            ProposalStatus::Created => {
+            ProposalStatus::Sandbox => {
+                if vote != VoteOption::For {
+                    env::panic_str("Only 'For' votes are allowed during the sandbox period");
+                }
+            }
+            ProposalStatus::Created | ProposalStatus::Scheduled => {
                 env::panic_str("Voting is not started yet");
             }
-            ProposalStatus::Rejected => {
-                env::panic_str("Proposal is rejected");
-            }
-            ProposalStatus::Expired => {
-                env::panic_str("Proposal is expired");
-            }
+            ProposalStatus::Rejected => env::panic_str("Proposal is rejected"),
+            ProposalStatus::Expired => env::panic_str("Proposal is expired"),
+            ProposalStatus::Slashed => env::panic_str("Proposal is slashed"),
             ProposalStatus::Succeeded
             | ProposalStatus::Defeated
             | ProposalStatus::Timelock
@@ -44,7 +48,6 @@ impl Contract {
             }
         }
 
-        // Validate merkle proof
         {
             let SnapshotAndState { snapshot, .. } = proposal.snapshot_and_state.as_ref().unwrap();
             require!(
@@ -80,7 +83,6 @@ impl Contract {
         if let Some(previous_vote) = previous_vote {
             proposal.votes[previous_vote as usize].remove_vote(account_balance);
             proposal.total_votes.remove_vote(account_balance);
-            // When changing the vote. Don't need to charge the fee again.
             storage_added = NearToken::from_yoctonear(0);
 
             events::emit::proposal_vote_action(
@@ -102,7 +104,6 @@ impl Contract {
             )
         );
 
-        // Note, don't refund 1 yoctoNEAR if changing the vote.
         if attached_deposit > near_add(storage_added, NearToken::from_yoctonear(1)) {
             let refund = near_sub(attached_deposit, storage_added);
             Promise::new(env::predecessor_account_id()).transfer(refund);
@@ -115,6 +116,21 @@ impl Contract {
             vote_index,
             &account_balance,
         );
+
+        // sandbox graduation schedule the real voting
+        if proposal.flow == ProposalFlow::V2
+            && proposal.status == ProposalStatus::Sandbox
+            && proposal.sandbox_threshold_met()
+        {
+            let now_ns = env::block_timestamp();
+            let after_ns = std::cmp::max(now_ns, self.last_voting_end_ns);
+            let scheduled_start = next_voting_start_ns(after_ns);
+            proposal.voting_start_time_ns = Some(scheduled_start.into());
+            proposal.status = ProposalStatus::Scheduled;
+            self.last_voting_end_ns = scheduled_start + proposal.voting_duration_ns.0;
+
+            events::emit::proposal_scheduled_action(proposal_id);
+        }
 
         self.votes
             .insert((account_id.clone(), proposal_id), vote_index);

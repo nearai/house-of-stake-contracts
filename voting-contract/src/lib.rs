@@ -1,3 +1,4 @@
+mod bond;
 mod config;
 mod execute;
 mod governance;
@@ -16,7 +17,7 @@ use crate::proposal::{ProposalId, VProposal};
 use common::account::*;
 use common::venear::VenearGrowthConfig;
 use near_sdk::store::{LookupMap, Vector};
-use near_sdk::{env, near, require, sys, AccountId, BorshStorageKey, NearToken, PanicOnDefault};
+use near_sdk::{AccountId, BorshStorageKey, NearToken, PanicOnDefault, env, near, require, sys};
 
 #[derive(BorshStorageKey)]
 #[near]
@@ -40,6 +41,8 @@ pub struct Contract {
     /// The paused contract will not accept new proposals, new votes or updated votes, proposals
     /// cannot be approved or rejected.
     paused: bool,
+    /// Tracks when the last scheduled voting period ends.
+    last_voting_end_ns: u64,
 }
 
 #[near]
@@ -54,6 +57,7 @@ impl Contract {
             votes: LookupMap::new(StorageKeys::Votes),
             approved_proposals: Vector::new(StorageKeys::ApprovedProposals),
             paused: false,
+            last_voting_end_ns: 0,
         }
     }
 }

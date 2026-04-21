@@ -5,12 +5,12 @@ use crate::setup::{VenearTestWorkspaceBuilder, DEFAULT_BOND_AMOUNT, NS_IN_SECOND
 use near_sdk::{Gas, NearToken};
 use near_workspaces::AccountId;
 use serde_json::json;
-use voting_contract_v2::proposal::{MajorityType, ProposalStatus, VoteOption};
+use voting_contract::proposal::{MajorityType, ProposalStatus, VoteOption};
 
 #[tokio::test]
 async fn test_voting_v2() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
-        .with_voting_v2()
+        .with_voting()
         .build()
         .await?;
     let user_a = v.create_account_with_lockup().await?;
@@ -27,7 +27,7 @@ async fn test_voting_v2() -> Result<(), Box<dyn std::error::Error>> {
         .json()?;
     assert_eq!(num_proposals, 0);
 
-    let proposal_id = create_proposal(&v, &user_a, None).await?;
+    let proposal_id = create_proposal_v2(&v, &user_a, None).await?;
     let num_proposals: u32 = v
         .sandbox
         .view(v.voting_id(), "get_num_proposals")
@@ -62,7 +62,6 @@ async fn test_voting_v2() -> Result<(), Box<dyn std::error::Error>> {
         "Regular user should not be able to approve the proposal"
     );
 
-    let balance_before_approval = user_a.view_account().await?.balance;
     approve_proposal_v2(
         &v,
         &v.voting.as_ref().unwrap().reviewer,
@@ -70,7 +69,6 @@ async fn test_voting_v2() -> Result<(), Box<dyn std::error::Error>> {
         MajorityType::Simple,
     )
     .await?;
-    let balance_after_approval = user_a.view_account().await?.balance;
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(proposal["total_votes"]["total_votes"].as_u64().unwrap(), 0);
@@ -82,16 +80,11 @@ async fn test_voting_v2() -> Result<(), Box<dyn std::error::Error>> {
         proposal["reviewer_id"].as_str().unwrap(),
         v.voting.as_ref().unwrap().reviewer.id().as_str()
     );
-    // Bond should be returned on approval
+    // Bond stays locked through approval; only refundable from Expired via claim_bond.
     assert_eq!(
         proposal["bond_amount"].as_str().unwrap(),
-        "0",
-        "bond_amount should be 0 after approval"
-    );
-    assert_eq!(
-        balance_after_approval.as_yoctonear() - balance_before_approval.as_yoctonear(),
-        DEFAULT_BOND_AMOUNT.as_yoctonear(),
-        "Bond should be returned on approval"
+        DEFAULT_BOND_AMOUNT.as_yoctonear().to_string(),
+        "bond_amount should stay locked after approval"
     );
     let num_proposals: u32 = v
         .sandbox
@@ -376,7 +369,7 @@ async fn test_voting_v2() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 async fn test_voting_v2_reject_proposal() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
-        .with_voting_v2()
+        .with_voting()
         .build()
         .await?;
     let user_a = v.create_account_with_lockup().await?;
@@ -384,7 +377,7 @@ async fn test_voting_v2_reject_proposal() -> Result<(), Box<dyn std::error::Erro
     v.transfer_and_lock(&user_a, NearToken::from_near(1000))
         .await?;
 
-    let proposal_id_1 = create_proposal(&v, &user_a, None).await?;
+    let proposal_id_1 = create_proposal_v2(&v, &user_a, None).await?;
     approve_proposal_v2(
         &v,
         &v.voting.as_ref().unwrap().reviewer,
@@ -474,7 +467,7 @@ async fn test_voting_v2_reject_proposal() -> Result<(), Box<dyn std::error::Erro
         "rejecter_id should be set to the council member"
     );
 
-    let proposal_id_2 = create_proposal(&v, &user_a, None).await?;
+    let proposal_id_2 = create_proposal_v2(&v, &user_a, None).await?;
     approve_proposal_v2(
         &v,
         &v.voting.as_ref().unwrap().reviewer,
@@ -530,7 +523,7 @@ async fn test_voting_v2_reject_proposal() -> Result<(), Box<dyn std::error::Erro
 #[tokio::test]
 async fn test_voting_v2_governance() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
-        .with_voting_v2()
+        .with_voting()
         .build()
         .await?;
     let user = v.create_account_with_lockup().await?;
@@ -1118,7 +1111,7 @@ async fn test_voting_v2_governance() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 async fn test_voting_v2_pause() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
-        .with_voting_v2()
+        .with_voting()
         .build()
         .await?;
     let user_a = v.create_account_with_lockup().await?;
@@ -1218,7 +1211,7 @@ async fn test_voting_v2_pause() -> Result<(), Box<dyn std::error::Error>> {
     assert!(!is_paused, "Contract should not be paused");
 
     // Prepare for pause testing
-    let proposal_id = create_proposal(&v, &user_a, None).await?;
+    let proposal_id = create_proposal_v2(&v, &user_a, None).await?;
     approve_proposal_v2(
         &v,
         &v.voting.as_ref().unwrap().reviewer,
@@ -1226,7 +1219,7 @@ async fn test_voting_v2_pause() -> Result<(), Box<dyn std::error::Error>> {
         MajorityType::Simple,
     )
     .await?;
-    let proposal_id_2 = create_proposal(&v, &user_a, None).await?;
+    let proposal_id_2 = create_proposal_v2(&v, &user_a, None).await?;
     assert_ne!(proposal_id, proposal_id_2);
 
     let (user_a_merkle_proof, user_a_v_account): (serde_json::Value, serde_json::Value) = v
@@ -1329,7 +1322,7 @@ async fn test_voting_v2_pause() -> Result<(), Box<dyn std::error::Error>> {
         outcome
     );
 
-    // Attempt to create a proposal while paused
+    // Attempt to create a v2 proposal while paused
     let outcome = user_b
         .call(v.voting_id(), "create_proposal")
         .args_json(json!({
@@ -1337,6 +1330,7 @@ async fn test_voting_v2_pause() -> Result<(), Box<dyn std::error::Error>> {
                 "title": "Test Proposal",
                 "description": "This is a test proposal",
             },
+            "flow": "V2",
         }))
         .deposit(NearToken::from_millinear(10_100))
         .gas(Gas::from_tgas(50))
@@ -1387,11 +1381,11 @@ async fn test_voting_v2_pause() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 async fn test_voting_v2_proposal_expiration() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
-        .with_voting_v2()
+        .with_voting()
         .build()
         .await?;
     let user_a = v.create_account_with_lockup().await?;
-    let proposal_id = create_proposal(&v, &user_a, None).await?;
+    let proposal_id = create_proposal_v2(&v, &user_a, None).await?;
 
     // Fast-forward past the expiration window
     v.fast_forward_to_proposal_status_v2(proposal_id, ProposalStatus::Expired)
@@ -1437,7 +1431,7 @@ async fn test_voting_v2_proposal_expiration() -> Result<(), Box<dyn std::error::
 #[tokio::test]
 async fn test_v2_quorum_succeeded() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
-        .with_voting_v2()
+        .with_voting()
         .build()
         .await?;
     let user_a = v.create_account_with_lockup().await?;
@@ -1449,7 +1443,7 @@ async fn test_v2_quorum_succeeded() -> Result<(), Box<dyn std::error::Error>> {
     v.transfer_and_lock(&user_b, NearToken::from_near(500))
         .await?;
 
-    let proposal_id = create_proposal(&v, &user_a, None).await?;
+    let proposal_id = create_proposal_v2(&v, &user_a, None).await?;
     approve_proposal_v2(
         &v,
         &v.voting.as_ref().unwrap().reviewer,
@@ -1480,7 +1474,7 @@ async fn test_v2_quorum_succeeded() -> Result<(), Box<dyn std::error::Error>> {
 async fn test_v2_quorum_defeated_insufficient_votes() -> Result<(), Box<dyn std::error::Error>> {
     // Default quorum_threshold_bps=3500 (35%). user_a holds 300/(300+1000)=23% < 35%.
     let v = VenearTestWorkspaceBuilder::default()
-        .with_voting_v2()
+        .with_voting()
         .build()
         .await?;
     let user_a = v.create_account_with_lockup().await?;
@@ -1491,7 +1485,7 @@ async fn test_v2_quorum_defeated_insufficient_votes() -> Result<(), Box<dyn std:
     v.transfer_and_lock(&user_b, NearToken::from_near(1000))
         .await?;
 
-    let proposal_id = create_proposal(&v, &user_a, None).await?;
+    let proposal_id = create_proposal_v2(&v, &user_a, None).await?;
     approve_proposal_v2(
         &v,
         &v.voting.as_ref().unwrap().reviewer,
@@ -1521,7 +1515,7 @@ async fn test_v2_quorum_defeated_insufficient_votes() -> Result<(), Box<dyn std:
 async fn test_v2_quorum_defeated_succeed_failed() -> Result<(), Box<dyn std::error::Error>> {
     // Low quorum so it's met, but more Against than For
     let v = VenearTestWorkspaceBuilder::default()
-        .with_voting_v2()
+        .with_voting()
         .build()
         .await?;
     let user_a = v.create_account_with_lockup().await?;
@@ -1532,7 +1526,7 @@ async fn test_v2_quorum_defeated_succeed_failed() -> Result<(), Box<dyn std::err
     v.transfer_and_lock(&user_b, NearToken::from_near(1000))
         .await?;
 
-    let proposal_id = create_proposal(&v, &user_a, None).await?;
+    let proposal_id = create_proposal_v2(&v, &user_a, None).await?;
     approve_proposal_v2(
         &v,
         &v.voting.as_ref().unwrap().reviewer,
@@ -1565,7 +1559,7 @@ async fn test_v2_quorum_with_abstain() -> Result<(), Box<dyn std::error::Error>>
     // Default quorum_threshold_bps=3500 (35%). user_a holds 300/(300+1000)=23% < 35%.
     // user_a alone can't meet quorum, but user_b's Abstain pushes total to 100%.
     let v = VenearTestWorkspaceBuilder::default()
-        .with_voting_v2()
+        .with_voting()
         .build()
         .await?;
     let user_a = v.create_account_with_lockup().await?;
@@ -1576,7 +1570,7 @@ async fn test_v2_quorum_with_abstain() -> Result<(), Box<dyn std::error::Error>>
     v.transfer_and_lock(&user_b, NearToken::from_near(1000))
         .await?;
 
-    let proposal_id = create_proposal(&v, &user_a, None).await?;
+    let proposal_id = create_proposal_v2(&v, &user_a, None).await?;
     approve_proposal_v2(
         &v,
         &v.voting.as_ref().unwrap().reviewer,
@@ -1609,7 +1603,7 @@ async fn test_v2_quorum_with_abstain() -> Result<(), Box<dyn std::error::Error>>
 #[tokio::test]
 async fn test_v2_proposal_with_transfer_action() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
-        .with_voting_v2()
+        .with_voting()
         .build()
         .await?;
     let user_a = v.create_account_with_lockup().await?;
@@ -1632,7 +1626,7 @@ async fn test_v2_proposal_with_transfer_action() -> Result<(), Box<dyn std::erro
     let recipient_balance_before = recipient.view_account().await?.balance;
 
     // Create proposal with a Transfer action
-    let proposal_id = create_proposal(
+    let proposal_id = create_proposal_v2(
         &v,
         &user_a,
         Some(json!([{
@@ -1703,7 +1697,7 @@ async fn test_v2_proposal_with_transfer_action() -> Result<(), Box<dyn std::erro
 #[tokio::test]
 async fn test_v2_proposal_with_function_call_actions() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
-        .with_voting_v2()
+        .with_voting()
         .build()
         .await?;
     let voting = v.voting.as_ref().unwrap();
@@ -1731,7 +1725,7 @@ async fn test_v2_proposal_with_function_call_actions() -> Result<(), Box<dyn std
     let fee_args = near_sdk::json_types::Base64VecU8(
         serde_json::to_vec(&json!({ "bond_amount": new_fee })).unwrap(),
     );
-    let proposal_id = create_proposal(
+    let proposal_id = create_proposal_v2(
         &v,
         &user_a,
         Some(json!([
@@ -1796,7 +1790,7 @@ async fn test_v2_proposal_with_function_call_actions() -> Result<(), Box<dyn std
 #[tokio::test]
 async fn test_v2_execute_proposal_failure_is_terminal() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
-        .with_voting_v2()
+        .with_voting()
         .build()
         .await?;
     let user_a = v.create_account_with_lockup().await?;
@@ -1808,7 +1802,7 @@ async fn test_v2_execute_proposal_failure_is_terminal() -> Result<(), Box<dyn st
         .await?;
 
     // Create proposal calling a nonexistent method to trigger failure
-    let proposal_id = create_proposal(
+    let proposal_id = create_proposal_v2(
         &v,
         &user_a,
         Some(json!([{
@@ -1865,14 +1859,14 @@ async fn test_v2_execute_proposal_failure_is_terminal() -> Result<(), Box<dyn st
 #[tokio::test]
 async fn test_v2_slash_proposal() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
-        .with_voting_v2()
+        .with_voting()
         .build()
         .await?;
     let user = v.create_account_with_lockup().await?;
     let reviewer = v.voting.as_ref().unwrap().reviewer.clone();
 
     // Non-reviewer cannot slash
-    let proposal_id = create_proposal(&v, &user, None).await?;
+    let proposal_id = create_proposal_v2(&v, &user, None).await?;
     let outcome = slash_proposal(&v, &user, proposal_id).await?;
     assert!(
         outcome.is_failure(),
@@ -1908,13 +1902,13 @@ async fn test_v2_slash_proposal() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 async fn test_bond_claim_by_non_proposer_fails() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
-        .with_voting_v2()
+        .with_voting()
         .build()
         .await?;
     let user_a = v.create_account_with_lockup().await?;
     let user_b = v.create_account_with_lockup().await?;
 
-    let proposal_id = create_proposal(&v, &user_a, None).await?;
+    let proposal_id = create_proposal_v2(&v, &user_a, None).await?;
     v.fast_forward_to_proposal_status_v2(proposal_id, ProposalStatus::Expired)
         .await?;
 
@@ -1929,12 +1923,12 @@ async fn test_bond_claim_by_non_proposer_fails() -> Result<(), Box<dyn std::erro
 #[tokio::test]
 async fn test_bond_double_claim_fails() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
-        .with_voting_v2()
+        .with_voting()
         .build()
         .await?;
     let user = v.create_account_with_lockup().await?;
 
-    let proposal_id = create_proposal(&v, &user, None).await?;
+    let proposal_id = create_proposal_v2(&v, &user, None).await?;
     v.fast_forward_to_proposal_status_v2(proposal_id, ProposalStatus::Expired)
         .await?;
 
@@ -1949,14 +1943,14 @@ async fn test_bond_double_claim_fails() -> Result<(), Box<dyn std::error::Error>
 #[tokio::test]
 async fn test_bond_zero_amount() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
-        .with_voting_v2()
+        .with_voting()
         .bond_amount(NearToken::from_yoctonear(0))
         .build()
         .await?;
     let user = v.create_account_with_lockup().await?;
     let reviewer = v.voting.as_ref().unwrap().reviewer.clone();
 
-    let proposal_id = create_proposal(&v, &user, None).await?;
+    let proposal_id = create_proposal_v2(&v, &user, None).await?;
     let proposal = v.get_proposal(proposal_id).await?;
 
     assert_eq!(
@@ -1987,7 +1981,7 @@ async fn test_bond_zero_amount() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 async fn test_strong_majority() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
-        .with_voting_v2()
+        .with_voting()
         .build()
         .await?;
     let user_a = v.create_account_with_lockup().await?;
@@ -2003,7 +1997,7 @@ async fn test_strong_majority() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     // --- Proposal 1: Simple majority, 60/40 split — should pass ---
-    let proposal_simple = create_proposal(&v, &user_a, None).await?;
+    let proposal_simple = create_proposal_v2(&v, &user_a, None).await?;
     approve_proposal_v2(
         &v,
         &v.voting.as_ref().unwrap().reviewer,
@@ -2028,7 +2022,7 @@ async fn test_strong_majority() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // --- Proposal 2: Strong majority, 60/40 split — should be defeated ---
-    let proposal_strong_fail = create_proposal(&v, &user_a, None).await?;
+    let proposal_strong_fail = create_proposal_v2(&v, &user_a, None).await?;
     approve_proposal_v2(
         &v,
         &v.voting.as_ref().unwrap().reviewer,
@@ -2053,7 +2047,7 @@ async fn test_strong_majority() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // --- Proposal 3: Strong majority, barely passing — 801 For / 400 Against = 66.69% ---
-    let proposal_strong_pass = create_proposal(&v, &user_a, None).await?;
+    let proposal_strong_pass = create_proposal_v2(&v, &user_a, None).await?;
     approve_proposal_v2(
         &v,
         &v.voting.as_ref().unwrap().reviewer,
@@ -2085,7 +2079,7 @@ async fn test_strong_majority() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 async fn test_sandbox_expiry_defeated() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
-        .with_voting_v2()
+        .with_voting()
         .build()
         .await?;
     let user_a = v.create_account_with_lockup().await?;
@@ -2098,7 +2092,7 @@ async fn test_sandbox_expiry_defeated() -> Result<(), Box<dyn std::error::Error>
     v.transfer_and_lock(&user_b, NearToken::from_near(1000))
         .await?;
 
-    let proposal_id = create_proposal(&v, &user_a, None).await?;
+    let proposal_id = create_proposal_v2(&v, &user_a, None).await?;
     approve_proposal_v2(
         &v,
         &v.voting.as_ref().unwrap().reviewer,
@@ -2144,7 +2138,7 @@ async fn test_sandbox_expiry_defeated() -> Result<(), Box<dyn std::error::Error>
 #[tokio::test]
 async fn test_two_proposals_scheduled_sequentially() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
-        .with_voting_v2()
+        .with_voting()
         .build()
         .await?;
     let user_a = v.create_account_with_lockup().await?;
@@ -2153,8 +2147,8 @@ async fn test_two_proposals_scheduled_sequentially() -> Result<(), Box<dyn std::
         .await?;
 
     // Create and approve two proposals
-    let proposal_1 = create_proposal(&v, &user_a, None).await?;
-    let proposal_2 = create_proposal(&v, &user_a, None).await?;
+    let proposal_1 = create_proposal_v2(&v, &user_a, None).await?;
+    let proposal_2 = create_proposal_v2(&v, &user_a, None).await?;
     let reviewer = &v.voting.as_ref().unwrap().reviewer;
     approve_proposal_v2(&v, reviewer, proposal_1, MajorityType::Simple).await?;
     approve_proposal_v2(&v, reviewer, proposal_2, MajorityType::Simple).await?;

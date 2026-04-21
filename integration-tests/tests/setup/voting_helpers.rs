@@ -1,4 +1,4 @@
-use super::{VenearTestWorkspace, VOTING_WASM_FILEPATH};
+use super::{VOTING_WASM_FILEPATH, VenearTestWorkspace};
 use near_sdk::{Gas, NearToken};
 use serde_json::json;
 
@@ -39,8 +39,9 @@ pub async fn create_proposal(
                 "description": "This is a test proposal",
             },
             "actions": actions,
+            "flow": "Classic",
         }))
-        .deposit(NearToken::from_millinear(10_100))
+        .deposit(NearToken::from_millinear(200))
         .gas(Gas::from_tgas(50))
         .transact()
         .await?;
@@ -54,10 +55,10 @@ pub async fn create_proposal(
     Ok(outcome.json().unwrap())
 }
 
-/// Create proposal on the old (v1.0.2) contract that still expects voting_options.
-pub async fn create_proposal_old(
+pub async fn create_proposal_v2(
     v: &VenearTestWorkspace,
     user: &near_workspaces::Account,
+    actions: Option<serde_json::Value>,
 ) -> Result<u32, Box<dyn std::error::Error>> {
     let outcome = user
         .call(v.voting_id(), "create_proposal")
@@ -65,10 +66,11 @@ pub async fn create_proposal_old(
             "metadata": {
                 "title": "Test Proposal",
                 "description": "This is a test proposal",
-                "voting_options": ["Option 1", "Option 2", "Option 3"],
             },
+            "actions": actions,
+            "flow": "V2",
         }))
-        .deposit(NearToken::from_millinear(200))
+        .deposit(NearToken::from_millinear(10_100))
         .gas(Gas::from_tgas(50))
         .transact()
         .await?;
@@ -106,6 +108,7 @@ pub async fn approve_proposal(
         .call(v.voting_id(), "approve_proposal")
         .args_json(json!({
             "proposal_id": proposal_id,
+            "majority_type": serde_json::Value::Null,
         }))
         .deposit(NearToken::from_yoctonear(1))
         .gas(Gas::from_tgas(200))
@@ -123,7 +126,7 @@ pub async fn approve_proposal_v2(
     v: &VenearTestWorkspace,
     user: &near_workspaces::Account,
     proposal_id: u32,
-    majority_type: voting_contract_v2::proposal::MajorityType,
+    majority_type: voting_contract::proposal::MajorityType,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let outcome = user
         .call(v.voting_id(), "approve_proposal")
@@ -197,7 +200,6 @@ pub async fn claim_bond(
     let outcome = caller
         .call(v.voting_id(), "claim_bond")
         .args_json(json!({ "proposal_id": proposal_id }))
-        .deposit(NearToken::from_yoctonear(1))
         .gas(Gas::from_tgas(50))
         .transact()
         .await?;

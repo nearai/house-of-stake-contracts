@@ -1,10 +1,12 @@
 use crate::metadata::ProposalMetadata;
 use crate::*;
-use common::{events, near_add, near_sub, TimestampNs};
+use common::{TimestampNs, events, near_add, near_sub};
 use near_sdk::json_types::{Base64VecU8, U64};
 use near_sdk::{Gas, Promise};
 
 pub type ProposalId = u32;
+
+const NS_PER_DAY: u64 = 86_400_000_000_000;
 
 /// A single action that the voting contract can execute on behalf of a passed proposal.
 #[derive(Clone)]
@@ -32,27 +34,58 @@ pub enum VoteOption {
     Abstain,
 }
 
-/// The old proposal structure (V1) that includes the `rejected` field.
+/// Which proposal flow a proposal follows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[near(serializers=[borsh, json])]
+pub enum ProposalFlow {
+    Classic,
+    V2,
+}
+
+/// The majority type required for a v2 proposal to pass.
+#[derive(Clone, Copy, PartialEq)]
+#[near(serializers=[borsh, json])]
+pub enum MajorityType {
+    /// Simple majority (e.g. >50%).
+    Simple,
+    /// Strong majority (e.g. >66.67%).
+    Strong,
+}
+
 #[derive(Clone)]
-#[near(serializers=[borsh])]
-pub struct ProposalV1 {
+#[near(serializers=[borsh, json])]
+pub struct Proposal {
     pub id: ProposalId,
     pub creation_time_ns: U64,
     pub proposer_id: AccountId,
     pub reviewer_id: Option<AccountId>,
+    pub rejecter_id: Option<AccountId>,
     pub voting_start_time_ns: Option<U64>,
     pub voting_duration_ns: U64,
-    pub rejected: bool,
+    pub expiration_ns: U64,
     pub snapshot_and_state: Option<SnapshotAndState>,
     pub votes: Vec<VoteStats>,
     pub total_votes: VoteStats,
     pub status: ProposalStatus,
+    pub quorum_threshold_bps: u16,
+    pub quorum_floor: NearToken,
+    pub approval_threshold_bps: u16,
+    pub actions: Option<Vec<ProposalAction>>,
+    pub flow: ProposalFlow,
+    // Classic only
+    pub timelock_duration_ns: U64,
+    // V2 only
+    pub approval_time_ns: Option<U64>,
+    pub bond_amount: NearToken,
+    pub sandbox_duration_ns: U64,
+    pub sandbox_threshold_bps: u16,
 }
 
+/// Borsh-tagged proposal storage envelope. The single `Current` variant wraps `Proposal`; the
+/// enum is kept so future schema changes can append new variants without breaking reads.
 #[derive(Clone)]
 #[near(serializers=[borsh])]
 pub enum VProposal {
-    V1(ProposalV1),
     Current(Proposal),
 }
 
@@ -63,70 +96,11 @@ impl From<Proposal> for VProposal {
 }
 
 impl From<VProposal> for Proposal {
-    fn from(value: VProposal) -> Self {
-        match value {
-            VProposal::V1(v1) => Proposal {
-                id: v1.id,
-                creation_time_ns: v1.creation_time_ns,
-                proposer_id: v1.proposer_id,
-                reviewer_id: v1.reviewer_id,
-                rejecter_id: None,
-                voting_start_time_ns: v1.voting_start_time_ns,
-                voting_duration_ns: v1.voting_duration_ns,
-                timelock_duration_ns: U64(0),
-                expiration_ns: U64(0),
-                snapshot_and_state: v1.snapshot_and_state,
-                votes: v1.votes,
-                total_votes: v1.total_votes,
-                status: v1.status,
-                quorum_threshold_bps: 0,
-                quorum_floor: NearToken::from_yoctonear(0),
-                approval_threshold_bps: 0,
-                actions: None,
-            },
-            VProposal::Current(current) => current,
+    fn from(v: VProposal) -> Self {
+        match v {
+            VProposal::Current(p) => p,
         }
     }
-}
-
-/// The proposal structure that contains all the information about a proposal.
-#[derive(Clone)]
-#[near(serializers=[borsh, json])]
-pub struct Proposal {
-    /// The unique identifier of the proposal, generated automatically.
-    pub id: ProposalId,
-    /// The timestamp in nanoseconds when the proposal was created, generated automatically.
-    pub creation_time_ns: U64,
-    /// The account ID of the proposer.
-    pub proposer_id: AccountId,
-    /// The account ID of the reviewer, who approved the proposal.
-    pub reviewer_id: Option<AccountId>,
-    /// The account ID of the council member who rejected (vetoed) the proposal.
-    pub rejecter_id: Option<AccountId>,
-    /// The timestamp when the voting starts.
-    pub voting_start_time_ns: Option<U64>,
-    /// The voting duration in nanoseconds, generated from the config.
-    pub voting_duration_ns: U64,
-    /// The duration of the timelock period in nanoseconds, stored per-proposal from config.
-    pub timelock_duration_ns: U64,
-    /// The deadline in nanoseconds by which the proposal must be approved. 0 means no expiration.
-    pub expiration_ns: U64,
-    /// The snapshot of the contract state and global state. Fetched when the proposal is approved.
-    pub snapshot_and_state: Option<SnapshotAndState>,
-    /// Aggregated votes per voting option.
-    pub votes: Vec<VoteStats>,
-    /// The total aggregated voting information across all voting options.
-    pub total_votes: VoteStats,
-    /// The status of the proposal. It's optional and can be computed from the proposal itself.
-    pub status: ProposalStatus,
-    /// Quorum threshold in basis points.
-    pub quorum_threshold_bps: u16,
-    /// Absolute minimum veNEAR required for quorum.
-    pub quorum_floor: NearToken,
-    /// Approval threshold in basis points.
-    pub approval_threshold_bps: u16,
-    /// Optional list of on-chain actions to execute when the proposal succeeds.
-    pub actions: Option<Vec<ProposalAction>>,
 }
 
 /// The proposal information structure that contains the proposal and its metadata.
@@ -145,7 +119,7 @@ pub struct ProposalInfo {
 pub enum ProposalStatus {
     /// The proposal was created and is waiting for the approver to approve it.
     Created,
-    /// The proposal was rejected by the council during the timelock period.
+    /// The proposal was rejected by the council.
     Rejected,
     /// The proposal is in the voting phase.
     Voting,
@@ -163,6 +137,12 @@ pub enum ProposalStatus {
     InProgress,
     /// The proposal's on-chain execution failed.
     Failed,
+    /// Tthe proposal was slashed by a reviewer; bond is forfeited.
+    Slashed,
+    /// Graduates to Scheduled when the sandbox threshold is met.
+    Sandbox,
+    /// The proposal met the sandbox threshold and is scheduled to start voting.
+    Scheduled,
 }
 
 /// The snapshot of the Merkle tree and the global state at the moment when the proposal was
@@ -204,12 +184,48 @@ impl VoteStats {
     }
 }
 
+/// Returns the next voting start time. In sandbox test mode, starts after 120 seconds.
+/// Otherwise, starts on the next Monday 00:00 UTC strictly after `after_ns`.
+pub fn next_voting_start_ns(after_ns: u64) -> u64 {
+    if cfg!(feature = "sandbox") {
+        after_ns + 120 * 1_000_000_000
+    } else {
+        let days_since_epoch = after_ns / NS_PER_DAY;
+        let day_of_week = days_since_epoch % 7;
+        let days_until_monday = (10 - day_of_week) % 7 + 1;
+        (days_since_epoch + days_until_monday) * NS_PER_DAY
+    }
+}
+
 impl Proposal {
     pub fn has_actions(&self) -> bool {
         self.actions.as_ref().is_some_and(|a| !a.is_empty())
     }
 
+    pub fn sandbox_threshold_met(&self) -> bool {
+        let total_supply = self
+            .snapshot_and_state
+            .as_ref()
+            .unwrap()
+            .total_venear
+            .as_yoctonear();
+        let for_power = self
+            .votes
+            .first()
+            .map(|v| v.total_venear.as_yoctonear())
+            .unwrap_or(0);
+        let threshold = total_supply * (self.sandbox_threshold_bps as u128) / 10_000;
+        for_power >= threshold
+    }
+
     pub fn update(&mut self, timestamp: TimestampNs) {
+        match self.flow {
+            ProposalFlow::Classic => self.update_classic(timestamp),
+            ProposalFlow::V2 => self.update_v2(timestamp),
+        }
+    }
+
+    fn update_classic(&mut self, timestamp: TimestampNs) {
         match self.status {
             ProposalStatus::Rejected
             | ProposalStatus::Succeeded
@@ -217,9 +233,7 @@ impl Proposal {
             | ProposalStatus::Defeated
             | ProposalStatus::Executable
             | ProposalStatus::InProgress
-            | ProposalStatus::Failed => {
-                return;
-            }
+            | ProposalStatus::Failed => {}
             ProposalStatus::Created => {
                 if self.expiration_ns.0 > 0 && timestamp.0 >= self.expiration_ns.0 {
                     self.status = ProposalStatus::Expired;
@@ -240,6 +254,52 @@ impl Proposal {
                         ProposalStatus::Succeeded
                     };
                 }
+            }
+            ProposalStatus::Slashed | ProposalStatus::Sandbox | ProposalStatus::Scheduled => {
+                // Not reachable for classic proposals.
+            }
+        }
+    }
+
+    fn update_v2(&mut self, timestamp: TimestampNs) {
+        match self.status {
+            ProposalStatus::Rejected
+            | ProposalStatus::Succeeded
+            | ProposalStatus::Expired
+            | ProposalStatus::Defeated
+            | ProposalStatus::Executable
+            | ProposalStatus::InProgress
+            | ProposalStatus::Failed
+            | ProposalStatus::Slashed => {}
+            ProposalStatus::Created => {
+                if self.expiration_ns.0 > 0 && timestamp.0 >= self.expiration_ns.0 {
+                    self.status = ProposalStatus::Expired;
+                }
+            }
+            ProposalStatus::Sandbox => {
+                let sandbox_end = self.approval_time_ns.unwrap().0 + self.sandbox_duration_ns.0;
+                if timestamp.0 >= sandbox_end {
+                    self.status = ProposalStatus::Defeated;
+                }
+            }
+            ProposalStatus::Scheduled | ProposalStatus::Voting => {
+                let voting_start = self.voting_start_time_ns.unwrap().0;
+                let voting_end = voting_start + self.voting_duration_ns.0;
+                if timestamp.0 >= voting_end {
+                    let final_status = self.compute_final_status();
+                    self.status = if final_status != ProposalStatus::Succeeded {
+                        final_status
+                    } else if self.has_actions() {
+                        ProposalStatus::Executable
+                    } else {
+                        ProposalStatus::Succeeded
+                    };
+                } else if timestamp.0 >= voting_start {
+                    self.status = ProposalStatus::Voting;
+                }
+            }
+            ProposalStatus::Timelock => {
+                // Not reachable for v2 proposals.
             }
         }
     }
@@ -282,14 +342,18 @@ impl Proposal {
 
 #[near]
 impl Contract {
-    /// Creates a new proposal with the given metadata.
-    /// The proposal is created by the predecessor account and requires a deposit to cover the
-    /// storage and the base proposal fee.
+    /// Creates a new proposal of the given flow.
+    ///
+    /// * Classic: requires a deposit covering the storage and `base_proposal_fee`.
+    /// * V2: requires a deposit covering the storage and `bond_amount`. The bond stays locked on
+    ///   the proposal and is recoverable via `claim_bond` once the proposal reaches a terminal
+    ///   non-slashed state.
     #[payable]
     pub fn create_proposal(
         &mut self,
         metadata: ProposalMetadata,
         actions: Option<Vec<ProposalAction>>,
+        flow: ProposalFlow,
     ) -> ProposalId {
         self.assert_not_paused();
         let attached_deposit = env::attached_deposit();
@@ -310,6 +374,14 @@ impl Contract {
         } else {
             U64(0)
         };
+        let (timelock_duration_ns, bond_amount, flow_fee) = match flow {
+            ProposalFlow::Classic => (
+                self.config.timelock_duration_ns,
+                NearToken::from_yoctonear(0),
+                self.config.base_proposal_fee,
+            ),
+            ProposalFlow::V2 => (U64(0), self.config.bond_amount, self.config.bond_amount),
+        };
         let proposal = Proposal {
             id: proposal_id,
             creation_time_ns: creation_time_ns.into(),
@@ -318,7 +390,6 @@ impl Contract {
             rejecter_id: None,
             voting_start_time_ns: None,
             voting_duration_ns: self.config.voting_duration_ns,
-            timelock_duration_ns: self.config.timelock_duration_ns,
             expiration_ns,
             snapshot_and_state: None,
             votes: vec![VoteStats::default(); 3],
@@ -328,6 +399,12 @@ impl Contract {
             quorum_floor: NearToken::from_yoctonear(0),
             approval_threshold_bps: 0,
             actions,
+            flow,
+            timelock_duration_ns,
+            approval_time_ns: None,
+            bond_amount,
+            sandbox_duration_ns: U64(0),
+            sandbox_threshold_bps: 0,
         };
         let storage_usage = env::storage_usage();
         self.proposals.push(proposal.into());
@@ -339,7 +416,7 @@ impl Contract {
         let storage_added_cost = env::storage_byte_cost()
             .checked_mul(storage_added as _)
             .unwrap();
-        let required_deposit = near_add(self.config.base_proposal_fee, storage_added_cost);
+        let required_deposit = near_add(flow_fee, storage_added_cost);
         require!(
             attached_deposit >= required_deposit,
             format!(
@@ -422,5 +499,56 @@ impl Contract {
     pub fn internal_expect_proposal_updated(&self, proposal_id: ProposalId) -> Proposal {
         self.internal_get_proposal(proposal_id)
             .expect(format!("Proposal {} is not found", proposal_id).as_str())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+
+    fn date_ns(year: i32, month: u32, day: u32) -> u64 {
+        NaiveDate::from_ymd_opt(year, month, day)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp_nanos_opt()
+            .unwrap() as u64
+    }
+
+    #[test]
+    fn test_next_monday_from_each_weekday() {
+        // 2026-04-06 is Monday, next Monday is 2026-04-13
+        let expected = date_ns(2026, 4, 13);
+
+        assert_eq!(next_voting_start_ns(date_ns(2026, 4, 6)), expected); // Monday
+        assert_eq!(next_voting_start_ns(date_ns(2026, 4, 7)), expected); // Tuesday
+        assert_eq!(next_voting_start_ns(date_ns(2026, 4, 8)), expected); // Wednesday
+        assert_eq!(next_voting_start_ns(date_ns(2026, 4, 9)), expected); // Thursday
+        assert_eq!(next_voting_start_ns(date_ns(2026, 4, 10)), expected); // Friday
+        assert_eq!(next_voting_start_ns(date_ns(2026, 4, 11)), expected); // Saturday
+        assert_eq!(next_voting_start_ns(date_ns(2026, 4, 12)), expected); // Sunday
+    }
+
+    #[test]
+    fn test_next_monday_from_time_within_day() {
+        let expected = date_ns(2026, 4, 13);
+        assert_eq!(
+            next_voting_start_ns(date_ns(2026, 4, 6) + 12 * 3600 * 1_000_000_000),
+            expected
+        );
+        assert_eq!(
+            next_voting_start_ns(date_ns(2026, 4, 7) - 1_000_000_000),
+            expected
+        );
+        assert_eq!(
+            next_voting_start_ns(date_ns(2026, 4, 12) + 12 * 3600 * 1_000_000_000),
+            expected
+        );
+        assert_eq!(
+            next_voting_start_ns(date_ns(2026, 4, 13) - 1_000_000_000),
+            expected
+        );
     }
 }

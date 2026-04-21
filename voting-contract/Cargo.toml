@@ -33,8 +33,14 @@ container_build_command = [
     "--locked",
 ]
 
+[features]
+sandbox = []
+
 [dependencies]
 merkle-tree = { path = "../merkle-tree" }
 common = { path = "../common" }
 near-sdk.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+chrono = "0.4"

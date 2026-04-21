@@ -1,51 +1,163 @@
-use crate::StorageKeys;
 use crate::config::Config;
-use crate::proposal::{Proposal, ProposalStatus, VProposal};
+use crate::proposal::{Proposal, ProposalFlow, ProposalStatus, VProposal};
 use crate::*;
-use near_sdk::Gas;
 use near_sdk::borsh::{self, BorshDeserialize};
 use near_sdk::json_types::U64;
 use near_sdk::store::{LookupMap, Vector};
+use near_sdk::Gas;
 
 const MIGRATE_STATE_GAS: Gas = Gas::from_tgas(50);
 const GET_CONFIG_GAS: Gas = Gas::from_tgas(5);
 
-const DEFAULT_QUORUM_THRESHOLD_BPS: u16 = 3500;
-const DEFAULT_QUORUM_FLOOR_NEAR: u128 = 1000;
-const DEFAULT_APPROVAL_THRESHOLD_BPS: u16 = 5000;
-const TIMELOCK_DURATION_NS: u64 = 14 * 24 * 60 * 60 * 1_000_000_000; // 14 days
-const PROPOSAL_EXPIRATION_NS: u64 = 7 * 24 * 60 * 60 * 1_000_000_000; // 7 days
+// Defaults applied when migrating a contract that predates the merged flow.
+const DEFAULT_BOND_AMOUNT_NEAR: u128 = 10;
+const DEFAULT_SIMPLE_MAJORITY_BPS: u16 = 5_000;
+const DEFAULT_STRONG_MAJORITY_BPS: u16 = 6_667;
+const DEFAULT_SANDBOX_DURATION_NS: u64 = 14 * 24 * 60 * 60 * 1_000_000_000; // 14 days
+const DEFAULT_SANDBOX_THRESHOLD_BPS: u16 = 3_000;
 
-const COUNCIL_MEMBERS: &[&str] = &[
-    "as.near",
-    "c65255255d689f74ae46b0a89f04bbaab94d3a51ab9dc4b79b1e9b61e7cf6816",
-    "e953bb69d1129e4da87b99739373884a0b57d5e64a65fdc868478f22e6c31eac",
-    "fastnear-hos.near",
-    "root.near",
-];
-
-/// Config from v1.0.2 (without council_ids, timelock, expiration, or quorum).
-#[derive(BorshDeserialize)]
+/// Config from v1.0.3 (pre-merge). No v2 fields.
+#[derive(Clone, BorshDeserialize, near_sdk::borsh::BorshSerialize)]
 #[borsh(crate = "borsh")]
 struct OldConfig {
     venear_account_id: AccountId,
     reviewer_ids: Vec<AccountId>,
+    council_ids: Vec<AccountId>,
     owner_account_id: AccountId,
     voting_duration_ns: U64,
-    max_number_of_voting_options: u8,
+    timelock_duration_ns: U64,
     base_proposal_fee: NearToken,
     vote_storage_fee: NearToken,
     guardians: Vec<AccountId>,
+    proposal_expiration_ns: U64,
     proposed_new_owner_account_id: Option<AccountId>,
+    quorum_threshold_bps: u16,
+    quorum_floor: NearToken,
+    approval_threshold_bps: u16,
 }
 
-/// Contract state from v1.0.2.
-/// All proposals are V1(ProposalV1) — the current VProposal enum handles this.
+/// Legacy classic-flow proposal shape stored under `VProposal::Current` at v1.0.3.
+#[derive(Clone, BorshDeserialize, near_sdk::borsh::BorshSerialize)]
+#[borsh(crate = "borsh")]
+struct LegacyProposalClassic {
+    id: ProposalId,
+    creation_time_ns: U64,
+    proposer_id: AccountId,
+    reviewer_id: Option<AccountId>,
+    rejecter_id: Option<AccountId>,
+    voting_start_time_ns: Option<U64>,
+    voting_duration_ns: U64,
+    timelock_duration_ns: U64,
+    expiration_ns: U64,
+    snapshot_and_state: Option<crate::proposal::SnapshotAndState>,
+    votes: Vec<crate::proposal::VoteStats>,
+    total_votes: crate::proposal::VoteStats,
+    status: ProposalStatus,
+    quorum_threshold_bps: u16,
+    quorum_floor: NearToken,
+    approval_threshold_bps: u16,
+    actions: Option<Vec<crate::proposal::ProposalAction>>,
+}
+
+/// Legacy pre-v1.0.3 proposal shape, if any are still tagged as `V1` in storage.
+#[derive(Clone, BorshDeserialize, near_sdk::borsh::BorshSerialize)]
+#[borsh(crate = "borsh")]
+struct LegacyProposalV1 {
+    id: ProposalId,
+    creation_time_ns: U64,
+    proposer_id: AccountId,
+    reviewer_id: Option<AccountId>,
+    voting_start_time_ns: Option<U64>,
+    voting_duration_ns: U64,
+    rejected: bool,
+    snapshot_and_state: Option<crate::proposal::SnapshotAndState>,
+    votes: Vec<crate::proposal::VoteStats>,
+    total_votes: crate::proposal::VoteStats,
+    status: ProposalStatus,
+}
+
+/// Legacy `VProposal` envelope as it was encoded at v1.0.3.
+#[derive(Clone, BorshDeserialize, near_sdk::borsh::BorshSerialize)]
+#[borsh(crate = "borsh")]
+enum LegacyVProposal {
+    V1(LegacyProposalV1),
+    Current(LegacyProposalClassic),
+}
+
+impl From<LegacyProposalClassic> for Proposal {
+    fn from(c: LegacyProposalClassic) -> Self {
+        Self {
+            id: c.id,
+            creation_time_ns: c.creation_time_ns,
+            proposer_id: c.proposer_id,
+            reviewer_id: c.reviewer_id,
+            rejecter_id: c.rejecter_id,
+            approval_time_ns: None,
+            voting_start_time_ns: c.voting_start_time_ns,
+            voting_duration_ns: c.voting_duration_ns,
+            timelock_duration_ns: c.timelock_duration_ns,
+            expiration_ns: c.expiration_ns,
+            snapshot_and_state: c.snapshot_and_state,
+            votes: c.votes,
+            total_votes: c.total_votes,
+            status: c.status,
+            quorum_threshold_bps: c.quorum_threshold_bps,
+            quorum_floor: c.quorum_floor,
+            approval_threshold_bps: c.approval_threshold_bps,
+            actions: c.actions,
+            bond_amount: NearToken::from_yoctonear(0),
+            sandbox_duration_ns: U64(0),
+            sandbox_threshold_bps: 0,
+            flow: ProposalFlow::Classic,
+        }
+    }
+}
+
+impl From<LegacyProposalV1> for Proposal {
+    fn from(v1: LegacyProposalV1) -> Self {
+        Self {
+            id: v1.id,
+            creation_time_ns: v1.creation_time_ns,
+            proposer_id: v1.proposer_id,
+            reviewer_id: v1.reviewer_id,
+            rejecter_id: None,
+            approval_time_ns: None,
+            voting_start_time_ns: v1.voting_start_time_ns,
+            voting_duration_ns: v1.voting_duration_ns,
+            timelock_duration_ns: U64(0),
+            expiration_ns: U64(0),
+            snapshot_and_state: v1.snapshot_and_state,
+            votes: v1.votes,
+            total_votes: v1.total_votes,
+            status: v1.status,
+            quorum_threshold_bps: 0,
+            quorum_floor: NearToken::from_yoctonear(0),
+            approval_threshold_bps: 0,
+            actions: None,
+            bond_amount: NearToken::from_yoctonear(0),
+            sandbox_duration_ns: U64(0),
+            sandbox_threshold_bps: 0,
+            flow: ProposalFlow::Classic,
+        }
+    }
+}
+
+impl From<LegacyVProposal> for Proposal {
+    fn from(v: LegacyVProposal) -> Self {
+        match v {
+            LegacyVProposal::V1(v1) => v1.into(),
+            LegacyVProposal::Current(c) => c.into(),
+        }
+    }
+}
+
+/// Contract state from v1.0.3 (pre-merge). No `last_voting_end_ns`; proposals are tagged with
+/// `LegacyVProposal` (`V1` | `Current(LegacyProposalClassic)`).
 #[derive(BorshDeserialize)]
 #[borsh(crate = "borsh")]
 struct OldContract {
     config: OldConfig,
-    proposals: Vector<VProposal>,
+    proposals: Vector<LegacyVProposal>,
     proposal_metadata: Vector<VProposalMetadata>,
     votes: LookupMap<(AccountId, ProposalId), u8>,
     approved_proposals: Vector<ProposalId>,
@@ -54,49 +166,47 @@ struct OldContract {
 
 #[near]
 impl Contract {
-    /// Private method to migrate the contract state from v1.0.2.
+    /// Private method to migrate the contract state from v1.0.3 (pre-merge) to the merged flow.
+    /// Rewrites every legacy proposal into the unified `Proposal` shape with `flow = Classic`.
     #[private]
     #[init(ignore_state)]
     pub fn migrate_state() -> Self {
         let old: OldContract = env::state_read().unwrap();
-        let quorum_floor = NearToken::from_near(DEFAULT_QUORUM_FLOOR_NEAR);
 
-        // Migrate proposals
         let mut proposals = Vector::new(StorageKeys::Proposal);
-        for old_vp in old.proposals.iter() {
-            let mut p: Proposal = old_vp.clone().into();
-            p.quorum_threshold_bps = DEFAULT_QUORUM_THRESHOLD_BPS;
-            p.quorum_floor = quorum_floor;
-            p.approval_threshold_bps = DEFAULT_APPROVAL_THRESHOLD_BPS;
-            // Re-evaluate proposals that were Finished (now Succeeded via borsh index 4).
-            if p.status == ProposalStatus::Succeeded {
-                p.status = p.compute_final_status();
-            }
-            proposals.push(VProposal::Current(p));
+        for legacy in old.proposals.iter() {
+            let proposal: Proposal = legacy.clone().into();
+            proposals.push(VProposal::Current(proposal));
         }
 
         Self {
             config: Config {
                 venear_account_id: old.config.venear_account_id,
                 reviewer_ids: old.config.reviewer_ids,
-                council_ids: COUNCIL_MEMBERS.iter().map(|s| s.parse().unwrap()).collect(),
+                council_ids: old.config.council_ids,
                 owner_account_id: old.config.owner_account_id,
                 voting_duration_ns: old.config.voting_duration_ns,
-                timelock_duration_ns: U64(TIMELOCK_DURATION_NS),
+                timelock_duration_ns: old.config.timelock_duration_ns,
                 base_proposal_fee: old.config.base_proposal_fee,
+                bond_amount: NearToken::from_near(DEFAULT_BOND_AMOUNT_NEAR),
                 vote_storage_fee: old.config.vote_storage_fee,
                 guardians: old.config.guardians,
-                proposal_expiration_ns: U64(PROPOSAL_EXPIRATION_NS),
+                proposal_expiration_ns: old.config.proposal_expiration_ns,
                 proposed_new_owner_account_id: old.config.proposed_new_owner_account_id,
-                quorum_threshold_bps: DEFAULT_QUORUM_THRESHOLD_BPS,
-                quorum_floor,
-                approval_threshold_bps: DEFAULT_APPROVAL_THRESHOLD_BPS,
+                quorum_threshold_bps: old.config.quorum_threshold_bps,
+                quorum_floor: old.config.quorum_floor,
+                approval_threshold_bps: old.config.approval_threshold_bps,
+                simple_majority_threshold_bps: DEFAULT_SIMPLE_MAJORITY_BPS,
+                strong_majority_threshold_bps: DEFAULT_STRONG_MAJORITY_BPS,
+                sandbox_duration_ns: U64(DEFAULT_SANDBOX_DURATION_NS),
+                sandbox_threshold_bps: DEFAULT_SANDBOX_THRESHOLD_BPS,
             },
             proposals,
             proposal_metadata: old.proposal_metadata,
             votes: old.votes,
             approved_proposals: old.approved_proposals,
             paused: old.paused,
+            last_voting_end_ns: 0,
         }
     }
 

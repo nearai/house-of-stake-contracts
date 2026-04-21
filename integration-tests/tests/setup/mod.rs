@@ -23,8 +23,6 @@ pub const DEFAULT_BOND_AMOUNT: NearToken = NearToken::from_near(10);
 pub const LOCKUP_WASM_FILEPATH: &str = "../res/local/lockup_contract.wasm";
 pub const VENEAR_WASM_FILEPATH: &str = "../res/local/venear_contract.wasm";
 pub const VOTING_WASM_FILEPATH: &str = "../res/local/voting_contract.wasm";
-pub const VOTING_V2_WASM_FILEPATH: &str = "../res/local/voting_contract_v2.wasm";
-pub const PREVIOUS_VOTING_WASM_FILEPATH: &str = "../res/release/1_0_2/voting_contract.wasm";
 pub const SANDBOX_CONTRACT_WASM_FILEPATH: &str =
     "../res/local/sandbox_staking_whitelist_contract.wasm";
 
@@ -58,8 +56,6 @@ pub struct VenearTestWorkspaceBuilder {
     pub min_lockup_deposit: NearToken,
     pub annual_growth_rate_ns: Fraction,
     pub deploy_voting: bool,
-    pub use_previous_voting_wasm: bool,
-    pub use_voting_v2: bool,
     pub voting_duration_ns: u64,
     pub timelock_duration_ns: u64,
     pub base_proposal_fee: NearToken,
@@ -90,8 +86,6 @@ impl Default for VenearTestWorkspaceBuilder {
                 denominator: 10u128.pow(30).into(),
             },
             deploy_voting: false,
-            use_previous_voting_wasm: false,
-            use_voting_v2: false,
             voting_duration_ns: VOTING_DURATION_SECONDS * NS_IN_SECOND,
             timelock_duration_ns: TIMELOCK_DURATION_SECONDS * NS_IN_SECOND,
             base_proposal_fee: NearToken::from_millinear(100),
@@ -275,14 +269,7 @@ impl VenearTestWorkspaceBuilder {
         );
 
         let voting = if self.deploy_voting {
-            let voting_wasm_path = if self.use_previous_voting_wasm {
-                PREVIOUS_VOTING_WASM_FILEPATH
-            } else if self.use_voting_v2 {
-                VOTING_V2_WASM_FILEPATH
-            } else {
-                VOTING_WASM_FILEPATH
-            };
-            let voting_wasm = std::fs::read(voting_wasm_path)?;
+            let voting_wasm = std::fs::read(VOTING_WASM_FILEPATH)?;
 
             let contract = sandbox.dev_create_account().await?;
 
@@ -291,60 +278,28 @@ impl VenearTestWorkspaceBuilder {
             let owner = sandbox.dev_create_account().await?;
             let guardian = sandbox.dev_create_account().await?;
 
-            let args = if self.use_previous_voting_wasm {
-                // Old WASM (v1.0.2) expects max_number_of_voting_options and lacks
-                // council_ids, timelock, expiration, quorum fields.
-                json!({
-                    "config": {
-                        "venear_account_id": venear.id(),
-                        "reviewer_ids": &[reviewer.id()],
-                        "owner_account_id": owner.id(),
-                        "voting_duration_ns": self.voting_duration_ns.to_string(),
-                        "max_number_of_voting_options": 16u8,
-                        "base_proposal_fee": self.base_proposal_fee,
-                        "vote_storage_fee": self.vote_storage_fee,
-                        "guardians": &[guardian.id()],
-                    },
-                })
-            } else if self.use_voting_v2 {
-                json!({
-                    "config": {
-                        "venear_account_id": venear.id(),
-                        "reviewer_ids": &[reviewer.id()],
-                        "council_ids": &[council.id()],
-                        "owner_account_id": owner.id(),
-                        "voting_duration_ns": self.voting_duration_ns.to_string(),
-                        "bond_amount": self.bond_amount,
-                        "vote_storage_fee": self.vote_storage_fee,
-                        "guardians": &[guardian.id()],
-                        "proposal_expiration_ns": self.proposal_expiration_ns.to_string(),
-                        "quorum_threshold_bps": self.quorum_threshold_bps,
-                        "quorum_floor": self.quorum_floor,
-                        "simple_majority_threshold_bps": self.simple_majority_threshold_bps,
-                        "strong_majority_threshold_bps": self.strong_majority_threshold_bps,
-                        "sandbox_duration_ns": self.sandbox_duration_ns.to_string(),
-                        "sandbox_threshold_bps": self.sandbox_threshold_bps,
-                    },
-                })
-            } else {
-                json!({
-                    "config": {
-                        "venear_account_id": venear.id(),
-                        "reviewer_ids": &[reviewer.id()],
-                        "owner_account_id": owner.id(),
-                        "voting_duration_ns": self.voting_duration_ns.to_string(),
-                        "base_proposal_fee": self.base_proposal_fee,
-                        "vote_storage_fee": self.vote_storage_fee,
-                        "guardians": &[guardian.id()],
-                        "council_ids": &[council.id()],
-                        "timelock_duration_ns": self.timelock_duration_ns.to_string(),
-                        "proposal_expiration_ns": self.proposal_expiration_ns.to_string(),
-                        "quorum_threshold_bps": self.quorum_threshold_bps,
-                        "quorum_floor": self.quorum_floor,
-                        "approval_threshold_bps": self.approval_threshold_bps,
-                    },
-                })
-            };
+            let args = json!({
+                "config": {
+                    "venear_account_id": venear.id(),
+                    "reviewer_ids": &[reviewer.id()],
+                    "council_ids": &[council.id()],
+                    "owner_account_id": owner.id(),
+                    "voting_duration_ns": self.voting_duration_ns.to_string(),
+                    "timelock_duration_ns": self.timelock_duration_ns.to_string(),
+                    "base_proposal_fee": self.base_proposal_fee,
+                    "bond_amount": self.bond_amount,
+                    "vote_storage_fee": self.vote_storage_fee,
+                    "guardians": &[guardian.id()],
+                    "proposal_expiration_ns": self.proposal_expiration_ns.to_string(),
+                    "quorum_threshold_bps": self.quorum_threshold_bps,
+                    "quorum_floor": self.quorum_floor,
+                    "approval_threshold_bps": self.approval_threshold_bps,
+                    "simple_majority_threshold_bps": self.simple_majority_threshold_bps,
+                    "strong_majority_threshold_bps": self.strong_majority_threshold_bps,
+                    "sandbox_duration_ns": self.sandbox_duration_ns.to_string(),
+                    "sandbox_threshold_bps": self.sandbox_threshold_bps,
+                },
+            });
 
             let outcome = contract
                 .batch(contract.id())
@@ -402,18 +357,6 @@ impl VenearTestWorkspaceBuilder {
 
     pub fn with_voting(mut self) -> Self {
         self.deploy_voting = true;
-        self
-    }
-
-    pub fn with_previous_voting(mut self) -> Self {
-        self.deploy_voting = true;
-        self.use_previous_voting_wasm = true;
-        self
-    }
-
-    pub fn with_voting_v2(mut self) -> Self {
-        self.deploy_voting = true;
-        self.use_voting_v2 = true;
         self
     }
 
@@ -727,9 +670,9 @@ impl VenearTestWorkspace {
     pub async fn fast_forward_to_proposal_status_v2(
         &self,
         proposal_id: u32,
-        target: voting_contract_v2::proposal::ProposalStatus,
+        target: voting_contract::proposal::ProposalStatus,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        use voting_contract_v2::proposal::ProposalStatus;
+        use voting_contract::proposal::ProposalStatus;
 
         let proposal = self.get_proposal(proposal_id).await?;
         let current_status: ProposalStatus =

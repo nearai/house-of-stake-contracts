@@ -134,7 +134,8 @@ impl Contract {
         self.config.quorum_floor = quorum_floor;
     }
 
-    /// Updates the approval threshold in basis points (e.g. 5000 = 50%, 6667 = ~66.67%).
+    /// Updates the classic-flow approval threshold in basis points (e.g. 5000 = 50%,
+    /// 6667 = ~66.67%).
     /// Can only be called by the owner.
     /// Requires 1 yocto NEAR.
     #[payable]
@@ -146,6 +147,68 @@ impl Contract {
             "Approval threshold must be <= 10000 bps"
         );
         self.config.approval_threshold_bps = approval_threshold_bps;
+    }
+
+    /// Updates the v2 bond amount required to create a proposal.
+    /// Can only be called by the owner.
+    /// Requires 1 yocto NEAR.
+    #[payable]
+    pub fn set_bond_amount(&mut self, bond_amount: NearToken) {
+        assert_one_yocto();
+        self.assert_owner();
+        self.config.bond_amount = bond_amount;
+    }
+
+    /// Updates the v2 simple majority threshold in basis points (e.g. 5000 = 50%).
+    /// Can only be called by the owner.
+    /// Requires 1 yocto NEAR.
+    #[payable]
+    pub fn set_simple_majority_threshold_bps(&mut self, simple_majority_threshold_bps: u16) {
+        assert_one_yocto();
+        self.assert_owner();
+        require!(
+            simple_majority_threshold_bps <= 10_000,
+            "Simple majority threshold must be <= 10000 bps"
+        );
+        self.config.simple_majority_threshold_bps = simple_majority_threshold_bps;
+    }
+
+    /// Updates the v2 strong (super) majority threshold in basis points (e.g. 6667 ≈ 66.67%).
+    /// Can only be called by the owner.
+    /// Requires 1 yocto NEAR.
+    #[payable]
+    pub fn set_strong_majority_threshold_bps(&mut self, strong_majority_threshold_bps: u16) {
+        assert_one_yocto();
+        self.assert_owner();
+        require!(
+            strong_majority_threshold_bps <= 10_000,
+            "Strong majority threshold must be <= 10000 bps"
+        );
+        self.config.strong_majority_threshold_bps = strong_majority_threshold_bps;
+    }
+
+    /// Updates the v2 sandbox duration in seconds.
+    /// Can only be called by the owner.
+    /// Requires 1 yocto NEAR.
+    #[payable]
+    pub fn set_sandbox_duration(&mut self, sandbox_duration_sec: u32) {
+        assert_one_yocto();
+        self.assert_owner();
+        self.config.sandbox_duration_ns = (sandbox_duration_sec as u64 * 10u64.pow(9)).into();
+    }
+
+    /// Updates the v2 sandbox threshold in basis points (e.g. 3000 = 30%).
+    /// Can only be called by the owner.
+    /// Requires 1 yocto NEAR.
+    #[payable]
+    pub fn set_sandbox_threshold_bps(&mut self, sandbox_threshold_bps: u16) {
+        assert_one_yocto();
+        self.assert_owner();
+        require!(
+            sandbox_threshold_bps <= 10_000,
+            "Sandbox threshold must be <= 10000 bps"
+        );
+        self.config.sandbox_threshold_bps = sandbox_threshold_bps;
     }
 }
 
