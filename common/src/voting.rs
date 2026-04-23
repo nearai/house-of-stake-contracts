@@ -15,7 +15,7 @@ pub enum VoteOption {
 pub enum ProposalStatus {
     /// The proposal was created and is waiting for the approver to approve it.
     Created,
-    /// The proposal was rejected by the council during the timelock period.
+    /// The proposal was rejected by a reviewer before approval.
     Rejected,
     /// Legacy: the proposal was approved by the approver and is waiting for the voting to start.
     ApprovalLegacy,
@@ -23,6 +23,8 @@ pub enum ProposalStatus {
     Voting,
     /// Legacy: the proposal voting is finished and the results are available.
     FinishLegacy,
+    /// The proposal was vetoed by a council member during the timelock period.
+    Vetoed,
     /// The voting has ended and the proposal is in the timelock period awaiting potential council veto.
     Timelock,
     /// The proposal expired before being approved by a reviewer.

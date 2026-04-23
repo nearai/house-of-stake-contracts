@@ -92,9 +92,9 @@ pub struct Proposal {
     pub creation_time_ns: U64,
     /// The account ID of the proposer.
     pub proposer_id: AccountId,
-    /// The account ID of the reviewer, who approved the proposal.
+    /// The account ID of the reviewer who approved or rejected the proposal.
     pub reviewer_id: Option<AccountId>,
-    /// The account ID of the council member who rejected (vetoed) the proposal.
+    /// The account ID of the council member who vetoed the proposal.
     pub rejecter_id: Option<AccountId>,
     /// The timestamp when the voting starts.
     pub voting_start_time_ns: Option<U64>,
@@ -179,6 +179,7 @@ impl Proposal {
     pub fn update(&mut self, timestamp: TimestampNs) {
         match self.status {
             ProposalStatus::Rejected
+            | ProposalStatus::Vetoed
             | ProposalStatus::Succeeded
             | ProposalStatus::Expired
             | ProposalStatus::Defeated

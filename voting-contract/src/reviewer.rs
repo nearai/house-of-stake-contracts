@@ -34,24 +34,46 @@ impl Contract {
             )
     }
 
-    /// Rejects (vetoes) the proposal during the timelock period.
+    /// Rejects the proposal before it has been approved.
+    /// Requires 1 yocto attached to the call.
+    /// Can only be called by the reviewers while the proposal is in the Created status.
+    #[payable]
+    pub fn reject_proposal(&mut self, proposal_id: ProposalId) {
+        assert_one_yocto();
+        self.assert_not_paused();
+        self.assert_called_by_reviewer();
+        let mut proposal = self.internal_expect_proposal_updated(proposal_id);
+
+        if proposal.status != ProposalStatus::Created {
+            env::panic_str("Proposal can only be rejected while in the Created status");
+        }
+
+        proposal.reviewer_id = Some(env::predecessor_account_id());
+        proposal.status = ProposalStatus::Rejected;
+
+        events::emit::reject_proposal_action(&env::predecessor_account_id(), proposal_id);
+
+        self.internal_set_proposal(proposal);
+    }
+
+    /// Vetoes the proposal during the timelock period.
     /// Requires 1 yocto attached to the call.
     /// Can only be called by the council members.
     #[payable]
-    pub fn reject_proposal(&mut self, proposal_id: ProposalId) {
+    pub fn veto_proposal(&mut self, proposal_id: ProposalId) {
         assert_one_yocto();
         self.assert_not_paused();
         self.assert_called_by_council();
         let mut proposal = self.internal_expect_proposal_updated(proposal_id);
 
         if proposal.status != ProposalStatus::Timelock {
-            env::panic_str("Proposal can only be rejected during the timelock period");
+            env::panic_str("Proposal can only be vetoed during the timelock period");
         }
 
         proposal.rejecter_id = Some(env::predecessor_account_id());
-        proposal.status = ProposalStatus::Rejected;
+        proposal.status = ProposalStatus::Vetoed;
 
-        events::emit::reject_proposal_action(&env::predecessor_account_id(), proposal_id);
+        events::emit::veto_proposal_action(&env::predecessor_account_id(), proposal_id);
 
         self.internal_set_proposal(proposal);
     }

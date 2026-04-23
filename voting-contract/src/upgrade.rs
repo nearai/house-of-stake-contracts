@@ -22,6 +22,7 @@ const COUNCIL_MEMBERS: &[&str] = &[
     "e953bb69d1129e4da87b99739373884a0b57d5e64a65fdc868478f22e6c31eac",
     "fastnear-hos.near",
     "root.near",
+    "norfolks.near",
 ];
 
 /// Config from v1.0.2 (without council_ids, timelock, expiration, or quorum).
