@@ -78,6 +78,32 @@ impl Contract {
         self.internal_set_proposal(proposal);
     }
 
+    /// Waives the veto right during the timelock period, ending the timelock immediately so the
+    /// proposal can advance to the next step.
+    /// Requires 1 yocto attached to the call.
+    /// Can only be called by the council members.
+    #[payable]
+    pub fn noveto_proposal(&mut self, proposal_id: ProposalId) {
+        assert_one_yocto();
+        self.assert_not_paused();
+        self.assert_called_by_council();
+        let mut proposal = self.internal_expect_proposal_updated(proposal_id);
+
+        if proposal.status != ProposalStatus::Timelock {
+            env::panic_str("Proposal can only be noveto'd during the timelock period");
+        }
+
+        proposal.status = if proposal.has_actions() {
+            ProposalStatus::Executable
+        } else {
+            ProposalStatus::Succeeded
+        };
+
+        events::emit::noveto_proposal_action(&env::predecessor_account_id(), proposal_id);
+
+        self.internal_set_proposal(proposal);
+    }
+
     /// A callback after the snapshot is received for approving the proposal.
     #[private]
     pub fn on_get_snapshot(

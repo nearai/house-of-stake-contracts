@@ -48,6 +48,13 @@ pub mod emit {
 
     #[derive(Serialize)]
     #[serde(crate = "near_sdk::serde")]
+    pub(crate) struct NoVetoProposalData<'a> {
+        pub(crate) account_id: &'a AccountId,
+        pub(crate) proposal_id: u32,
+    }
+
+    #[derive(Serialize)]
+    #[serde(crate = "near_sdk::serde")]
     pub(crate) struct ProposalData<'a> {
         pub(crate) proposer_id: &'a AccountId,
         pub(crate) proposal_id: u32,
@@ -175,6 +182,17 @@ pub mod emit {
             "venear",
             "proposal_veto",
             VetoProposalData {
+                account_id,
+                proposal_id,
+            },
+        );
+    }
+
+    pub fn noveto_proposal_action(account_id: &AccountId, proposal_id: u32) {
+        log_event(
+            "venear",
+            "proposal_noveto",
+            NoVetoProposalData {
                 account_id,
                 proposal_id,
             },
