@@ -5,6 +5,7 @@ mod governance;
 mod metadata;
 mod pause;
 pub mod proposal;
+pub mod queue;
 mod reviewer;
 mod upgrade;
 mod votes;
@@ -16,7 +17,7 @@ use crate::metadata::VProposalMetadata;
 use crate::proposal::{ProposalId, VProposal};
 use common::account::*;
 use common::venear::VenearGrowthConfig;
-use near_sdk::store::{LookupMap, Vector};
+use near_sdk::store::{IterableSet, LookupMap, Vector};
 use near_sdk::{AccountId, BorshStorageKey, NearToken, PanicOnDefault, env, near, require, sys};
 
 #[derive(BorshStorageKey)]
@@ -26,6 +27,8 @@ enum StorageKeys {
     ProposalMetadata,
     Votes,
     ApprovedProposals,
+    PendingQueue,
+    ActiveProposals,
 }
 
 #[derive(PanicOnDefault)]
@@ -41,8 +44,10 @@ pub struct Contract {
     /// The paused contract will not accept new proposals, new votes or updated votes, proposals
     /// cannot be approved or rejected.
     paused: bool,
-    /// Tracks when the last scheduled voting period ends.
-    last_voting_end_ns: u64,
+    /// Approved proposals that are waiting for a slot.
+    pending_queue: Vector<ProposalId>,
+    /// Set of proposals currently occupying an active slot.
+    active_proposals: IterableSet<ProposalId>,
 }
 
 #[near]
@@ -57,7 +62,8 @@ impl Contract {
             votes: LookupMap::new(StorageKeys::Votes),
             approved_proposals: Vector::new(StorageKeys::ApprovedProposals),
             paused: false,
-            last_voting_end_ns: 0,
+            pending_queue: Vector::new(StorageKeys::PendingQueue),
+            active_proposals: IterableSet::new(StorageKeys::ActiveProposals),
         }
     }
 }

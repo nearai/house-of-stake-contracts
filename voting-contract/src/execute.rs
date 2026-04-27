@@ -11,6 +11,7 @@ impl Contract {
     /// Can be called by anyone. The proposal must be in `Executable` status.
     pub fn execute_proposal(&mut self, proposal_id: ProposalId) -> Promise {
         self.assert_not_paused();
+        self.internal_advance_queue();
         let mut proposal = self.internal_expect_proposal_updated(proposal_id);
 
         require!(
@@ -56,6 +57,7 @@ impl Contract {
 
     #[private]
     pub fn on_execute_proposal(&mut self, proposal_id: ProposalId) {
+        self.internal_advance_queue();
         let mut proposal = self.internal_expect_proposal_updated(proposal_id);
 
         let all_succeeded = (0..env::promise_results_count())

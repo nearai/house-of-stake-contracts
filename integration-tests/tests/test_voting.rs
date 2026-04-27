@@ -44,10 +44,7 @@ async fn test_voting() -> Result<(), Box<dyn std::error::Error>> {
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(proposal["total_votes"]["total_votes"].as_u64().unwrap(), 0);
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
-        ProposalStatus::Created
-    );
+    assert_eq!(get_status(&proposal)?, ProposalStatus::Created);
 
     assert!(
         approve_proposal(&v, &user_a, proposal_id).await.is_err(),
@@ -58,10 +55,7 @@ async fn test_voting() -> Result<(), Box<dyn std::error::Error>> {
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(proposal["total_votes"]["total_votes"].as_u64().unwrap(), 0);
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
-        ProposalStatus::Voting
-    );
+    assert_eq!(get_status(&proposal)?, ProposalStatus::Voting);
     assert_eq!(
         proposal["reviewer_id"].as_str().unwrap(),
         v.voting.as_ref().unwrap().reviewer.id().as_str()
@@ -260,10 +254,7 @@ async fn test_voting() -> Result<(), Box<dyn std::error::Error>> {
     v.fast_forward_to_proposal_status(proposal_id, ProposalStatus::Timelock)
         .await?;
     let proposal = v.get_proposal(proposal_id).await?;
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
-        ProposalStatus::Timelock
-    );
+    assert_eq!(get_status(&proposal)?, ProposalStatus::Timelock);
 
     // Voting on a Timelock proposal should fail
     let outcome = user_b
@@ -288,10 +279,7 @@ async fn test_voting() -> Result<(), Box<dyn std::error::Error>> {
     v.fast_forward_to_proposal_status(proposal_id, ProposalStatus::Succeeded)
         .await?;
     let proposal = v.get_proposal(proposal_id).await?;
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
-        ProposalStatus::Succeeded
-    );
+    assert_eq!(get_status(&proposal)?, ProposalStatus::Succeeded);
 
     Ok(())
 }
@@ -319,7 +307,7 @@ async fn test_voting_reject_proposal() -> Result<(), Box<dyn std::error::Error>>
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Timelock,
         "Proposal should be in Timelock status"
     );
@@ -381,10 +369,7 @@ async fn test_voting_reject_proposal() -> Result<(), Box<dyn std::error::Error>>
     );
 
     let proposal = v.get_proposal(proposal_id).await?;
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
-        ProposalStatus::Rejected
-    );
+    assert_eq!(get_status(&proposal)?, ProposalStatus::Rejected);
     // rejecter_id should be the council member who vetoed
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
@@ -1251,7 +1236,7 @@ async fn test_voting_proposal_expiration() -> Result<(), Box<dyn std::error::Err
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Expired,
         "Proposal should be Expired after expiration window"
     );
@@ -1293,7 +1278,7 @@ async fn test_quorum_succeeded() -> Result<(), Box<dyn std::error::Error>> {
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Succeeded,
         "Proposal should succeed with enough For votes"
     );
@@ -1329,7 +1314,7 @@ async fn test_quorum_defeated_insufficient_votes() -> Result<(), Box<dyn std::er
     // Defeated proposals should skip timelock entirely
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Defeated,
         "Defeated proposal should skip timelock"
     );
@@ -1364,7 +1349,7 @@ async fn test_quorum_defeated_succeed_failed() -> Result<(), Box<dyn std::error:
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Defeated,
         "Proposal should be defeated: more Against than For"
     );
@@ -1400,7 +1385,7 @@ async fn test_quorum_with_abstain() -> Result<(), Box<dyn std::error::Error>> {
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Succeeded,
         "Abstain should count for quorum, and For/(For+Against) = 100% >= 50%"
     );
@@ -1464,7 +1449,7 @@ async fn test_proposal_with_transfer_action() -> Result<(), Box<dyn std::error::
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Executable,
         "Proposal with actions should be Executable after timelock"
     );
@@ -1480,7 +1465,7 @@ async fn test_proposal_with_transfer_action() -> Result<(), Box<dyn std::error::
     // Verify status is now Succeeded
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Succeeded,
         "Proposal should be Succeeded after execution"
     );
@@ -1568,10 +1553,7 @@ async fn test_proposal_with_function_call_actions() -> Result<(), Box<dyn std::e
     );
 
     let proposal = v.get_proposal(proposal_id).await?;
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
-        ProposalStatus::Succeeded,
-    );
+    assert_eq!(get_status(&proposal)?, ProposalStatus::Succeeded,);
 
     // Verify both actions executed
     let config: serde_json::Value = v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
@@ -1637,7 +1619,7 @@ async fn test_execute_proposal_failure_is_terminal() -> Result<(), Box<dyn std::
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Failed,
         "Proposal should be Failed after execution failure"
     );

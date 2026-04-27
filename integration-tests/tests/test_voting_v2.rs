@@ -1,7 +1,7 @@
 mod setup;
 
 use crate::setup::voting_helpers::*;
-use crate::setup::{VenearTestWorkspaceBuilder, DEFAULT_BOND_AMOUNT, NS_IN_SECOND};
+use crate::setup::{DEFAULT_BOND_AMOUNT, NS_IN_SECOND, VenearTestWorkspaceBuilder};
 use near_sdk::{Gas, NearToken};
 use near_workspaces::AccountId;
 use serde_json::json;
@@ -43,10 +43,7 @@ async fn test_voting_v2() -> Result<(), Box<dyn std::error::Error>> {
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(proposal["total_votes"]["total_votes"].as_u64().unwrap(), 0);
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
-        ProposalStatus::Created
-    );
+    assert_eq!(get_status(&proposal)?, ProposalStatus::Created);
 
     // Bond should be set after creation
     assert_ne!(
@@ -72,10 +69,7 @@ async fn test_voting_v2() -> Result<(), Box<dyn std::error::Error>> {
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(proposal["total_votes"]["total_votes"].as_u64().unwrap(), 0);
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
-        ProposalStatus::Sandbox
-    );
+    assert_eq!(get_status(&proposal)?, ProposalStatus::Sandbox);
     assert_eq!(
         proposal["reviewer_id"].as_str().unwrap(),
         v.voting.as_ref().unwrap().reviewer.id().as_str()
@@ -185,7 +179,7 @@ async fn test_voting_v2() -> Result<(), Box<dyn std::error::Error>> {
     // Should have been scheduled after meeting 30% threshold
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Scheduled,
         "Should be Scheduled after meeting 30% threshold"
     );
@@ -200,10 +194,7 @@ async fn test_voting_v2() -> Result<(), Box<dyn std::error::Error>> {
     v.fast_forward_to_proposal_status_v2(proposal_id, ProposalStatus::Voting)
         .await?;
     let proposal = v.get_proposal(proposal_id).await?;
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
-        ProposalStatus::Voting,
-    );
+    assert_eq!(get_status(&proposal)?, ProposalStatus::Voting,);
 
     // Change vote to Against (now in Voting, change is allowed)
     let outcome = user_a
@@ -358,10 +349,7 @@ async fn test_voting_v2() -> Result<(), Box<dyn std::error::Error>> {
     v.fast_forward_to_proposal_status_v2(proposal_id, ProposalStatus::Succeeded)
         .await?;
     let proposal = v.get_proposal(proposal_id).await?;
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
-        ProposalStatus::Succeeded
-    );
+    assert_eq!(get_status(&proposal)?, ProposalStatus::Succeeded);
 
     Ok(())
 }
@@ -395,7 +383,7 @@ async fn test_voting_v2_reject_proposal() -> Result<(), Box<dyn std::error::Erro
 
     let proposal = v.get_proposal(proposal_id_1).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Voting,
         "Proposal 1 should be in Voting status"
     );
@@ -457,10 +445,7 @@ async fn test_voting_v2_reject_proposal() -> Result<(), Box<dyn std::error::Erro
     );
 
     let proposal = v.get_proposal(proposal_id_1).await?;
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
-        ProposalStatus::Rejected
-    );
+    assert_eq!(get_status(&proposal)?, ProposalStatus::Rejected);
     assert_eq!(
         proposal["rejecter_id"].as_str().unwrap(),
         v.voting.as_ref().unwrap().council.id().as_str(),
@@ -481,7 +466,7 @@ async fn test_voting_v2_reject_proposal() -> Result<(), Box<dyn std::error::Erro
 
     let proposal = v.get_proposal(proposal_id_2).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Scheduled,
         "Proposal 2 should be in Scheduled status"
     );
@@ -507,10 +492,7 @@ async fn test_voting_v2_reject_proposal() -> Result<(), Box<dyn std::error::Erro
     );
 
     let proposal = v.get_proposal(proposal_id_2).await?;
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
-        ProposalStatus::Rejected
-    );
+    assert_eq!(get_status(&proposal)?, ProposalStatus::Rejected);
     assert_eq!(
         proposal["rejecter_id"].as_str().unwrap(),
         v.voting.as_ref().unwrap().council.id().as_str(),
@@ -1393,7 +1375,7 @@ async fn test_voting_v2_proposal_expiration() -> Result<(), Box<dyn std::error::
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Expired,
         "Proposal should be Expired after expiration window"
     );
@@ -1462,7 +1444,7 @@ async fn test_v2_quorum_succeeded() -> Result<(), Box<dyn std::error::Error>> {
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Succeeded,
         "Proposal should succeed with enough For votes"
     );
@@ -1503,7 +1485,7 @@ async fn test_v2_quorum_defeated_insufficient_votes() -> Result<(), Box<dyn std:
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Defeated,
         "Proposal should be Defeated after voting ends"
     );
@@ -1546,7 +1528,7 @@ async fn test_v2_quorum_defeated_succeed_failed() -> Result<(), Box<dyn std::err
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Defeated,
         "Proposal should be defeated: more Against than For"
     );
@@ -1592,7 +1574,7 @@ async fn test_v2_quorum_with_abstain() -> Result<(), Box<dyn std::error::Error>>
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Succeeded,
         "Abstain should count for quorum, and For/(For+Against) = 100% >= 50%"
     );
@@ -1662,7 +1644,7 @@ async fn test_v2_proposal_with_transfer_action() -> Result<(), Box<dyn std::erro
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Executable,
         "Proposal with actions should be Executable after voting succeeds"
     );
@@ -1678,7 +1660,7 @@ async fn test_v2_proposal_with_transfer_action() -> Result<(), Box<dyn std::erro
     // Verify status is now Succeeded
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Succeeded,
         "Proposal should be Succeeded after execution"
     );
@@ -1766,10 +1748,7 @@ async fn test_v2_proposal_with_function_call_actions() -> Result<(), Box<dyn std
     );
 
     let proposal = v.get_proposal(proposal_id).await?;
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
-        ProposalStatus::Succeeded,
-    );
+    assert_eq!(get_status(&proposal)?, ProposalStatus::Succeeded,);
 
     // Verify both actions executed
     let config: serde_json::Value = v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
@@ -1841,7 +1820,7 @@ async fn test_v2_execute_proposal_failure_is_terminal() -> Result<(), Box<dyn st
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Failed,
         "Proposal should be Failed after execution failure"
     );
@@ -1882,10 +1861,7 @@ async fn test_v2_slash_proposal() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let proposal = v.get_proposal(proposal_id).await?;
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
-        ProposalStatus::Slashed,
-    );
+    assert_eq!(get_status(&proposal)?, ProposalStatus::Slashed,);
     assert_ne!(
         proposal["bond_amount"].as_str().unwrap(),
         "0",
@@ -1894,7 +1870,10 @@ async fn test_v2_slash_proposal() -> Result<(), Box<dyn std::error::Error>> {
 
     // Cannot claim bond from slashed proposal
     let outcome = claim_bond(&v, &user, proposal_id).await?;
-    assert!(outcome.is_failure(), "Cannot claim bond from slashed proposal");
+    assert!(
+        outcome.is_failure(),
+        "Cannot claim bond from slashed proposal"
+    );
 
     Ok(())
 }
@@ -1953,10 +1932,7 @@ async fn test_bond_zero_amount() -> Result<(), Box<dyn std::error::Error>> {
     let proposal_id = create_proposal_v2(&v, &user, None).await?;
     let proposal = v.get_proposal(proposal_id).await?;
 
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
-        ProposalStatus::Created,
-    );
+    assert_eq!(get_status(&proposal)?, ProposalStatus::Created,);
     assert_eq!(
         proposal["bond_amount"].as_str().unwrap(),
         "0",
@@ -1966,10 +1942,7 @@ async fn test_bond_zero_amount() -> Result<(), Box<dyn std::error::Error>> {
     approve_proposal_v2(&v, &reviewer, proposal_id, MajorityType::Simple).await?;
     let proposal_after = v.get_proposal(proposal_id).await?;
 
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal_after["status"].clone())?,
-        ProposalStatus::Sandbox,
-    );
+    assert_eq!(get_status(&proposal_after)?, ProposalStatus::Sandbox,);
     assert_eq!(
         proposal_after["bond_amount"].as_str().unwrap(),
         "0",
@@ -2016,7 +1989,7 @@ async fn test_strong_majority() -> Result<(), Box<dyn std::error::Error>> {
 
     let proposal = v.get_proposal(proposal_simple).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Succeeded,
         "60/40 split should pass simple majority"
     );
@@ -2041,7 +2014,7 @@ async fn test_strong_majority() -> Result<(), Box<dyn std::error::Error>> {
 
     let proposal = v.get_proposal(proposal_strong_fail).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Defeated,
         "60/40 split should fail strong majority (~66.67%)"
     );
@@ -2068,7 +2041,7 @@ async fn test_strong_majority() -> Result<(), Box<dyn std::error::Error>> {
 
     let proposal = v.get_proposal(proposal_strong_pass).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Succeeded,
         "801/1201 (66.69%) should barely pass strong majority"
     );
@@ -2102,17 +2075,14 @@ async fn test_sandbox_expiry_defeated() -> Result<(), Box<dyn std::error::Error>
     .await?;
 
     let proposal = v.get_proposal(proposal_id).await?;
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
-        ProposalStatus::Sandbox,
-    );
+    assert_eq!(get_status(&proposal)?, ProposalStatus::Sandbox,);
 
     // user_a votes For — 200/1200 = 16.7% < 30%, stays in Sandbox
     vote_for_option(&v, &user_a, proposal_id, VoteOption::For).await?;
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Sandbox,
         "Should still be in Sandbox (16.7% < 30%)"
     );
@@ -2127,7 +2097,7 @@ async fn test_sandbox_expiry_defeated() -> Result<(), Box<dyn std::error::Error>
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        get_status(&proposal)?,
         ProposalStatus::Defeated,
         "Sandbox should expire to Defeated when threshold not met"
     );
@@ -2136,7 +2106,9 @@ async fn test_sandbox_expiry_defeated() -> Result<(), Box<dyn std::error::Error>
 }
 
 #[tokio::test]
-async fn test_two_proposals_scheduled_sequentially() -> Result<(), Box<dyn std::error::Error>> {
+async fn test_two_proposals_scheduled_concurrently() -> Result<(), Box<dyn std::error::Error>> {
+    // Under the concurrency model, two approved V2 proposals share active slots rather than
+    // serializing voting windows. Both can graduate Sandbox and run Voting in parallel.
     let v = VenearTestWorkspaceBuilder::default()
         .with_voting()
         .build()
@@ -2146,78 +2118,56 @@ async fn test_two_proposals_scheduled_sequentially() -> Result<(), Box<dyn std::
     v.transfer_and_lock(&user_a, NearToken::from_near(1000))
         .await?;
 
-    // Create and approve two proposals
     let proposal_1 = create_proposal_v2(&v, &user_a, None).await?;
     let proposal_2 = create_proposal_v2(&v, &user_a, None).await?;
     let reviewer = &v.voting.as_ref().unwrap().reviewer;
     approve_proposal_v2(&v, reviewer, proposal_1, MajorityType::Simple).await?;
     approve_proposal_v2(&v, reviewer, proposal_2, MajorityType::Simple).await?;
 
-    // Both should be in Sandbox
+    // Both should be in Sandbox immediately (cap is 3, so both fit).
     let p1 = v.get_proposal(proposal_1).await?;
     let p2 = v.get_proposal(proposal_2).await?;
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(p1["status"].clone())?,
-        ProposalStatus::Sandbox,
-    );
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(p2["status"].clone())?,
-        ProposalStatus::Sandbox,
-    );
+    assert_eq!(get_status(&p1)?, ProposalStatus::Sandbox,);
+    assert_eq!(get_status(&p2)?, ProposalStatus::Sandbox,);
 
-    // Graduate proposal 1 from Sandbox — gets Scheduled
+    // Graduate proposal 1 from Sandbox.
     vote_for_option(&v, &user_a, proposal_1, VoteOption::For).await?;
     let p1 = v.get_proposal(proposal_1).await?;
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(p1["status"].clone())?,
-        ProposalStatus::Scheduled,
-    );
+    assert_eq!(get_status(&p1)?, ProposalStatus::Scheduled,);
     let p1_voting_start: u64 = p1["voting_start_time_ns"].as_str().unwrap().parse()?;
-    let p1_voting_duration: u64 = p1["voting_duration_ns"].as_str().unwrap().parse()?;
-    let p1_voting_end = p1_voting_start + p1_voting_duration;
 
-    // Graduate proposal 2 from Sandbox — should be scheduled after proposal 1's voting ends
+    // Graduate proposal 2. Its voting_start is computed from the current block time
+    // (not from `p1_voting_end`), so both windows overlap instead of serializing.
     vote_for_option(&v, &user_a, proposal_2, VoteOption::For).await?;
     let p2 = v.get_proposal(proposal_2).await?;
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(p2["status"].clone())?,
-        ProposalStatus::Scheduled,
-    );
+    assert_eq!(get_status(&p2)?, ProposalStatus::Scheduled,);
     let p2_voting_start: u64 = p2["voting_start_time_ns"].as_str().unwrap().parse()?;
 
-    // In sandbox mode, next_voting_start_ns adds 120s after max(now, last_voting_end).
-    // Since p1_voting_end is far in the future, p2 is scheduled exactly 120s after p1 ends.
+    // In sandbox feature mode, `next_voting_start_ns(now) = now + 120s`. The two calls happen
+    // within a few blocks, so the difference is bounded well below one full cycle.
     let scheduling_delay_ns: u64 = 120 * NS_IN_SECOND;
-    assert_eq!(
-        p2_voting_start,
-        p1_voting_end + scheduling_delay_ns,
-        "Proposal 2 should start exactly 120s after proposal 1 voting ends"
+    let delta = p2_voting_start.saturating_sub(p1_voting_start);
+    assert!(
+        delta < scheduling_delay_ns,
+        "Proposals should be scheduled concurrently, not serialized (delta={}ns)",
+        delta
     );
 
-    // Both proposals should reach Voting at their scheduled times
+    // Fast-forward to proposal 1's voting window. Because p2_voting_start < p1_voting_start + 120s,
+    // proposal 2 should also have crossed its own voting_start by then.
     v.fast_forward_to_proposal_status_v2(proposal_1, ProposalStatus::Voting)
         .await?;
     let p1 = v.get_proposal(proposal_1).await?;
     let p2 = v.get_proposal(proposal_2).await?;
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(p1["status"].clone())?,
+        get_status(&p1)?,
         ProposalStatus::Voting,
         "Proposal 1 should be Voting"
     );
     assert_eq!(
-        serde_json::from_value::<ProposalStatus>(p2["status"].clone())?,
-        ProposalStatus::Scheduled,
-        "Proposal 2 should still be Scheduled while proposal 1 is Voting"
-    );
-
-    // Fast-forward to proposal 2's voting start
-    v.fast_forward_to_proposal_status_v2(proposal_2, ProposalStatus::Voting)
-        .await?;
-    let p2 = v.get_proposal(proposal_2).await?;
-    assert_eq!(
-        serde_json::from_value::<ProposalStatus>(p2["status"].clone())?,
+        get_status(&p2)?,
         ProposalStatus::Voting,
-        "Proposal 2 should now be Voting after proposal 1 finished"
+        "Proposal 2 should also be Voting in parallel, not waiting for proposal 1 to finish"
     );
 
     Ok(())

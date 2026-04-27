@@ -106,8 +106,7 @@ impl Contract {
     pub fn set_proposal_expiration(&mut self, proposal_expiration_sec: u32) {
         assert_one_yocto();
         self.assert_owner();
-        self.config.proposal_expiration_ns =
-            (proposal_expiration_sec as u64 * 10u64.pow(9)).into();
+        self.config.proposal_expiration_ns = (proposal_expiration_sec as u64 * 10u64.pow(9)).into();
     }
 
     /// Updates the quorum threshold in basis points (e.g. 3500 = 35%).
@@ -209,6 +208,21 @@ impl Contract {
             "Sandbox threshold must be <= 10000 bps"
         );
         self.config.sandbox_threshold_bps = sandbox_threshold_bps;
+    }
+
+    /// Updates the maximum number of simultaneously active (Sandbox/Scheduled/Voting) proposals.
+    /// Can only be called by the owner.
+    /// Requires 1 yocto NEAR.
+    #[payable]
+    pub fn set_max_active_proposals(&mut self, max_active_proposals: u32) {
+        assert_one_yocto();
+        self.assert_owner();
+        require!(
+            max_active_proposals > 0,
+            "max_active_proposals must be greater than 0"
+        );
+        self.config.max_active_proposals = max_active_proposals;
+        self.internal_advance_queue();
     }
 }
 

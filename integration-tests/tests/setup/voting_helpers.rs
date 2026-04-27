@@ -1,6 +1,14 @@
 use super::{VOTING_WASM_FILEPATH, VenearTestWorkspace};
 use near_sdk::{Gas, NearToken};
 use serde_json::json;
+use voting_contract::proposal::ProposalStatus;
+use voting_contract::queue::QueueState;
+
+pub fn get_status(
+    proposal: &serde_json::Value,
+) -> Result<ProposalStatus, Box<dyn std::error::Error>> {
+    Ok(serde_json::from_value(proposal["status"].clone())?)
+}
 
 pub async fn attempt_voting_upgrade(
     user: &near_workspaces::Account,
@@ -70,7 +78,7 @@ pub async fn create_proposal_v2(
             "actions": actions,
             "flow": "V2",
         }))
-        .deposit(NearToken::from_millinear(10_100))
+        .deposit(NearToken::from_millinear(200))
         .gas(Gas::from_tgas(50))
         .transact()
         .await?;
@@ -201,6 +209,45 @@ pub async fn claim_bond(
         .call(v.voting_id(), "claim_bond")
         .args_json(json!({ "proposal_id": proposal_id }))
         .gas(Gas::from_tgas(50))
+        .transact()
+        .await?;
+    Ok(outcome)
+}
+
+pub async fn get_queue_state(
+    v: &VenearTestWorkspace,
+) -> Result<QueueState, Box<dyn std::error::Error>> {
+    Ok(v.sandbox
+        .view(v.voting_id(), "get_queue_state")
+        .await?
+        .json()?)
+}
+
+/// Call advance_queue as any account. Returns the execution outcome.
+pub async fn advance_queue(
+    v: &VenearTestWorkspace,
+    caller: &near_workspaces::Account,
+) -> Result<near_workspaces::result::ExecutionFinalResult, Box<dyn std::error::Error>> {
+    let outcome = caller
+        .call(v.voting_id(), "advance_queue")
+        .args_json(json!({}))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    Ok(outcome)
+}
+
+/// Council-only veto helper.
+pub async fn reject_proposal(
+    v: &VenearTestWorkspace,
+    caller: &near_workspaces::Account,
+    proposal_id: u32,
+) -> Result<near_workspaces::result::ExecutionFinalResult, Box<dyn std::error::Error>> {
+    let outcome = caller
+        .call(v.voting_id(), "reject_proposal")
+        .args_json(json!({ "proposal_id": proposal_id }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(100))
         .transact()
         .await?;
     Ok(outcome)

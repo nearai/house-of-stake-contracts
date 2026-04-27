@@ -3,6 +3,7 @@ use crate::*;
 use common::{TimestampNs, events, near_add, near_sub};
 use near_sdk::json_types::{Base64VecU8, U64};
 use near_sdk::{Gas, Promise};
+use std::collections::HashMap;
 
 pub type ProposalId = u32;
 
@@ -143,6 +144,8 @@ pub enum ProposalStatus {
     Sandbox,
     /// The proposal met the sandbox threshold and is scheduled to start voting.
     Scheduled,
+    /// Approved by a reviewer but waiting for an active slot to open.
+    Queued,
 }
 
 /// The snapshot of the Merkle tree and the global state at the moment when the proposal was
@@ -258,6 +261,9 @@ impl Proposal {
             ProposalStatus::Slashed | ProposalStatus::Sandbox | ProposalStatus::Scheduled => {
                 // Not reachable for classic proposals.
             }
+            ProposalStatus::Queued => {
+                // Queued waits for explicit promotion by the scheduler.
+            }
         }
     }
 
@@ -300,6 +306,9 @@ impl Proposal {
             }
             ProposalStatus::Timelock => {
                 // Not reachable for v2 proposals.
+            }
+            ProposalStatus::Queued => {
+                // Queued waits for explicit promotion by the scheduler.
             }
         }
     }
@@ -431,18 +440,9 @@ impl Contract {
         proposal_id
     }
 
-    /// Returns the proposal information by the given proposal ID.
     pub fn get_proposal(&self, proposal_id: ProposalId) -> Option<ProposalInfo> {
-        self.internal_get_proposal(proposal_id)
-            .map(|proposal| ProposalInfo {
-                proposal,
-                metadata: self
-                    .proposal_metadata
-                    .get(proposal_id)
-                    .unwrap()
-                    .clone()
-                    .into(),
-            })
+        let overrides = self.get_proposals_virtual_updates();
+        self.resolve_proposal_info(proposal_id, &overrides)
     }
 
     /// Returns the number of proposals.
@@ -450,14 +450,13 @@ impl Contract {
         self.proposals.len()
     }
 
-    /// Returns a list of proposals from the given index based on the proposal ID order.
     pub fn get_proposals(&self, from_index: u32, limit: Option<u32>) -> Vec<ProposalInfo> {
-        let from_index = from_index;
+        let overrides = self.get_proposals_virtual_updates();
         let limit = limit.unwrap_or(u32::MAX);
         let to_index = std::cmp::min(from_index.saturating_add(limit), self.get_num_proposals());
         (from_index..to_index)
             .into_iter()
-            .filter_map(|i| self.get_proposal(i))
+            .filter_map(|i| self.resolve_proposal_info(i, &overrides))
             .collect()
     }
 
@@ -466,10 +465,8 @@ impl Contract {
         self.approved_proposals.len()
     }
 
-    /// Returns a list of approved proposals from the given index based on the approved proposals
-    /// order.
     pub fn get_approved_proposals(&self, from_index: u32, limit: Option<u32>) -> Vec<ProposalInfo> {
-        let from_index = from_index;
+        let overrides = self.get_proposals_virtual_updates();
         let limit = limit.unwrap_or(u32::MAX);
         let to_index = std::cmp::min(
             from_index.saturating_add(limit),
@@ -477,28 +474,66 @@ impl Contract {
         );
         (from_index..to_index)
             .into_iter()
-            .filter_map(|i| self.get_proposal(self.approved_proposals[i]))
+            .filter_map(|i| self.resolve_proposal_info(self.approved_proposals[i], &overrides))
             .collect()
     }
+}
+
+/// A proposal occupies an active slot while it is in Sandbox, Timelock, Scheduled, or Voting status.
+pub fn is_active_status(status: ProposalStatus) -> bool {
+    matches!(
+        status,
+        ProposalStatus::Sandbox
+            | ProposalStatus::Scheduled
+            | ProposalStatus::Voting
+            | ProposalStatus::Timelock
+    )
 }
 
 impl Contract {
     pub fn internal_set_proposal(&mut self, proposal: Proposal) {
         let proposal_id = proposal.id;
+        let new_active = is_active_status(proposal.status);
+        let was_active = self.active_proposals.contains(&proposal_id);
+        if !was_active && new_active {
+            self.active_proposals.insert(proposal_id);
+        } else if was_active && !new_active {
+            self.active_proposals.remove(&proposal_id);
+        }
+
         self.proposals[proposal_id] = proposal.into();
     }
 
-    pub fn internal_get_proposal(&self, proposal_id: ProposalId) -> Option<Proposal> {
+    fn resolve_proposal_info(
+        &self,
+        proposal_id: ProposalId,
+        overrides: &HashMap<ProposalId, Proposal>,
+    ) -> Option<ProposalInfo> {
+        let proposal = if let Some(p) = overrides.get(&proposal_id) {
+            p.clone()
+        } else {
+            self.internal_get_proposal(proposal_id)?.0
+        };
+        Some(ProposalInfo {
+            proposal,
+            metadata: self.proposal_metadata.get(proposal_id)?.clone().into(),
+        })
+    }
+
+    pub fn internal_get_proposal(&self, proposal_id: ProposalId) -> Option<(Proposal, bool)> {
         self.proposals.get(proposal_id).cloned().map(|proposal| {
             let mut proposal: Proposal = proposal.into();
+            let old_status = proposal.status;
             proposal.update(env::block_timestamp().into());
-            proposal
+            let changed = proposal.status != old_status;
+            (proposal, changed)
         })
     }
 
     pub fn internal_expect_proposal_updated(&self, proposal_id: ProposalId) -> Proposal {
         self.internal_get_proposal(proposal_id)
             .expect(format!("Proposal {} is not found", proposal_id).as_str())
+            .0
     }
 }
 

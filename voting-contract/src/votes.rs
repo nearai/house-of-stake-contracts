@@ -20,6 +20,7 @@ impl Contract {
         v_account: VAccount,
     ) {
         self.assert_not_paused();
+        self.internal_advance_queue();
         let attached_deposit = env::attached_deposit();
         require!(!attached_deposit.is_zero(), "Requires attached deposit");
 
@@ -32,7 +33,7 @@ impl Contract {
                     env::panic_str("Only 'For' votes are allowed during the sandbox period");
                 }
             }
-            ProposalStatus::Created | ProposalStatus::Scheduled => {
+            ProposalStatus::Created | ProposalStatus::Scheduled | ProposalStatus::Queued => {
                 env::panic_str("Voting is not started yet");
             }
             ProposalStatus::Rejected => env::panic_str("Proposal is rejected"),
@@ -117,19 +118,16 @@ impl Contract {
             &account_balance,
         );
 
-        // sandbox graduation schedule the real voting
+        // Sandbox graduation: schedule the real voting for the next Monday. Multiple proposals
+        // that graduate in the same week all share the same Monday — the concurrency cap is
+        // enforced by `active_proposals`, not by serializing voting windows.
         if proposal.flow == ProposalFlow::V2
             && proposal.status == ProposalStatus::Sandbox
             && proposal.sandbox_threshold_met()
         {
-            let now_ns = env::block_timestamp();
-            let after_ns = std::cmp::max(now_ns, self.last_voting_end_ns);
-            let scheduled_start = next_voting_start_ns(after_ns);
+            let scheduled_start = next_voting_start_ns(env::block_timestamp());
             proposal.voting_start_time_ns = Some(scheduled_start.into());
             proposal.status = ProposalStatus::Scheduled;
-            self.last_voting_end_ns = scheduled_start + proposal.voting_duration_ns.0;
-
-            events::emit::proposal_scheduled_action(proposal_id);
         }
 
         self.votes

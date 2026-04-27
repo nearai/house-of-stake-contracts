@@ -1,9 +1,9 @@
 use crate::config::Config;
-use crate::proposal::{Proposal, ProposalFlow, ProposalStatus, VProposal};
+use crate::proposal::{is_active_status, Proposal, ProposalFlow, ProposalStatus, VProposal};
 use crate::*;
 use near_sdk::borsh::{self, BorshDeserialize};
 use near_sdk::json_types::U64;
-use near_sdk::store::{LookupMap, Vector};
+use near_sdk::store::{IterableSet, LookupMap, Vector};
 use near_sdk::Gas;
 
 const MIGRATE_STATE_GAS: Gas = Gas::from_tgas(50);
@@ -15,6 +15,7 @@ const DEFAULT_SIMPLE_MAJORITY_BPS: u16 = 5_000;
 const DEFAULT_STRONG_MAJORITY_BPS: u16 = 6_667;
 const DEFAULT_SANDBOX_DURATION_NS: u64 = 14 * 24 * 60 * 60 * 1_000_000_000; // 14 days
 const DEFAULT_SANDBOX_THRESHOLD_BPS: u16 = 3_000;
+const DEFAULT_MAX_ACTIVE_PROPOSALS: u32 = 3;
 
 /// Config from v1.0.3 (pre-merge). No v2 fields.
 #[derive(Clone, BorshDeserialize, near_sdk::borsh::BorshSerialize)]
@@ -151,7 +152,7 @@ impl From<LegacyVProposal> for Proposal {
     }
 }
 
-/// Contract state from v1.0.3 (pre-merge). No `last_voting_end_ns`; proposals are tagged with
+/// Contract state from v1.0.3 (pre-merge). Proposals are tagged with
 /// `LegacyVProposal` (`V1` | `Current(LegacyProposalClassic)`).
 #[derive(BorshDeserialize)]
 #[borsh(crate = "borsh")]
@@ -174,8 +175,12 @@ impl Contract {
         let old: OldContract = env::state_read().unwrap();
 
         let mut proposals = Vector::new(StorageKeys::Proposal);
-        for legacy in old.proposals.iter() {
+        let mut active_proposals = IterableSet::new(StorageKeys::ActiveProposals);
+        for (idx, legacy) in old.proposals.iter().enumerate() {
             let proposal: Proposal = legacy.clone().into();
+            if is_active_status(proposal.status) {
+                active_proposals.insert(idx as ProposalId);
+            }
             proposals.push(VProposal::Current(proposal));
         }
 
@@ -200,13 +205,15 @@ impl Contract {
                 strong_majority_threshold_bps: DEFAULT_STRONG_MAJORITY_BPS,
                 sandbox_duration_ns: U64(DEFAULT_SANDBOX_DURATION_NS),
                 sandbox_threshold_bps: DEFAULT_SANDBOX_THRESHOLD_BPS,
+                max_active_proposals: DEFAULT_MAX_ACTIVE_PROPOSALS,
             },
             proposals,
             proposal_metadata: old.proposal_metadata,
             votes: old.votes,
             approved_proposals: old.approved_proposals,
             paused: old.paused,
-            last_voting_end_ns: 0,
+            pending_queue: Vector::new(StorageKeys::PendingQueue),
+            active_proposals,
         }
     }
 

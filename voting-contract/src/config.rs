@@ -64,6 +64,10 @@ pub struct Config {
 
     /// The "For" votes threshold to graduate a v2 proposal from Sandbox to Scheduled.
     pub sandbox_threshold_bps: u16,
+
+    /// Maximum number of proposals allowed in Sandbox/Scheduled/Voting simultaneously.
+    /// Extra approved proposals park in the pending queue until a slot frees.
+    pub max_active_proposals: u32,
 }
 
 #[near]

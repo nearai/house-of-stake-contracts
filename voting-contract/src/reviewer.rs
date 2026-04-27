@@ -1,7 +1,11 @@
-use crate::proposal::{MajorityType, ProposalFlow, ProposalInfo, ProposalStatus, SnapshotAndState};
+use crate::proposal::{
+    MajorityType, ProposalFlow, ProposalInfo, ProposalStatus, SnapshotAndState,
+};
+use crate::queue::activate_proposal;
 use crate::*;
 use common::global_state::{GlobalState, VGlobalState};
 use common::{TimestampNs, events};
+use near_sdk::json_types::U64;
 use near_sdk::{Gas, Promise, assert_one_yocto, ext_contract};
 
 pub const GAS_FOR_ON_GET_SNAPSHOT: Gas = Gas::from_tgas(30);
@@ -51,6 +55,7 @@ impl Contract {
         assert_one_yocto();
         self.assert_not_paused();
         self.assert_called_by_council();
+        self.internal_advance_queue();
         let mut proposal = self.internal_expect_proposal_updated(proposal_id);
 
         match (proposal.flow, proposal.status) {
@@ -65,6 +70,9 @@ impl Contract {
         events::emit::reject_proposal_action(&env::predecessor_account_id(), proposal_id);
 
         self.internal_set_proposal(proposal);
+        // The rejection just freed an active slot (V2 Voting/Scheduled → Rejected). Run the
+        // scheduler so the next queued proposal can fill it without waiting on another call.
+        self.internal_advance_queue();
     }
 
     /// Slashes a proposal that is still in Created status.
@@ -102,6 +110,9 @@ impl Contract {
         majority_type: Option<MajorityType>,
     ) -> ProposalInfo {
         self.assert_not_paused();
+        // Free any stale slots before deciding whether this approval can activate immediately.
+        self.internal_advance_queue();
+
         let mut proposal = self.internal_expect_proposal_updated(proposal_id);
 
         if proposal.status != ProposalStatus::Created {
@@ -125,27 +136,28 @@ impl Contract {
 
         match proposal.flow {
             ProposalFlow::Classic => {
-                proposal.voting_start_time_ns = Some(timestamp);
                 proposal.approval_threshold_bps = self.config.approval_threshold_bps;
-                proposal.status = ProposalStatus::Voting;
-                self.approved_proposals.push(proposal_id);
-                self.internal_set_proposal(proposal);
             }
             ProposalFlow::V2 => {
-                proposal.approval_time_ns = Some(timestamp);
                 proposal.approval_threshold_bps = match majority_type.unwrap() {
                     MajorityType::Simple => self.config.simple_majority_threshold_bps,
                     MajorityType::Strong => self.config.strong_majority_threshold_bps,
                 };
                 proposal.sandbox_duration_ns = self.config.sandbox_duration_ns;
                 proposal.sandbox_threshold_bps = self.config.sandbox_threshold_bps;
-                proposal.status = ProposalStatus::Sandbox;
-
-                self.internal_set_proposal(proposal);
-                self.approved_proposals.push(proposal_id);
-
-                events::emit::proposal_sandbox_action(proposal_id);
             }
+        }
+
+        self.approved_proposals.push(proposal_id);
+
+        if (self.active_proposals.len() as u64) < self.config.max_active_proposals as u64 {
+            let now: U64 = env::block_timestamp().into();
+            activate_proposal(&mut proposal, now);
+            self.internal_set_proposal(proposal);
+        } else {
+            proposal.status = ProposalStatus::Queued;
+            self.internal_set_proposal(proposal);
+            self.pending_queue.push(proposal_id);
         }
 
         self.get_proposal(proposal_id).unwrap()

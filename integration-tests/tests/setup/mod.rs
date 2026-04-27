@@ -18,7 +18,7 @@ pub const VOTING_DURATION_SECONDS: u64 = 60;
 pub const TIMELOCK_DURATION_SECONDS: u64 = 60;
 pub const PROPOSAL_EXPIRATION_SECONDS: u64 = 60;
 pub const SANDBOX_DURATION_SECONDS: u64 = 60;
-pub const DEFAULT_BOND_AMOUNT: NearToken = NearToken::from_near(10);
+pub const DEFAULT_BOND_AMOUNT: NearToken = NearToken::from_millinear(100);
 
 pub const LOCKUP_WASM_FILEPATH: &str = "../res/local/lockup_contract.wasm";
 pub const VENEAR_WASM_FILEPATH: &str = "../res/local/venear_contract.wasm";
@@ -69,6 +69,7 @@ pub struct VenearTestWorkspaceBuilder {
     pub strong_majority_threshold_bps: u16,
     pub sandbox_duration_ns: u64,
     pub sandbox_threshold_bps: u16,
+    pub max_active_proposals: u32,
 }
 
 impl Default for VenearTestWorkspaceBuilder {
@@ -99,6 +100,7 @@ impl Default for VenearTestWorkspaceBuilder {
             strong_majority_threshold_bps: 6667,
             sandbox_duration_ns: SANDBOX_DURATION_SECONDS * NS_IN_SECOND,
             sandbox_threshold_bps: 3000,
+            max_active_proposals: 3,
         }
     }
 }
@@ -298,6 +300,7 @@ impl VenearTestWorkspaceBuilder {
                     "strong_majority_threshold_bps": self.strong_majority_threshold_bps,
                     "sandbox_duration_ns": self.sandbox_duration_ns.to_string(),
                     "sandbox_threshold_bps": self.sandbox_threshold_bps,
+                    "max_active_proposals": self.max_active_proposals,
                 },
             });
 
@@ -362,6 +365,11 @@ impl VenearTestWorkspaceBuilder {
 
     pub fn bond_amount(mut self, bond_amount: NearToken) -> Self {
         self.bond_amount = bond_amount;
+        self
+    }
+
+    pub fn max_active_proposals(mut self, max_active_proposals: u32) -> Self {
+        self.max_active_proposals = max_active_proposals;
         self
     }
 }
