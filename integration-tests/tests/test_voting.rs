@@ -35,12 +35,6 @@ async fn test_voting() -> Result<(), Box<dyn std::error::Error>> {
         .await?
         .json()?;
     assert_eq!(num_proposals, 1);
-    let num_approved_proposals: u32 = v
-        .sandbox
-        .view(v.voting_id(), "get_num_approved_proposals")
-        .await?
-        .json()?;
-    assert_eq!(num_approved_proposals, 0);
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(proposal["total_votes"]["total_votes"].as_u64().unwrap(), 0);
@@ -66,12 +60,6 @@ async fn test_voting() -> Result<(), Box<dyn std::error::Error>> {
         .await?
         .json()?;
     assert_eq!(num_proposals, 1);
-    let num_approved_proposals: u32 = v
-        .sandbox
-        .view(v.voting_id(), "get_num_approved_proposals")
-        .await?
-        .json()?;
-    assert_eq!(num_approved_proposals, 1);
 
     let (user_a_merkle_proof, user_a_v_account): (serde_json::Value, serde_json::Value) = v
         .sandbox

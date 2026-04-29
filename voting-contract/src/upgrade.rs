@@ -172,7 +172,7 @@ impl Contract {
     #[private]
     #[init(ignore_state)]
     pub fn migrate_state() -> Self {
-        let old: OldContract = env::state_read().unwrap();
+        let mut old: OldContract = env::state_read().unwrap();
 
         let mut proposals = Vector::new(StorageKeys::Proposal);
         let mut active_proposals = IterableSet::new(StorageKeys::ActiveProposals);
@@ -183,6 +183,9 @@ impl Contract {
             }
             proposals.push(VProposal::Current(proposal));
         }
+
+        // The merged flow no longer tracks `approved_proposals` separately; release its storage.
+        old.approved_proposals.clear();
 
         Self {
             config: Config {
@@ -210,7 +213,6 @@ impl Contract {
             proposals,
             proposal_metadata: old.proposal_metadata,
             votes: old.votes,
-            approved_proposals: old.approved_proposals,
             paused: old.paused,
             pending_queue: Vector::new(StorageKeys::PendingQueue),
             active_proposals,

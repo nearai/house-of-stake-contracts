@@ -3,11 +3,13 @@ use crate::*;
 use common::{TimestampNs, events, near_add, near_sub};
 use near_sdk::json_types::{Base64VecU8, U64};
 use near_sdk::{Gas, Promise};
-use std::collections::HashMap;
 
 pub type ProposalId = u32;
 
 const NS_PER_DAY: u64 = 86_400_000_000_000;
+
+/// Bytes reserved at proposal-creation time to cover the future `SnapshotAndState` write.
+const SNAPSHOT_STORAGE_RESERVE_BYTES: u64 = 101;
 
 /// A single action that the voting contract can execute on behalf of a passed proposal.
 #[derive(Clone)]
@@ -205,13 +207,47 @@ impl Proposal {
         self.actions.as_ref().is_some_and(|a| !a.is_empty())
     }
 
+    /// Transitions a proposal into its first active status.
+    pub fn activate(&mut self, start_time: U64) {
+        match self.flow {
+            ProposalFlow::Classic => {
+                self.voting_start_time_ns = Some(start_time);
+                self.status = ProposalStatus::Voting;
+            }
+            ProposalFlow::V2 => {
+                self.approval_time_ns = Some(start_time);
+                self.status = ProposalStatus::Sandbox;
+            }
+        }
+    }
+
+    /// Latest timestamp at which an active proposal still occupies its slot. Used by the
+    /// scheduler to backdate the start of a queued proposal that fills a freed slot.
+    pub fn active_end_time_ns(&self) -> u64 {
+        match self.flow {
+            ProposalFlow::Classic => {
+                let voting_end = self.voting_start_time_ns.unwrap().0 + self.voting_duration_ns.0;
+                if self.compute_final_status() == ProposalStatus::Succeeded {
+                    voting_end + self.timelock_duration_ns.0
+                } else {
+                    voting_end
+                }
+            }
+            ProposalFlow::V2 => {
+                if let Some(voting_start) = self.voting_start_time_ns {
+                    voting_start.0 + self.voting_duration_ns.0
+                } else {
+                    self.approval_time_ns.unwrap().0 + self.sandbox_duration_ns.0
+                }
+            }
+        }
+    }
+
     pub fn sandbox_threshold_met(&self) -> bool {
-        let total_supply = self
-            .snapshot_and_state
-            .as_ref()
-            .unwrap()
-            .total_venear
-            .as_yoctonear();
+        let Some(snapshot) = self.snapshot_and_state.as_ref() else {
+            return false;
+        };
+        let total_supply = snapshot.total_venear.as_yoctonear();
         let for_power = self
             .votes
             .first()
@@ -314,13 +350,11 @@ impl Proposal {
     }
 
     pub fn compute_final_status(&self) -> ProposalStatus {
+        let Some(snapshot) = self.snapshot_and_state.as_ref() else {
+            return ProposalStatus::Defeated;
+        };
         // Quorum check
-        let total_supply = self
-            .snapshot_and_state
-            .as_ref()
-            .unwrap()
-            .total_venear
-            .as_yoctonear();
+        let total_supply = snapshot.total_venear.as_yoctonear();
         let bps_quorum = total_supply * (self.quorum_threshold_bps as u128) / 10_000;
         let quorum_required = std::cmp::max(bps_quorum, self.quorum_floor.as_yoctonear());
         let quorum_met = self.total_votes.total_venear.as_yoctonear() >= quorum_required;
@@ -420,7 +454,7 @@ impl Contract {
         self.proposals.flush();
         self.proposal_metadata.push(metadata.into());
         self.proposal_metadata.flush();
-        let updated_storage_usage = env::storage_usage();
+        let updated_storage_usage = env::storage_usage() + SNAPSHOT_STORAGE_RESERVE_BYTES;
         let storage_added = updated_storage_usage.saturating_sub(storage_usage);
         let storage_added_cost = env::storage_byte_cost()
             .checked_mul(storage_added as _)
@@ -441,8 +475,14 @@ impl Contract {
     }
 
     pub fn get_proposal(&self, proposal_id: ProposalId) -> Option<ProposalInfo> {
-        let overrides = self.get_proposals_virtual_updates();
-        self.resolve_proposal_info(proposal_id, &overrides)
+        let proposal = self
+            .get_proposals_virtual_updates()
+            .remove(&proposal_id)
+            .or_else(|| self.internal_get_proposal(proposal_id).map(|(p, _)| p))?;
+        Some(ProposalInfo {
+            proposal,
+            metadata: self.proposal_metadata.get(proposal_id)?.clone().into(),
+        })
     }
 
     /// Returns the number of proposals.
@@ -451,30 +491,19 @@ impl Contract {
     }
 
     pub fn get_proposals(&self, from_index: u32, limit: Option<u32>) -> Vec<ProposalInfo> {
-        let overrides = self.get_proposals_virtual_updates();
+        let mut overrides = self.get_proposals_virtual_updates();
         let limit = limit.unwrap_or(u32::MAX);
         let to_index = std::cmp::min(from_index.saturating_add(limit), self.get_num_proposals());
         (from_index..to_index)
-            .into_iter()
-            .filter_map(|i| self.resolve_proposal_info(i, &overrides))
-            .collect()
-    }
-
-    /// Returns the number of approved proposals.
-    pub fn get_num_approved_proposals(&self) -> u32 {
-        self.approved_proposals.len()
-    }
-
-    pub fn get_approved_proposals(&self, from_index: u32, limit: Option<u32>) -> Vec<ProposalInfo> {
-        let overrides = self.get_proposals_virtual_updates();
-        let limit = limit.unwrap_or(u32::MAX);
-        let to_index = std::cmp::min(
-            from_index.saturating_add(limit),
-            self.get_num_approved_proposals(),
-        );
-        (from_index..to_index)
-            .into_iter()
-            .filter_map(|i| self.resolve_proposal_info(self.approved_proposals[i], &overrides))
+            .map(|i| {
+                let proposal = overrides
+                    .remove(&i)
+                    .unwrap_or_else(|| self.internal_get_proposal(i).unwrap().0);
+                ProposalInfo {
+                    proposal,
+                    metadata: self.proposal_metadata.get(i).unwrap().clone().into(),
+                }
+            })
             .collect()
     }
 }
@@ -502,22 +531,6 @@ impl Contract {
         }
 
         self.proposals[proposal_id] = proposal.into();
-    }
-
-    fn resolve_proposal_info(
-        &self,
-        proposal_id: ProposalId,
-        overrides: &HashMap<ProposalId, Proposal>,
-    ) -> Option<ProposalInfo> {
-        let proposal = if let Some(p) = overrides.get(&proposal_id) {
-            p.clone()
-        } else {
-            self.internal_get_proposal(proposal_id)?.0
-        };
-        Some(ProposalInfo {
-            proposal,
-            metadata: self.proposal_metadata.get(proposal_id)?.clone().into(),
-        })
     }
 
     pub fn internal_get_proposal(&self, proposal_id: ProposalId) -> Option<(Proposal, bool)> {

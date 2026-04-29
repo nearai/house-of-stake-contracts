@@ -14,11 +14,32 @@ use merkle_tree::{MerkleProof, MerkleTreeSnapshot};
 
 use crate::config::Config;
 use crate::metadata::VProposalMetadata;
-use crate::proposal::{ProposalId, VProposal};
+use crate::proposal::{ProposalId, VProposal, VoteOption};
 use common::account::*;
 use common::venear::VenearGrowthConfig;
 use near_sdk::store::{IterableSet, LookupMap, Vector};
-use near_sdk::{AccountId, BorshStorageKey, NearToken, PanicOnDefault, env, near, require, sys};
+use near_sdk::{
+    AccountId, BorshStorageKey, NearToken, PanicOnDefault, env, ext_contract, near, require, sys,
+};
+
+#[allow(dead_code)]
+#[ext_contract(ext_venear)]
+pub(crate) trait ExtVenear {
+    fn get_snapshot(&self);
+}
+
+#[allow(dead_code)]
+#[ext_contract(ext_self)]
+pub(crate) trait ExtSelf {
+    fn on_get_snapshot(&mut self, proposal_id: ProposalId);
+    fn vote(
+        &mut self,
+        proposal_id: ProposalId,
+        vote: VoteOption,
+        merkle_proof: MerkleProof,
+        v_account: VAccount,
+    );
+}
 
 #[derive(BorshStorageKey)]
 #[near]
@@ -26,7 +47,6 @@ enum StorageKeys {
     Proposal,
     ProposalMetadata,
     Votes,
-    ApprovedProposals,
     PendingQueue,
     ActiveProposals,
 }
@@ -39,7 +59,6 @@ pub struct Contract {
     proposal_metadata: Vector<VProposalMetadata>,
     /// A map from the account ID and the proposal ID to the vote option index.
     votes: LookupMap<(AccountId, ProposalId), u8>,
-    approved_proposals: Vector<ProposalId>,
     /// A flag indicating whether the contract is paused.
     /// The paused contract will not accept new proposals, new votes or updated votes, proposals
     /// cannot be approved or rejected.
@@ -60,7 +79,6 @@ impl Contract {
             proposals: Vector::new(StorageKeys::Proposal),
             proposal_metadata: Vector::new(StorageKeys::ProposalMetadata),
             votes: LookupMap::new(StorageKeys::Votes),
-            approved_proposals: Vector::new(StorageKeys::ApprovedProposals),
             paused: false,
             pending_queue: Vector::new(StorageKeys::PendingQueue),
             active_proposals: IterableSet::new(StorageKeys::ActiveProposals),

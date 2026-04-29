@@ -6,64 +6,8 @@ use near_sdk::{Gas, NearToken};
 use serde_json::json;
 use voting_contract::proposal::{MajorityType, ProposalStatus, VoteOption};
 
-/// Approvals past the active-slot cap should land in `Queued` regardless of flow. Fill the
-/// cap=3 with V2 Sandboxes, then verify that both a 4th (Classic) and 5th (V2) approval end up
-/// in the pending queue in FIFO order.
-#[tokio::test]
-async fn test_queue_proposal_queued() -> Result<(), Box<dyn std::error::Error>> {
-    let v = VenearTestWorkspaceBuilder::default()
-        .with_voting()
-        .build()
-        .await?;
-    let user = v.create_account_with_lockup().await?;
-
-    let reviewer = &v.voting.as_ref().unwrap().reviewer;
-
-    // Create all proposals (3 V2, 1 Classic, 1 V2).
-    let p1 = create_proposal_v2(&v, &user, None).await?;
-    let p2 = create_proposal_v2(&v, &user, None).await?;
-    let p3 = create_proposal_v2(&v, &user, None).await?;
-    let p4 = create_proposal(&v, &user, None).await?;
-    let p5 = create_proposal_v2(&v, &user, None).await?;
-
-    // Approve in order — first three fill the active slots, remaining two queue.
-    approve_proposal_v2(&v, reviewer, p1, MajorityType::Simple).await?;
-    approve_proposal_v2(&v, reviewer, p2, MajorityType::Simple).await?;
-    approve_proposal_v2(&v, reviewer, p3, MajorityType::Simple).await?;
-    approve_proposal(&v, reviewer, p4).await?;
-    approve_proposal_v2(&v, reviewer, p5, MajorityType::Simple).await?;
-
-    assert_eq!(
-        get_status(&v.get_proposal(p1).await?)?,
-        ProposalStatus::Sandbox
-    );
-    assert_eq!(
-        get_status(&v.get_proposal(p2).await?)?,
-        ProposalStatus::Sandbox
-    );
-    assert_eq!(
-        get_status(&v.get_proposal(p3).await?)?,
-        ProposalStatus::Sandbox
-    );
-    assert_eq!(
-        get_status(&v.get_proposal(p4).await?)?,
-        ProposalStatus::Queued
-    );
-    assert_eq!(
-        get_status(&v.get_proposal(p5).await?)?,
-        ProposalStatus::Queued
-    );
-
-    let state = get_queue_state(&v).await?;
-    assert_eq!(state.active_proposals.len(), 3);
-    assert_eq!(state.pending_queue, vec![p4, p5]);
-
-    Ok(())
-}
-
-/// Vetoing a Scheduled/Timelock proposal frees a slot; the next queued proposal is promoted
-/// by `reject_proposal`'s auto-tick. Exercises both flows: a V2 queued proposal becomes Sandbox,
-/// a Classic queued proposal becomes Voting.
+/// Vetoing a Scheduled/Timelock proposal frees a slot — `reject_proposal`'s auto-tick promotes
+/// the next queued proposal. Exercises Classic→Voting and V2→Sandbox promotion paths.
 #[tokio::test]
 async fn test_queued_promotes_on_veto() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
@@ -119,7 +63,6 @@ async fn test_queued_promotes_on_veto() -> Result<(), Box<dyn std::error::Error>
         ProposalStatus::Queued,
         "Classic still waiting — only one slot freed"
     );
-
     vote_for_option(&v, &user, ids[1], VoteOption::For).await?;
     assert_eq!(
         get_status(&v.get_proposal(ids[1]).await?)?,
@@ -170,6 +113,11 @@ async fn test_queued_promotes_on_sandbox_timeout() -> Result<(), Box<dyn std::er
         ProposalStatus::Queued
     );
 
+    let p0_pre = v.get_proposal(ids[0]).await?;
+    let sandbox_duration: u64 = p0_pre["sandbox_duration_ns"].as_str().unwrap().parse()?;
+    let p0_approval: u64 = p0_pre["approval_time_ns"].as_str().unwrap().parse()?;
+    let earliest_freed_slot_end = p0_approval + sandbox_duration;
+
     // Fast-forward past the sandbox deadline. The three already-Sandbox proposals all time out.
     v.fast_forward_to_proposal_status_v2(ids[0], ProposalStatus::Defeated)
         .await?;
@@ -218,6 +166,15 @@ async fn test_queued_promotes_on_sandbox_timeout() -> Result<(), Box<dyn std::er
     );
     assert_eq!(get_queue_state(&v).await?.active_proposals.len() as u32, 1);
     assert_eq!(get_queue_state(&v).await?.pending_queue.len() as u32, 0);
+
+    // Backdating: ids[3] inherits ids[0]'s sandbox_end (earliest freed slot), not `now`.
+    // A regression that switches to `now` would silently shift every promoted deadline forward.
+    let p3_promoted = v.get_proposal(ids[3]).await?;
+    let p3_approval: u64 = p3_promoted["approval_time_ns"].as_str().unwrap().parse()?;
+    assert_eq!(
+        p3_approval, earliest_freed_slot_end,
+        "Promoted proposal must inherit the earliest freed slot's end_time as its start"
+    );
 
     Ok(())
 }
@@ -440,90 +397,6 @@ async fn test_max_active_proposals_setter() -> Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
-/// `get_approved_proposals` is a historical log of all reviewer-approved proposals. Even Queued
-/// proposals (which have an approval but no active slot) must show up there.
-#[tokio::test]
-async fn test_approved_proposals_view_includes_queued() -> Result<(), Box<dyn std::error::Error>> {
-    let v = VenearTestWorkspaceBuilder::default()
-        .with_voting()
-        .max_active_proposals(1)
-        .build()
-        .await?;
-    let user = v.create_account_with_lockup().await?;
-    v.transfer_and_lock(&user, NearToken::from_near(1000))
-        .await?;
-
-    let reviewer = &v.voting.as_ref().unwrap().reviewer;
-
-    let p1 = create_proposal_v2(&v, &user, None).await?;
-    let p2 = create_proposal_v2(&v, &user, None).await?;
-
-    approve_proposal_v2(&v, reviewer, p1, MajorityType::Simple).await?;
-    approve_proposal_v2(&v, reviewer, p2, MajorityType::Simple).await?;
-
-    let count: u32 = v
-        .sandbox
-        .view(v.voting_id(), "get_num_approved_proposals")
-        .await?
-        .json()?;
-    assert_eq!(
-        count, 2,
-        "Both approvals should be counted even when one is Queued"
-    );
-
-    let approved: serde_json::Value = v
-        .sandbox
-        .view(v.voting_id(), "get_approved_proposals")
-        .args_json(json!({ "from_index": 0u32, "limit": 10u32 }))
-        .await?
-        .json()?;
-    let arr = approved.as_array().expect("array");
-    assert_eq!(arr.len(), 2);
-    let statuses: Vec<ProposalStatus> = arr
-        .iter()
-        .map(|p| serde_json::from_value(p["status"].clone()).unwrap())
-        .collect();
-    assert!(statuses.contains(&ProposalStatus::Sandbox));
-    assert!(statuses.contains(&ProposalStatus::Queued));
-
-    Ok(())
-}
-
-/// Sanity check that the active set and its order change on promotion.
-#[tokio::test]
-async fn test_active_proposals_view_reflects_promotion() -> Result<(), Box<dyn std::error::Error>> {
-    let v = VenearTestWorkspaceBuilder::default()
-        .with_voting()
-        .max_active_proposals(1)
-        .build()
-        .await?;
-    let user = v.create_account_with_lockup().await?;
-    v.transfer_and_lock(&user, NearToken::from_near(1000))
-        .await?;
-
-    let reviewer = &v.voting.as_ref().unwrap().reviewer;
-
-    let p1 = create_proposal_v2(&v, &user, None).await?;
-    let p2 = create_proposal_v2(&v, &user, None).await?;
-
-    approve_proposal_v2(&v, reviewer, p1, MajorityType::Simple).await?;
-    approve_proposal_v2(&v, reviewer, p2, MajorityType::Simple).await?;
-
-    let active = get_queue_state(&v).await?.active_proposals;
-    assert_eq!(active, vec![p1]);
-
-    // Let the first Sandbox time out, then advance and re-check.
-    v.fast_forward_to_proposal_status_v2(p1, ProposalStatus::Defeated)
-        .await?;
-    let outcome = advance_queue(&v, &user).await?;
-    assert!(outcome.is_success());
-
-    let active = get_queue_state(&v).await?.active_proposals;
-    assert_eq!(active, vec![p2]);
-
-    Ok(())
-}
-
 #[tokio::test]
 async fn test_view_virtual_advance() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
@@ -543,9 +416,7 @@ async fn test_view_virtual_advance() -> Result<(), Box<dyn std::error::Error>> {
         ids.push(id);
     }
 
-    // -----------------------------------------------------------------------
     // Phase 1: no transitions yet — view shows the stored Queued status.
-    // -----------------------------------------------------------------------
     assert_eq!(
         get_status(&v.get_proposal(ids[3]).await?)?,
         ProposalStatus::Queued,
@@ -554,10 +425,8 @@ async fn test_view_virtual_advance() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(get_queue_state(&v).await?.active_proposals.len() as u32, 3);
     assert_eq!(get_queue_state(&v).await?.pending_queue.len() as u32, 3);
 
-    // -----------------------------------------------------------------------
     // Phase 2: first sandbox batch expires. ids[0..=2] virtually Defeated,
     // ids[3..=5] virtually promoted into Sandbox.
-    // -----------------------------------------------------------------------
     v.fast_forward_to_proposal_status_v2(ids[0], ProposalStatus::Defeated)
         .await?;
     for i in 0..3 {
@@ -576,9 +445,32 @@ async fn test_view_virtual_advance() -> Result<(), Box<dyn std::error::Error>> {
     }
     assert_eq!(get_queue_state(&v).await?.active_proposals.len() as u32, 3);
 
-    // -----------------------------------------------------------------------
-    // Phase 3
-    // -----------------------------------------------------------------------
+    // freed_slot_times priority ordering: end_times are sorted earliest-first; queued proposals
+    // pop in FIFO order, so each ids[3+i] inherits ids[i]'s sandbox_end.
+    let sandbox_duration: u64 = v.get_proposal(ids[0]).await?["sandbox_duration_ns"]
+        .as_str()
+        .unwrap()
+        .parse()?;
+    for i in 0..3 {
+        let active_approval: u64 = v.get_proposal(ids[i]).await?["approval_time_ns"]
+            .as_str()
+            .unwrap()
+            .parse()?;
+        let promoted_approval: u64 = v.get_proposal(ids[3 + i]).await?["approval_time_ns"]
+            .as_str()
+            .unwrap()
+            .parse()?;
+        assert_eq!(
+            promoted_approval,
+            active_approval + sandbox_duration,
+            "ids[{}] should inherit ids[{}]'s sandbox_end as its approval_time",
+            3 + i,
+            i
+        );
+    }
+
+    // Phase 3: fast-forward past the *promoted* batch's sandbox window too — every
+    // proposal (originals and chained promotions) ends Defeated.
     let proposal = v.get_proposal(ids[0]).await?;
     let approval_time: u64 = proposal["approval_time_ns"].as_str().unwrap().parse()?;
     let sandbox_duration: u64 = proposal["sandbox_duration_ns"].as_str().unwrap().parse()?;
@@ -596,6 +488,307 @@ async fn test_view_virtual_advance() -> Result<(), Box<dyn std::error::Error>> {
     let state = get_queue_state(&v).await?;
     assert_eq!(state.active_proposals.len(), 0);
     assert_eq!(state.pending_queue.len(), 0);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_vote_on_promoted_queued_without_snapshot() -> Result<(), Box<dyn std::error::Error>> {
+    let v = VenearTestWorkspaceBuilder::default()
+        .with_voting()
+        .max_active_proposals(1)
+        .build()
+        .await?;
+    let user = v.create_account_with_lockup().await?;
+    v.transfer_and_lock(&user, NearToken::from_near(1000))
+        .await?;
+
+    let reviewer = &v.voting.as_ref().unwrap().reviewer;
+
+    let p1 = create_proposal_v2(&v, &user, None).await?;
+    let p2 = create_proposal_v2(&v, &user, None).await?;
+
+    approve_proposal_v2(&v, reviewer, p1, MajorityType::Simple).await?;
+    approve_proposal_v2(&v, reviewer, p2, MajorityType::Simple).await?;
+
+    assert_eq!(
+        get_status(&v.get_proposal(p1).await?)?,
+        ProposalStatus::Sandbox
+    );
+    assert_eq!(
+        get_status(&v.get_proposal(p2).await?)?,
+        ProposalStatus::Queued
+    );
+
+    // Time out p1 so the queue advances p2 into Sandbox virtually.
+    v.fast_forward_to_proposal_status_v2(p1, ProposalStatus::Defeated)
+        .await?;
+
+    let view = v.get_proposal(p2).await?;
+    assert_eq!(
+        get_status(&view)?,
+        ProposalStatus::Sandbox,
+        "View should show p2 as Sandbox via virtual promotion"
+    );
+    assert!(
+        view["snapshot_and_state"].is_null(),
+        "Promoted-without-snapshot proposal must not have a snapshot yet"
+    );
+
+    // vote() runs internal_advance_queue and then panics on the missing snapshot.
+    let (merkle_proof, v_account): (serde_json::Value, serde_json::Value) = v
+        .sandbox
+        .view(v.venear.id(), "get_proof")
+        .args_json(json!({ "account_id": user.id() }))
+        .await?
+        .json()?;
+    let outcome = user
+        .call(v.voting_id(), "vote")
+        .args_json(json!({
+            "proposal_id": p2,
+            "vote": VoteOption::For,
+            "merkle_proof": merkle_proof,
+            "v_account": v_account,
+        }))
+        .deposit(NearToken::from_millinear(15))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_failure(),
+        "Vote should fail before take_snapshot: {:#?}",
+        outcome
+    );
+    assert!(
+        format!("{:?}", outcome).contains("Snapshot has not been taken yet"),
+        "Expected snapshot-missing panic, got: {:#?}",
+        outcome
+    );
+
+    // Now fetch the snapshot (no vote) and confirm it's persisted.
+    let take = user
+        .call(v.voting_id(), "take_snapshot_and_vote")
+        .args_json(json!({ "proposal_id": p2, "vote": serde_json::Value::Null }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    assert!(
+        take.is_success(),
+        "take_snapshot_and_vote failed: {:#?}",
+        take
+    );
+
+    let view = v.get_proposal(p2).await?;
+    assert!(
+        !view["snapshot_and_state"].is_null(),
+        "Snapshot should be set after take_snapshot_and_vote"
+    );
+
+    // Second snapshot-only call must reject because snapshot is already set.
+    let again = user
+        .call(v.voting_id(), "take_snapshot_and_vote")
+        .args_json(json!({ "proposal_id": p2, "vote": serde_json::Value::Null }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    assert!(again.is_failure(), "Second snapshot call must fail");
+    assert!(
+        format!("{:?}", again).contains("Snapshot is already set for this proposal"),
+        "Expected already-set panic, got: {:#?}",
+        again
+    );
+
+    // Wrong-status check: p1 is Defeated.
+    let on_defeated = user
+        .call(v.voting_id(), "take_snapshot_and_vote")
+        .args_json(json!({ "proposal_id": p1, "vote": serde_json::Value::Null }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    assert!(on_defeated.is_failure(), "Call on Defeated must fail");
+    assert!(
+        format!("{:?}", on_defeated)
+            .contains("Proposal must be in Sandbox or Voting status to take a snapshot"),
+        "Expected wrong-status panic, got: {:#?}",
+        on_defeated
+    );
+
+    // Voting now succeeds via the standalone vote() function.
+    vote_for_option(&v, &user, p2, VoteOption::For).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_take_snapshot_and_vote_chained() -> Result<(), Box<dyn std::error::Error>> {
+    let v = VenearTestWorkspaceBuilder::default()
+        .with_voting()
+        .max_active_proposals(1)
+        .build()
+        .await?;
+    let user_a = v.create_account_with_lockup().await?;
+    let user_b = v.create_account_with_lockup().await?;
+    v.transfer_and_lock(&user_a, NearToken::from_near(1000))
+        .await?;
+    v.transfer_and_lock(&user_b, NearToken::from_near(5000))
+        .await?;
+
+    let reviewer = &v.voting.as_ref().unwrap().reviewer;
+
+    let p1 = create_proposal_v2(&v, &user_a, None).await?;
+    let p2 = create_proposal_v2(&v, &user_a, None).await?;
+
+    approve_proposal_v2(&v, reviewer, p1, MajorityType::Simple).await?;
+    approve_proposal_v2(&v, reviewer, p2, MajorityType::Simple).await?;
+
+    assert_eq!(
+        get_status(&v.get_proposal(p2).await?)?,
+        ProposalStatus::Queued
+    );
+
+    v.fast_forward_to_proposal_status_v2(p1, ProposalStatus::Defeated)
+        .await?;
+
+    let (merkle_proof, v_account): (serde_json::Value, serde_json::Value) = v
+        .sandbox
+        .view(v.venear.id(), "get_proof")
+        .args_json(json!({ "account_id": user_a.id() }))
+        .await?
+        .json()?;
+
+    let outcome = user_a
+        .call(v.voting_id(), "take_snapshot_and_vote")
+        .args_json(json!({
+            "proposal_id": p2,
+            "vote": {
+                "vote": VoteOption::For,
+                "merkle_proof": merkle_proof,
+                "v_account": v_account,
+            },
+        }))
+        .deposit(NearToken::from_millinear(15))
+        .gas(Gas::from_tgas(150))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_success(),
+        "Chained take_snapshot_and_vote failed: {:#?}",
+        outcome
+    );
+
+    let view = v.get_proposal(p2).await?;
+    assert!(
+        !view["snapshot_and_state"].is_null(),
+        "Snapshot should be persisted"
+    );
+    let for_count = view["votes"][0]["total_votes"].as_u64().unwrap();
+    assert_eq!(for_count, 1, "One For vote should be recorded");
+    let stored: Option<u8> = v
+        .sandbox
+        .view(v.voting_id(), "get_vote")
+        .args_json(json!({ "account_id": user_a.id(), "proposal_id": p2 }))
+        .await?
+        .json()?;
+    assert_eq!(stored, Some(VoteOption::For as u8));
+    assert_eq!(get_status(&view)?, ProposalStatus::Sandbox);
+
+    // Pre-fetch user_b's proof while the venear tree still matches the proposal snapshot.
+    let (merkle_proof_b, v_account_b): (serde_json::Value, serde_json::Value) = v
+        .sandbox
+        .view(v.venear.id(), "get_proof")
+        .args_json(json!({ "account_id": user_b.id() }))
+        .await?
+        .json()?;
+
+    // user_b can't reuse user_a's v_account — pre-chain check rejects.
+    let outcome = user_b
+        .call(v.voting_id(), "take_snapshot_and_vote")
+        .args_json(json!({
+            "proposal_id": p2,
+            "vote": {
+                "vote": VoteOption::For,
+                "merkle_proof": merkle_proof_b,
+                "v_account": v_account,
+            },
+        }))
+        .deposit(NearToken::from_millinear(15))
+        .gas(Gas::from_tgas(150))
+        .transact()
+        .await?;
+    assert!(outcome.is_failure(), "v_account mismatch must fail");
+    assert!(
+        format!("{:?}", outcome).contains("v_account does not match the caller"),
+        "Expected v_account-mismatch panic, got: {:#?}",
+        outcome
+    );
+
+    // user_c joined after the snapshot was taken
+    let user_c = v.create_account_with_lockup().await?;
+    v.transfer_and_lock(&user_c, NearToken::from_near(100))
+        .await?;
+    let (merkle_proof, v_account): (serde_json::Value, serde_json::Value) = v
+        .sandbox
+        .view(v.venear.id(), "get_proof")
+        .args_json(json!({ "account_id": user_c.id() }))
+        .await?
+        .json()?;
+    let outcome = user_c
+        .call(v.voting_id(), "take_snapshot_and_vote")
+        .args_json(json!({
+            "proposal_id": p2,
+            "vote": {
+                "vote": VoteOption::For,
+                "merkle_proof": merkle_proof,
+                "v_account": v_account,
+            },
+        }))
+        .deposit(NearToken::from_millinear(15))
+        .gas(Gas::from_tgas(150))
+        .transact()
+        .await?;
+    assert!(outcome.is_failure(), "Stale-snapshot vote must fail");
+    assert!(
+        format!("{:?}", outcome).contains("Invalid merkle proof"),
+        "Expected Invalid merkle proof panic, got: {:#?}",
+        outcome
+    );
+
+    // Snapshot already set: user_b's chained call should reuse it (no refetch).
+    let stored_root = view["snapshot_and_state"]["snapshot"]["root"].clone();
+    let outcome = user_b
+        .call(v.voting_id(), "take_snapshot_and_vote")
+        .args_json(json!({
+            "proposal_id": p2,
+            "vote": {
+                "vote": VoteOption::For,
+                "merkle_proof": merkle_proof_b,
+                "v_account": v_account_b,
+            },
+        }))
+        .deposit(NearToken::from_millinear(15))
+        .gas(Gas::from_tgas(150))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_success(),
+        "take_snapshot_and_vote with existing snapshot must succeed: {:#?}",
+        outcome
+    );
+    let view = v.get_proposal(p2).await?;
+    assert_eq!(
+        view["snapshot_and_state"]["snapshot"]["root"], stored_root,
+        "Snapshot root must not change — chain should skip get_snapshot"
+    );
+    let stored: Option<u8> = v
+        .sandbox
+        .view(v.voting_id(), "get_vote")
+        .args_json(json!({ "account_id": user_b.id(), "proposal_id": p2 }))
+        .await?
+        .json()?;
+    assert_eq!(stored, Some(VoteOption::For as u8));
 
     Ok(())
 }

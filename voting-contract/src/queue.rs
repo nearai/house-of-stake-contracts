@@ -1,6 +1,5 @@
-use crate::proposal::{Proposal, ProposalFlow, ProposalStatus, is_active_status};
+use crate::proposal::{Proposal, is_active_status};
 use crate::*;
-use near_sdk::json_types::U64;
 use std::collections::{HashMap, VecDeque};
 
 struct QueueAdvanceOutcome {
@@ -79,7 +78,7 @@ impl Contract {
             }
             if updated {
                 if !is_active_status(proposal.status) {
-                    let end_time = proposal_end_time_ns(&proposal);
+                    let end_time = proposal.active_end_time_ns();
                     let pos = freed_slot_times
                         .iter()
                         .position(|&t| t >= end_time)
@@ -98,15 +97,15 @@ impl Contract {
             let mut proposal = self.internal_expect_proposal_updated(id);
 
             // Pre-existing empty slots start at `now`.
-            let start_time: U64 = freed_slot_times.pop_front().unwrap_or(now).into();
+            let start_time = freed_slot_times.pop_front().unwrap_or(now).into();
 
-            activate_proposal(&mut proposal, start_time);
+            proposal.activate(start_time);
             proposal.update(now.into());
 
             if is_active_status(proposal.status) {
                 virtual_active_count += 1;
             } else {
-                let end = proposal_end_time_ns(&proposal);
+                let end = proposal.active_end_time_ns();
                 let pos = freed_slot_times
                     .iter()
                     .position(|&t| t >= end)
@@ -143,40 +142,5 @@ impl Contract {
             .into_iter()
             .map(|p| (p.id, p))
             .collect()
-    }
-}
-
-/// Transitions a proposal into its first active status.
-pub(crate) fn activate_proposal(proposal: &mut Proposal, start_time: U64) {
-    match proposal.flow {
-        ProposalFlow::Classic => {
-            proposal.voting_start_time_ns = Some(start_time);
-            proposal.status = ProposalStatus::Voting;
-        }
-        ProposalFlow::V2 => {
-            proposal.approval_time_ns = Some(start_time);
-            proposal.status = ProposalStatus::Sandbox;
-        }
-    }
-}
-
-fn proposal_end_time_ns(proposal: &Proposal) -> u64 {
-    match proposal.flow {
-        ProposalFlow::Classic => {
-            let voting_end =
-                proposal.voting_start_time_ns.unwrap().0 + proposal.voting_duration_ns.0;
-            if proposal.compute_final_status() == ProposalStatus::Succeeded {
-                voting_end + proposal.timelock_duration_ns.0
-            } else {
-                voting_end
-            }
-        }
-        ProposalFlow::V2 => {
-            if let Some(voting_start) = proposal.voting_start_time_ns {
-                voting_start.0 + proposal.voting_duration_ns.0
-            } else {
-                proposal.approval_time_ns.unwrap().0 + proposal.sandbox_duration_ns.0
-            }
-        }
     }
 }

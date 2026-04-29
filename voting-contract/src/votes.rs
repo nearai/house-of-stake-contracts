@@ -1,9 +1,21 @@
 use crate::proposal::{
     Proposal, ProposalFlow, ProposalStatus, SnapshotAndState, VoteOption, next_voting_start_ns,
 };
+use crate::reviewer::GAS_FOR_ON_GET_SNAPSHOT;
 use crate::*;
 use common::{events, near_add, near_sub};
-use near_sdk::Promise;
+use near_sdk::{Gas, Promise};
+
+const GAS_FOR_CHAINED_VOTE: Gas = Gas::from_tgas(50);
+
+/// Vote inputs accepted by `take_snapshot_and_vote` to optionally cast a vote in the same call.
+#[derive(Clone)]
+#[near(serializers=[json])]
+pub struct VotePayload {
+    pub vote: VoteOption,
+    pub merkle_proof: MerkleProof,
+    pub v_account: VAccount,
+}
 
 #[near]
 impl Contract {
@@ -49,6 +61,11 @@ impl Contract {
             }
         }
 
+        require!(
+            proposal.snapshot_and_state.is_some(),
+            "Snapshot has not been taken yet — call take_snapshot_and_vote first"
+        );
+
         {
             let SnapshotAndState { snapshot, .. } = proposal.snapshot_and_state.as_ref().unwrap();
             require!(
@@ -60,9 +77,11 @@ impl Contract {
         let timestamp_ns = proposal.snapshot_and_state.as_ref().unwrap().timestamp_ns;
         let account: Account = v_account.into();
         let account_id = &account.account_id;
+        let predecessor_account_id = &env::predecessor_account_id();
         require!(
-            account_id == &env::predecessor_account_id(),
-            "Account ID doesn't match the predecessor account ID"
+            account_id == predecessor_account_id
+                || predecessor_account_id == &env::current_account_id(),
+            "Account ID doesn't match the predecessor account ID or self-call."
         );
         let account_balance = account.total_balance(
             timestamp_ns,
@@ -107,7 +126,7 @@ impl Contract {
 
         if attached_deposit > near_add(storage_added, NearToken::from_yoctonear(1)) {
             let refund = near_sub(attached_deposit, storage_added);
-            Promise::new(env::predecessor_account_id()).transfer(refund);
+            Promise::new(env::signer_account_id()).transfer(refund);
         }
 
         events::emit::proposal_vote_action(
@@ -118,9 +137,6 @@ impl Contract {
             &account_balance,
         );
 
-        // Sandbox graduation: schedule the real voting for the next Monday. Multiple proposals
-        // that graduate in the same week all share the same Monday — the concurrency cap is
-        // enforced by `active_proposals`, not by serializing voting windows.
         if proposal.flow == ProposalFlow::V2
             && proposal.status == ProposalStatus::Sandbox
             && proposal.sandbox_threshold_met()
@@ -138,5 +154,62 @@ impl Contract {
     /// Returns the vote of the given account ID and proposal ID.
     pub fn get_vote(&self, account_id: AccountId, proposal_id: ProposalId) -> Option<u8> {
         self.votes.get(&(account_id, proposal_id)).cloned()
+    }
+
+    /// Fetches a fresh veNEAR snapshot for a proposal that's already in Sandbox/Voting without
+    /// a snapshot, and optionally casts a vote in the same transaction.
+    #[payable]
+    pub fn take_snapshot_and_vote(
+        &mut self,
+        proposal_id: ProposalId,
+        vote: Option<VotePayload>,
+    ) -> Promise {
+        self.assert_not_paused();
+        self.internal_advance_queue();
+
+        let proposal = self.internal_expect_proposal_updated(proposal_id);
+        if proposal.status != ProposalStatus::Sandbox && proposal.status != ProposalStatus::Voting {
+            env::panic_str("Proposal must be in Sandbox or Voting status to take a snapshot");
+        }
+        if vote.is_none() && proposal.snapshot_and_state.is_some() {
+            env::panic_str("Snapshot is already set for this proposal");
+        }
+
+        let mut promise: Option<Promise> = None;
+        if proposal.snapshot_and_state.is_none() {
+            promise = Some(
+                ext_venear::ext(self.config.venear_account_id.clone())
+                    .with_unused_gas_weight(1)
+                    .get_snapshot()
+                    .then(
+                        ext_self::ext(env::current_account_id())
+                            .with_static_gas(GAS_FOR_ON_GET_SNAPSHOT)
+                            .on_get_snapshot(proposal_id),
+                    ),
+            );
+        }
+
+        if let Some(payload) = vote {
+            let VAccount::V0(account) = &payload.v_account;
+            require!(
+                account.account_id == env::predecessor_account_id(),
+                "v_account does not match the caller"
+            );
+            let action = ext_self::ext(env::current_account_id())
+                .with_attached_deposit(env::attached_deposit())
+                .with_static_gas(GAS_FOR_CHAINED_VOTE)
+                .vote(
+                    proposal_id,
+                    payload.vote,
+                    payload.merkle_proof,
+                    payload.v_account,
+                );
+            promise = Some(match promise {
+                Some(p) => p.then(action),
+                None => action,
+            });
+        }
+
+        promise.unwrap()
     }
 }
