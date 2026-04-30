@@ -177,7 +177,17 @@ impl Contract {
         let mut proposals = Vector::new(StorageKeys::Proposal);
         let mut active_proposals = IterableSet::new(StorageKeys::ActiveProposals);
         for (idx, legacy) in old.proposals.iter().enumerate() {
-            let proposal: Proposal = legacy.clone().into();
+            let mut proposal: Proposal = legacy.clone().into();
+            // Translate any legacy borsh-index placeholders that may still be in storage.
+            match proposal.status {
+                ProposalStatus::FinishLegacy => {
+                    proposal.status = proposal.compute_final_status();
+                }
+                ProposalStatus::ApprovalLegacy => {
+                    proposal.status = ProposalStatus::Voting;
+                }
+                _ => {}
+            }
             if is_active_status(proposal.status) {
                 active_proposals.insert(idx as ProposalId);
             }

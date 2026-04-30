@@ -5,7 +5,7 @@ use crate::setup::{DEFAULT_BOND_AMOUNT, NS_IN_SECOND, VenearTestWorkspaceBuilder
 use near_sdk::{Gas, NearToken};
 use near_workspaces::AccountId;
 use serde_json::json;
-use voting_contract::proposal::{MajorityType, ProposalStatus, VoteOption};
+use common::voting::{MajorityType, ProposalStatus, VoteOption};
 
 #[tokio::test]
 async fn test_voting_v2() -> Result<(), Box<dyn std::error::Error>> {
@@ -376,9 +376,9 @@ async fn test_voting_v2_reject_proposal() -> Result<(), Box<dyn std::error::Erro
         "Proposal 1 should be in Voting status"
     );
 
-    // Regular user cannot reject during voting
+    // Regular user cannot veto during voting
     let outcome = user_a
-        .call(v.voting_id(), "reject_proposal")
+        .call(v.voting_id(), "veto_proposal")
         .args_json(json!({
             "proposal_id": proposal_id_1,
         }))
@@ -388,17 +388,17 @@ async fn test_voting_v2_reject_proposal() -> Result<(), Box<dyn std::error::Erro
         .await?;
     assert!(
         outcome.is_failure(),
-        "User should not be able to reject proposal: {:#?}",
+        "User should not be able to veto proposal: {:#?}",
         outcome
     );
 
-    // Reviewer cannot reject proposals
+    // Reviewer cannot veto proposals
     let outcome = v
         .voting
         .as_ref()
         .unwrap()
         .reviewer
-        .call(v.voting_id(), "reject_proposal")
+        .call(v.voting_id(), "veto_proposal")
         .args_json(json!({
             "proposal_id": proposal_id_1,
         }))
@@ -408,17 +408,17 @@ async fn test_voting_v2_reject_proposal() -> Result<(), Box<dyn std::error::Erro
         .await?;
     assert!(
         outcome.is_failure(),
-        "Reviewer should not be able to reject proposal: {:#?}",
+        "Reviewer should not be able to veto proposal: {:#?}",
         outcome
     );
 
-    // Council can reject (veto) during voting
+    // Council can veto during voting
     let outcome = v
         .voting
         .as_ref()
         .unwrap()
         .council
-        .call(v.voting_id(), "reject_proposal")
+        .call(v.voting_id(), "veto_proposal")
         .args_json(json!({
             "proposal_id": proposal_id_1,
         }))
@@ -428,12 +428,12 @@ async fn test_voting_v2_reject_proposal() -> Result<(), Box<dyn std::error::Erro
         .await?;
     assert!(
         outcome.is_success(),
-        "Council should be able to reject proposal during voting: {:#?}",
+        "Council should be able to veto proposal during voting: {:#?}",
         outcome
     );
 
     let proposal = v.get_proposal(proposal_id_1).await?;
-    assert_eq!(get_status(&proposal)?, ProposalStatus::Rejected);
+    assert_eq!(get_status(&proposal)?, ProposalStatus::Vetoed);
     assert_eq!(
         proposal["rejecter_id"].as_str().unwrap(),
         v.voting.as_ref().unwrap().council.id().as_str(),
@@ -459,13 +459,13 @@ async fn test_voting_v2_reject_proposal() -> Result<(), Box<dyn std::error::Erro
         "Proposal 2 should be in Scheduled status"
     );
 
-    // Council can reject (veto) during scheduled period
+    // Council can veto during scheduled period
     let outcome = v
         .voting
         .as_ref()
         .unwrap()
         .council
-        .call(v.voting_id(), "reject_proposal")
+        .call(v.voting_id(), "veto_proposal")
         .args_json(json!({
             "proposal_id": proposal_id_2,
         }))
@@ -475,12 +475,12 @@ async fn test_voting_v2_reject_proposal() -> Result<(), Box<dyn std::error::Erro
         .await?;
     assert!(
         outcome.is_success(),
-        "Council should be able to reject proposal during scheduled period: {:#?}",
+        "Council should be able to veto proposal during scheduled period: {:#?}",
         outcome
     );
 
     let proposal = v.get_proposal(proposal_id_2).await?;
-    assert_eq!(get_status(&proposal)?, ProposalStatus::Rejected);
+    assert_eq!(get_status(&proposal)?, ProposalStatus::Vetoed);
     assert_eq!(
         proposal["rejecter_id"].as_str().unwrap(),
         v.voting.as_ref().unwrap().council.id().as_str(),

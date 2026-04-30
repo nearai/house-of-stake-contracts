@@ -45,19 +45,8 @@ impl Contract {
                     env::panic_str("Only 'For' votes are allowed during the sandbox period");
                 }
             }
-            ProposalStatus::Created | ProposalStatus::Scheduled | ProposalStatus::Queued => {
-                env::panic_str("Voting is not started yet");
-            }
-            ProposalStatus::Rejected => env::panic_str("Proposal is rejected"),
-            ProposalStatus::Expired => env::panic_str("Proposal is expired"),
-            ProposalStatus::Slashed => env::panic_str("Proposal is slashed"),
-            ProposalStatus::Succeeded
-            | ProposalStatus::Defeated
-            | ProposalStatus::Timelock
-            | ProposalStatus::Executable
-            | ProposalStatus::InProgress
-            | ProposalStatus::Failed => {
-                env::panic_str("Voting is finished");
+            _ => {
+                env::panic_str("Proposal is not in the voting phase");
             }
         }
 

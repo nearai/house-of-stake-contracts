@@ -1,8 +1,7 @@
 use super::{VOTING_WASM_FILEPATH, VenearTestWorkspace};
+use common::voting::{MajorityType, ProposalStatus, QueueState};
 use near_sdk::{Gas, NearToken};
 use serde_json::json;
-use voting_contract::proposal::ProposalStatus;
-use voting_contract::queue::QueueState;
 
 pub fn get_status(
     proposal: &serde_json::Value,
@@ -134,7 +133,7 @@ pub async fn approve_proposal_v2(
     v: &VenearTestWorkspace,
     user: &near_workspaces::Account,
     proposal_id: u32,
-    majority_type: voting_contract::proposal::MajorityType,
+    majority_type: MajorityType,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let outcome = user
         .call(v.voting_id(), "approve_proposal")
@@ -237,7 +236,7 @@ pub async fn advance_queue(
     Ok(outcome)
 }
 
-/// Council-only veto helper.
+/// Reviewer-only reject helper. Valid only while the proposal is in Created status.
 pub async fn reject_proposal(
     v: &VenearTestWorkspace,
     caller: &near_workspaces::Account,
@@ -245,6 +244,23 @@ pub async fn reject_proposal(
 ) -> Result<near_workspaces::result::ExecutionFinalResult, Box<dyn std::error::Error>> {
     let outcome = caller
         .call(v.voting_id(), "reject_proposal")
+        .args_json(json!({ "proposal_id": proposal_id }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    Ok(outcome)
+}
+
+/// Council-only veto helper.
+/// Classic: valid during Timelock. V2: valid during Scheduled or Voting.
+pub async fn veto_proposal(
+    v: &VenearTestWorkspace,
+    caller: &near_workspaces::Account,
+    proposal_id: u32,
+) -> Result<near_workspaces::result::ExecutionFinalResult, Box<dyn std::error::Error>> {
+    let outcome = caller
+        .call(v.voting_id(), "veto_proposal")
         .args_json(json!({ "proposal_id": proposal_id }))
         .deposit(NearToken::from_yoctonear(1))
         .gas(Gas::from_tgas(100))

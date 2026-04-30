@@ -2,17 +2,11 @@ use crate::proposal::{Proposal, is_active_status};
 use crate::*;
 use std::collections::{HashMap, VecDeque};
 
+pub use common::voting::QueueState;
+
 struct QueueAdvanceOutcome {
     active_updates: Vec<Proposal>,
     queue_promotions: Vec<Proposal>,
-}
-
-/// Snapshot of the proposal scheduler: currently-active proposals and the FIFO pending queue.
-#[near(serializers=[json])]
-#[derive(Debug, PartialEq, Eq)]
-pub struct QueueState {
-    pub active_proposals: Vec<ProposalId>,
-    pub pending_queue: Vec<ProposalId>,
 }
 
 #[near]

@@ -4,6 +4,8 @@ use common::{TimestampNs, events, near_add, near_sub};
 use near_sdk::json_types::{Base64VecU8, U64};
 use near_sdk::{Gas, Promise};
 
+pub use common::voting::{MajorityType, ProposalStatus, VoteOption};
+
 pub type ProposalId = u32;
 
 const NS_PER_DAY: u64 = 86_400_000_000_000;
@@ -28,31 +30,12 @@ pub enum ProposalAction {
     },
 }
 
-/// The fixed voting options for proposals.
-#[derive(Clone, Copy, PartialEq)]
-#[near(serializers=[borsh, json])]
-pub enum VoteOption {
-    For,
-    Against,
-    Abstain,
-}
-
 /// Which proposal flow a proposal follows.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[near(serializers=[borsh, json])]
 pub enum ProposalFlow {
     Classic,
     V2,
-}
-
-/// The majority type required for a v2 proposal to pass.
-#[derive(Clone, Copy, PartialEq)]
-#[near(serializers=[borsh, json])]
-pub enum MajorityType {
-    /// Simple majority (e.g. >50%).
-    Simple,
-    /// Strong majority (e.g. >66.67%).
-    Strong,
 }
 
 #[derive(Clone)]
@@ -78,6 +61,7 @@ pub struct Proposal {
     // Classic only
     pub timelock_duration_ns: U64,
     // V2 only
+    //todo approval time to everyone
     pub approval_time_ns: Option<U64>,
     pub bond_amount: NearToken,
     pub sandbox_duration_ns: U64,
@@ -114,40 +98,6 @@ pub struct ProposalInfo {
     pub proposal: Proposal,
     #[serde(flatten)]
     pub metadata: ProposalMetadata,
-}
-
-/// The status of the proposal
-#[derive(Clone, Copy, Debug, PartialEq)]
-#[near(serializers=[borsh, json])]
-pub enum ProposalStatus {
-    /// The proposal was created and is waiting for the approver to approve it.
-    Created,
-    /// The proposal was rejected by the council.
-    Rejected,
-    /// The proposal is in the voting phase.
-    Voting,
-    /// The proposal voting has finished, quorum was met and approval threshold was met.
-    Succeeded,
-    /// The voting has ended and the proposal is in the timelock period awaiting potential council veto.
-    Timelock,
-    /// The proposal expired before being approved by a reviewer.
-    Expired,
-    /// The proposal voting has finished, but quorum was not met or approval threshold was not met.
-    Defeated,
-    /// The proposal passed and has actions ready for on-chain execution.
-    Executable,
-    /// The proposal actions are being executed (dispatched, awaiting callback).
-    InProgress,
-    /// The proposal's on-chain execution failed.
-    Failed,
-    /// Tthe proposal was slashed by a reviewer; bond is forfeited.
-    Slashed,
-    /// Graduates to Scheduled when the sandbox threshold is met.
-    Sandbox,
-    /// The proposal met the sandbox threshold and is scheduled to start voting.
-    Scheduled,
-    /// Approved by a reviewer but waiting for an active slot to open.
-    Queued,
 }
 
 /// The snapshot of the Merkle tree and the global state at the moment when the proposal was
@@ -267,12 +217,15 @@ impl Proposal {
     fn update_classic(&mut self, timestamp: TimestampNs) {
         match self.status {
             ProposalStatus::Rejected
+            | ProposalStatus::Vetoed
             | ProposalStatus::Succeeded
             | ProposalStatus::Expired
             | ProposalStatus::Defeated
             | ProposalStatus::Executable
             | ProposalStatus::InProgress
-            | ProposalStatus::Failed => {}
+            | ProposalStatus::Failed
+            | ProposalStatus::ApprovalLegacy
+            | ProposalStatus::FinishLegacy => {}
             ProposalStatus::Created => {
                 if self.expiration_ns.0 > 0 && timestamp.0 >= self.expiration_ns.0 {
                     self.status = ProposalStatus::Expired;
@@ -312,7 +265,10 @@ impl Proposal {
             | ProposalStatus::Executable
             | ProposalStatus::InProgress
             | ProposalStatus::Failed
-            | ProposalStatus::Slashed => {}
+            | ProposalStatus::Slashed
+            | ProposalStatus::Vetoed
+            | ProposalStatus::ApprovalLegacy
+            | ProposalStatus::FinishLegacy => {}
             ProposalStatus::Created => {
                 if self.expiration_ns.0 > 0 && timestamp.0 >= self.expiration_ns.0 {
                     self.status = ProposalStatus::Expired;

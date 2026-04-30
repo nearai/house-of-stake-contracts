@@ -4,7 +4,7 @@ use crate::setup::voting_helpers::*;
 use crate::setup::{NS_IN_SECOND, VenearTestWorkspaceBuilder};
 use near_sdk::{Gas, NearToken};
 use serde_json::json;
-use voting_contract::proposal::{MajorityType, ProposalStatus, VoteOption};
+use common::voting::{MajorityType, ProposalStatus, VoteOption};
 
 /// Vetoing a Scheduled/Timelock proposal frees a slot — `reject_proposal`'s auto-tick promotes
 /// the next queued proposal. Exercises Classic→Voting and V2→Sandbox promotion paths.
@@ -46,12 +46,12 @@ async fn test_queued_promotes_on_veto() -> Result<(), Box<dyn std::error::Error>
         get_status(&v.get_proposal(ids[0]).await?)?,
         ProposalStatus::Scheduled
     );
-    let outcome = reject_proposal(&v, council, ids[0]).await?;
+    let outcome = veto_proposal(&v, council, ids[0]).await?;
     assert!(outcome.is_success(), "Veto should succeed: {:#?}", outcome);
 
     assert_eq!(
         get_status(&v.get_proposal(ids[0]).await?)?,
-        ProposalStatus::Rejected
+        ProposalStatus::Vetoed
     );
     assert_eq!(
         get_status(&v.get_proposal(ids[3]).await?)?,
@@ -68,7 +68,7 @@ async fn test_queued_promotes_on_veto() -> Result<(), Box<dyn std::error::Error>
         get_status(&v.get_proposal(ids[1]).await?)?,
         ProposalStatus::Scheduled
     );
-    let outcome = reject_proposal(&v, council, ids[1]).await?;
+    let outcome = veto_proposal(&v, council, ids[1]).await?;
     assert!(
         outcome.is_success(),
         "Second veto should succeed: {:#?}",
@@ -77,7 +77,7 @@ async fn test_queued_promotes_on_veto() -> Result<(), Box<dyn std::error::Error>
 
     assert_eq!(
         get_status(&v.get_proposal(ids[1]).await?)?,
-        ProposalStatus::Rejected
+        ProposalStatus::Vetoed
     );
     assert_eq!(
         get_status(&v.get_proposal(classic_p).await?)?,

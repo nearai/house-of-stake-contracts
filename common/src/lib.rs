@@ -8,6 +8,7 @@ pub mod events;
 pub mod global_state;
 pub mod lockup_update;
 pub mod venear;
+pub mod voting;
 
 pub use types::*;
 pub use utils::*;
