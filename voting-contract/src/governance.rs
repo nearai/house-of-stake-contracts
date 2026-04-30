@@ -109,15 +109,15 @@ impl Contract {
         self.config.proposal_expiration_ns = (proposal_expiration_sec as u64 * 10u64.pow(9)).into();
     }
 
-    /// Updates the V2 proposal expiration duration in seconds.
+    /// Updates the FastTrack proposal expiration duration in seconds.
     /// Set to 0 to disable proposal expiration.
     /// Can only be called by the owner.
     /// Requires 1 yocto NEAR.
     #[payable]
-    pub fn set_v2_proposal_expiration(&mut self, proposal_expiration_sec: u32) {
+    pub fn set_fast_track_proposal_expiration(&mut self, proposal_expiration_sec: u32) {
         assert_one_yocto();
         self.assert_owner();
-        self.config.v2_proposal_expiration_ns =
+        self.config.fast_track_proposal_expiration_ns =
             (proposal_expiration_sec as u64 * 10u64.pow(9)).into();
     }
 
@@ -160,7 +160,7 @@ impl Contract {
         self.config.approval_threshold_bps = approval_threshold_bps;
     }
 
-    /// Updates the v2 bond amount required to create a proposal.
+    /// Updates the FastTrack bond amount required to create a proposal.
     /// Can only be called by the owner.
     /// Requires 1 yocto NEAR.
     #[payable]
@@ -170,7 +170,7 @@ impl Contract {
         self.config.bond_amount = bond_amount;
     }
 
-    /// Updates the v2 simple majority threshold in basis points (e.g. 5000 = 50%).
+    /// Updates the FastTrack simple majority threshold in basis points (e.g. 5000 = 50%).
     /// Can only be called by the owner.
     /// Requires 1 yocto NEAR.
     #[payable]
@@ -184,7 +184,7 @@ impl Contract {
         self.config.simple_majority_threshold_bps = simple_majority_threshold_bps;
     }
 
-    /// Updates the v2 strong (super) majority threshold in basis points (e.g. 6667 ≈ 66.67%).
+    /// Updates the FastTrack strong (super) majority threshold in basis points (e.g. 6667 ≈ 66.67%).
     /// Can only be called by the owner.
     /// Requires 1 yocto NEAR.
     #[payable]
@@ -198,7 +198,7 @@ impl Contract {
         self.config.strong_majority_threshold_bps = strong_majority_threshold_bps;
     }
 
-    /// Updates the v2 sandbox duration in seconds.
+    /// Updates the FastTrack sandbox duration in seconds.
     /// Can only be called by the owner.
     /// Requires 1 yocto NEAR.
     #[payable]
@@ -208,7 +208,7 @@ impl Contract {
         self.config.sandbox_duration_ns = (sandbox_duration_sec as u64 * 10u64.pow(9)).into();
     }
 
-    /// Updates the v2 sandbox threshold in basis points (e.g. 3000 = 30%).
+    /// Updates the FastTrack sandbox threshold in basis points (e.g. 3000 = 30%).
     /// Can only be called by the owner.
     /// Requires 1 yocto NEAR.
     #[payable]

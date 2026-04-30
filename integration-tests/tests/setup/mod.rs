@@ -63,7 +63,7 @@ pub struct VenearTestWorkspaceBuilder {
     pub bond_amount: NearToken,
     pub vote_storage_fee: NearToken,
     pub proposal_expiration_ns: u64,
-    pub v2_proposal_expiration_ns: u64,
+    pub fast_track_proposal_expiration_ns: u64,
     pub quorum_threshold_bps: u16,
     pub quorum_floor: NearToken,
     pub approval_threshold_bps: u16,
@@ -95,7 +95,7 @@ impl Default for VenearTestWorkspaceBuilder {
             bond_amount: DEFAULT_BOND_AMOUNT,
             vote_storage_fee: NearToken::from_yoctonear(125 * 10u128.pow(19)),
             proposal_expiration_ns: PROPOSAL_EXPIRATION_SECONDS * NS_IN_SECOND,
-            v2_proposal_expiration_ns: PROPOSAL_EXPIRATION_SECONDS * NS_IN_SECOND,
+            fast_track_proposal_expiration_ns: PROPOSAL_EXPIRATION_SECONDS * NS_IN_SECOND,
             quorum_threshold_bps: 3500,
             quorum_floor: NearToken::from_near(1000),
             approval_threshold_bps: 5000,
@@ -296,7 +296,7 @@ impl VenearTestWorkspaceBuilder {
                     "vote_storage_fee": self.vote_storage_fee,
                     "guardians": &[guardian.id()],
                     "proposal_expiration_ns": self.proposal_expiration_ns.to_string(),
-                    "v2_proposal_expiration_ns": self.v2_proposal_expiration_ns.to_string(),
+                    "fast_track_proposal_expiration_ns": self.fast_track_proposal_expiration_ns.to_string(),
                     "quorum_threshold_bps": self.quorum_threshold_bps,
                     "quorum_floor": self.quorum_floor,
                     "approval_threshold_bps": self.approval_threshold_bps,
@@ -674,7 +674,7 @@ impl VenearTestWorkspace {
         self.voting.as_ref().unwrap().contract.id()
     }
 
-    pub async fn fast_forward_to_proposal_status_v2(
+    pub async fn fast_forward_to_proposal_status_fst(
         &self,
         proposal_id: u32,
         target: common::voting::ProposalStatus,

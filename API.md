@@ -1001,7 +1001,7 @@ pub fn vote(
 pub fn get_vote(&self, account_id: AccountId, proposal_id: ProposalId) -> Option<u8>;
 ```
 
-## Voting v2
+## Voting (FastTrack flow)
 
 ### Structures
 

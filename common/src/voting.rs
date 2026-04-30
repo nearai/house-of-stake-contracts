@@ -11,7 +11,7 @@ pub enum VoteOption {
     Abstain,
 }
 
-/// The majority type required for a v2 proposal to pass.
+/// The majority type required for a FastTrack proposal to pass.
 #[derive(Clone, Copy, PartialEq)]
 #[near(serializers=[borsh, json])]
 pub enum MajorityType {

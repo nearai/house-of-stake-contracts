@@ -4,14 +4,14 @@ use near_sdk::Promise;
 
 #[near]
 impl Contract {
-    /// Allows the proposer of a v2 proposal to reclaim their bond if the proposal expired
+    /// Allows the proposer of a FastTrack proposal to reclaim their bond if the proposal expired
     /// before it was approved. Any other terminal state forfeits the bond.
     pub fn claim_bond(&mut self, proposal_id: ProposalId) {
         let mut proposal = self.internal_expect_proposal_updated(proposal_id);
 
         require!(
-            proposal.flow == ProposalFlow::V2,
-            "Bonds only exist on v2 proposals"
+            proposal.flow == ProposalFlow::FastTrack,
+            "Bonds only exist on FastTrack proposals"
         );
         require!(
             proposal.proposer_id == env::predecessor_account_id(),

@@ -8,11 +8,12 @@ It contains the following contracts:
 - **lockup-contract**: A contract that locks NEAR tokens while being owned by the user. It's non-upgradable and doesn't
   depend on the venear-contract logic. This provides extra layer of security for the user. It allows to stake NEAR
   tokens to a validator (or towards a liquid staking as staking pools).
-- **voting-contract**: A voting contract (v1). It allows anyone to create proposals. One of the
-  reviewers has to approve the proposal, to start voting process. It uses end-of-the-block snapshots from the veNEAR
+- **voting-contract**: A voting contract supporting two flows. It allows anyone to create proposals. One of the
+  reviewers has to approve the proposal, to start the voting process. It uses end-of-the-block snapshots from the veNEAR
   contract to track veNEAR holders at the time of the proposal approving.
-- **voting-contract-v2**: A voting contract (v2). Extends v1 with a sandbox pre-voting period, scheduled Monday voting,
-  bond-based proposal fees, flexible majority types (simple/strong), proposal slashing, and council veto during voting.
+  - **Classic flow**: standard approve → vote → timelock → execute lifecycle.
+  - **FastTrack flow**: extends Classic with a sandbox pre-voting period, scheduled Monday voting,
+    bond-based proposal fees, flexible majority types (simple/strong), proposal slashing, and council veto during voting.
 
 ## Design principles
 
@@ -74,16 +75,16 @@ All contracts are designed to be deployed without access keys, to make sure the 
     period, during which council members can veto. After the timelock expires, signaling-only proposals (without
     actions) are finalized as `Succeeded`. Proposals with actions enter an `Executable` status, and anyone can
     trigger on-chain execution (function calls, transfers) by calling `execute_proposal`.
-- **voting v2**
-  - Shares the same base design as v1: independent of a particular veNEAR contract, controlled by an owner,
+- **FastTrack flow**
+  - Shares the same base design as Classic: independent of a particular veNEAR contract, controlled by an owner,
     and allows anyone to create proposals.
-  - Key differences from v1: bond-based proposal fees, sandbox pre-voting period, scheduled Monday voting,
+  - Key differences from Classic: bond-based proposal fees, sandbox pre-voting period, scheduled Monday voting,
     flexible majority types (simple/strong), council veto without timelock, and reviewer slash action.
   - See the proposal lifecycle below for the full status flow.
 
-### Voting v2 — Proposal Lifecycle
+### FastTrack — Proposal Lifecycle
 
-A proposal in v2 moves through a series of statuses. Each transition is triggered by a specific action or condition:
+A FastTrack proposal moves through a series of statuses. Each transition is triggered by a specific action or condition:
 
 1. **Created** — Anyone creates a proposal by attaching a deposit (storage + bond).
    - The proposal sits in `Created` waiting for a reviewer to act.

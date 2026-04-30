@@ -35,7 +35,7 @@ pub enum ProposalAction {
 #[near(serializers=[borsh, json])]
 pub enum ProposalFlow {
     Classic,
-    V2,
+    FastTrack,
 }
 
 #[derive(Clone)]
@@ -61,7 +61,7 @@ pub struct Proposal {
     pub flow: ProposalFlow,
     // Classic only
     pub timelock_duration_ns: U64,
-    // V2 only
+    // FastTrack only
     pub sandbox_start_time_ns: Option<U64>,
     pub bond_amount: NearToken,
     pub sandbox_duration_ns: U64,
@@ -164,7 +164,7 @@ impl Proposal {
                 self.voting_start_time_ns = Some(start_time);
                 self.status = ProposalStatus::Voting;
             }
-            ProposalFlow::V2 => {
+            ProposalFlow::FastTrack => {
                 self.sandbox_start_time_ns = Some(start_time);
                 self.status = ProposalStatus::Sandbox;
             }
@@ -183,7 +183,7 @@ impl Proposal {
                     voting_end
                 }
             }
-            ProposalFlow::V2 => {
+            ProposalFlow::FastTrack => {
                 if let Some(voting_start) = self.voting_start_time_ns {
                     voting_start.0 + self.voting_duration_ns.0
                 } else {
@@ -210,7 +210,7 @@ impl Proposal {
     pub fn update(&mut self, timestamp: TimestampNs) {
         match self.flow {
             ProposalFlow::Classic => self.update_classic(timestamp),
-            ProposalFlow::V2 => self.update_v2(timestamp),
+            ProposalFlow::FastTrack => self.update_fast_track(timestamp),
         }
     }
 
@@ -256,7 +256,7 @@ impl Proposal {
         }
     }
 
-    fn update_v2(&mut self, timestamp: TimestampNs) {
+    fn update_fast_track(&mut self, timestamp: TimestampNs) {
         match self.status {
             ProposalStatus::Rejected
             | ProposalStatus::Succeeded
@@ -298,7 +298,7 @@ impl Proposal {
                 }
             }
             ProposalStatus::Timelock => {
-                // Not reachable for v2 proposals.
+                // Not reachable for FastTrack proposals.
             }
             ProposalStatus::Queued => {
                 // Queued waits for explicit promotion by the scheduler.
@@ -345,7 +345,7 @@ impl Contract {
     /// Creates a new proposal of the given flow.
     ///
     /// * Classic: requires a deposit covering the storage and `base_proposal_fee`.
-    /// * V2: requires a deposit covering the storage and `bond_amount`. The bond stays locked on
+    /// * FastTrack: requires a deposit covering the storage and `bond_amount`. The bond stays locked on
     ///   the proposal and is recoverable via `claim_bond` once the proposal reaches a terminal
     ///   non-slashed state.
     #[payable]
@@ -371,7 +371,7 @@ impl Contract {
         let creation_time_ns: u64 = env::block_timestamp();
         let flow_expiration_ns = match flow {
             ProposalFlow::Classic => self.config.proposal_expiration_ns,
-            ProposalFlow::V2 => self.config.v2_proposal_expiration_ns,
+            ProposalFlow::FastTrack => self.config.fast_track_proposal_expiration_ns,
         };
         let expiration_ns = if flow_expiration_ns.0 > 0 {
             U64(creation_time_ns + flow_expiration_ns.0)
@@ -384,7 +384,7 @@ impl Contract {
                 NearToken::from_yoctonear(0),
                 self.config.base_proposal_fee,
             ),
-            ProposalFlow::V2 => (U64(0), self.config.bond_amount, self.config.bond_amount),
+            ProposalFlow::FastTrack => (U64(0), self.config.bond_amount, self.config.bond_amount),
         };
         let proposal = Proposal {
             id: proposal_id,

@@ -126,7 +126,7 @@ impl Contract {
             &account_balance,
         );
 
-        if proposal.flow == ProposalFlow::V2
+        if proposal.flow == ProposalFlow::FastTrack
             && proposal.status == ProposalStatus::Sandbox
             && proposal.sandbox_threshold_met()
         {

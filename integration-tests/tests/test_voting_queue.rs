@@ -7,7 +7,7 @@ use near_sdk::{Gas, NearToken};
 use serde_json::json;
 
 /// Vetoing a Scheduled/Timelock proposal frees a slot — `reject_proposal`'s auto-tick promotes
-/// the next queued proposal. Exercises Classic→Voting and V2→Sandbox promotion paths.
+/// the next queued proposal. Exercises Classic→Voting and FastTrack→Sandbox promotion paths.
 #[tokio::test]
 async fn test_queued_promotes_on_veto() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
@@ -21,8 +21,8 @@ async fn test_queued_promotes_on_veto() -> Result<(), Box<dyn std::error::Error>
 
     let mut ids = Vec::new();
     for _ in 0..4 {
-        let id = create_proposal_v2(&v, &user, None).await?;
-        approve_proposal_v2(&v, reviewer, id, MajorityType::Simple).await?;
+        let id = create_proposal_fst(&v, &user, None).await?;
+        approve_proposal_fst(&v, reviewer, id, MajorityType::Simple).await?;
         ids.push(id);
     }
     let classic_p = create_proposal(&v, &user, None).await?;
@@ -56,7 +56,7 @@ async fn test_queued_promotes_on_veto() -> Result<(), Box<dyn std::error::Error>
     assert_eq!(
         get_status(&v.get_proposal(ids[3]).await?)?,
         ProposalStatus::Sandbox,
-        "V2 queued proposal should be promoted into Sandbox after a slot freed via veto"
+        "FastTrack queued proposal should be promoted into Sandbox after a slot freed via veto"
     );
     assert_eq!(
         get_status(&v.get_proposal(classic_p).await?)?,
@@ -104,8 +104,8 @@ async fn test_queued_promotes_on_sandbox_timeout() -> Result<(), Box<dyn std::er
 
     let mut ids = Vec::new();
     for _ in 0..4 {
-        let id = create_proposal_v2(&v, &user, None).await?;
-        approve_proposal_v2(&v, reviewer, id, MajorityType::Simple).await?;
+        let id = create_proposal_fst(&v, &user, None).await?;
+        approve_proposal_fst(&v, reviewer, id, MajorityType::Simple).await?;
         ids.push(id);
     }
     assert_eq!(
@@ -119,7 +119,7 @@ async fn test_queued_promotes_on_sandbox_timeout() -> Result<(), Box<dyn std::er
     let earliest_freed_slot_end = p0_sandbox_start + sandbox_duration;
 
     // Fast-forward past the sandbox deadline. The three already-Sandbox proposals all time out.
-    v.fast_forward_to_proposal_status_v2(ids[0], ProposalStatus::Defeated)
+    v.fast_forward_to_proposal_status_fst(ids[0], ProposalStatus::Defeated)
         .await?;
 
     assert_eq!(
@@ -323,12 +323,12 @@ async fn test_max_active_proposals_setter() -> Result<(), Box<dyn std::error::Er
     let owner = &v.voting.as_ref().unwrap().owner;
     let reviewer = &v.voting.as_ref().unwrap().reviewer;
 
-    // With cap=1, two approved V2 proposals: first active, second queued.
-    let p1 = create_proposal_v2(&v, &user, None).await?;
-    let p2 = create_proposal_v2(&v, &user, None).await?;
+    // With cap=1, two approved FastTrack proposals: first active, second queued.
+    let p1 = create_proposal_fst(&v, &user, None).await?;
+    let p2 = create_proposal_fst(&v, &user, None).await?;
 
-    approve_proposal_v2(&v, reviewer, p1, MajorityType::Simple).await?;
-    approve_proposal_v2(&v, reviewer, p2, MajorityType::Simple).await?;
+    approve_proposal_fst(&v, reviewer, p1, MajorityType::Simple).await?;
+    approve_proposal_fst(&v, reviewer, p2, MajorityType::Simple).await?;
 
     assert_eq!(
         get_status(&v.get_proposal(p1).await?)?,
@@ -377,8 +377,8 @@ async fn test_max_active_proposals_setter() -> Result<(), Box<dyn std::error::Er
     );
 
     // Approve a third proposal while over-cap. It must queue.
-    let p3 = create_proposal_v2(&v, &user, None).await?;
-    approve_proposal_v2(&v, reviewer, p3, MajorityType::Simple).await?;
+    let p3 = create_proposal_fst(&v, &user, None).await?;
+    approve_proposal_fst(&v, reviewer, p3, MajorityType::Simple).await?;
     assert_eq!(
         get_status(&v.get_proposal(p3).await?)?,
         ProposalStatus::Queued,
@@ -413,8 +413,8 @@ async fn test_view_virtual_advance() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut ids = Vec::new();
     for _ in 0..6 {
-        let id = create_proposal_v2(&v, &user, None).await?;
-        approve_proposal_v2(&v, reviewer, id, MajorityType::Simple).await?;
+        let id = create_proposal_fst(&v, &user, None).await?;
+        approve_proposal_fst(&v, reviewer, id, MajorityType::Simple).await?;
         ids.push(id);
     }
 
@@ -429,7 +429,7 @@ async fn test_view_virtual_advance() -> Result<(), Box<dyn std::error::Error>> {
 
     // Phase 2: first sandbox batch expires. ids[0..=2] virtually Defeated,
     // ids[3..=5] virtually promoted into Sandbox.
-    v.fast_forward_to_proposal_status_v2(ids[0], ProposalStatus::Defeated)
+    v.fast_forward_to_proposal_status_fst(ids[0], ProposalStatus::Defeated)
         .await?;
     for i in 0..3 {
         assert_eq!(
@@ -473,7 +473,7 @@ async fn test_view_virtual_advance() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Phase 3: fast-forward past the *promoted* batch's sandbox window
-    v.fast_forward_to_proposal_status_v2(ids[5], ProposalStatus::Defeated)
+    v.fast_forward_to_proposal_status_fst(ids[5], ProposalStatus::Defeated)
         .await?;
 
     for i in 0..6 {
@@ -503,11 +503,11 @@ async fn test_vote_on_promoted_queued_without_snapshot() -> Result<(), Box<dyn s
 
     let reviewer = &v.voting.as_ref().unwrap().reviewer;
 
-    let p1 = create_proposal_v2(&v, &user, None).await?;
-    let p2 = create_proposal_v2(&v, &user, None).await?;
+    let p1 = create_proposal_fst(&v, &user, None).await?;
+    let p2 = create_proposal_fst(&v, &user, None).await?;
 
-    approve_proposal_v2(&v, reviewer, p1, MajorityType::Simple).await?;
-    approve_proposal_v2(&v, reviewer, p2, MajorityType::Simple).await?;
+    approve_proposal_fst(&v, reviewer, p1, MajorityType::Simple).await?;
+    approve_proposal_fst(&v, reviewer, p2, MajorityType::Simple).await?;
 
     assert_eq!(
         get_status(&v.get_proposal(p1).await?)?,
@@ -519,7 +519,7 @@ async fn test_vote_on_promoted_queued_without_snapshot() -> Result<(), Box<dyn s
     );
 
     // Time out p1 so the queue advances p2 into Sandbox virtually.
-    v.fast_forward_to_proposal_status_v2(p1, ProposalStatus::Defeated)
+    v.fast_forward_to_proposal_status_fst(p1, ProposalStatus::Defeated)
         .await?;
 
     let view = v.get_proposal(p2).await?;
@@ -636,18 +636,18 @@ async fn test_take_snapshot_and_vote_chained() -> Result<(), Box<dyn std::error:
 
     let reviewer = &v.voting.as_ref().unwrap().reviewer;
 
-    let p1 = create_proposal_v2(&v, &user_a, None).await?;
-    let p2 = create_proposal_v2(&v, &user_a, None).await?;
+    let p1 = create_proposal_fst(&v, &user_a, None).await?;
+    let p2 = create_proposal_fst(&v, &user_a, None).await?;
 
-    approve_proposal_v2(&v, reviewer, p1, MajorityType::Simple).await?;
-    approve_proposal_v2(&v, reviewer, p2, MajorityType::Simple).await?;
+    approve_proposal_fst(&v, reviewer, p1, MajorityType::Simple).await?;
+    approve_proposal_fst(&v, reviewer, p2, MajorityType::Simple).await?;
 
     assert_eq!(
         get_status(&v.get_proposal(p2).await?)?,
         ProposalStatus::Queued
     );
 
-    v.fast_forward_to_proposal_status_v2(p1, ProposalStatus::Defeated)
+    v.fast_forward_to_proposal_status_fst(p1, ProposalStatus::Defeated)
         .await?;
 
     let (merkle_proof, v_account): (serde_json::Value, serde_json::Value) = v

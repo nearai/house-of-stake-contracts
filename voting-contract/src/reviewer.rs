@@ -28,8 +28,8 @@ impl Contract {
         if proposal.status != ProposalStatus::Created {
             env::panic_str("Proposal is not in the Created status");
         }
-        if proposal.flow == ProposalFlow::V2 && majority_type.is_none() {
-            env::panic_str("V2 proposals require a majority_type");
+        if proposal.flow == ProposalFlow::FastTrack && majority_type.is_none() {
+            env::panic_str("FastTrack proposals require a majority_type");
         }
 
         events::emit::approve_proposal_action(&env::predecessor_account_id(), proposal_id);
@@ -42,7 +42,7 @@ impl Contract {
             ProposalFlow::Classic => {
                 proposal.approval_threshold_bps = self.config.approval_threshold_bps;
             }
-            ProposalFlow::V2 => {
+            ProposalFlow::FastTrack => {
                 proposal.approval_threshold_bps = match majority_type.unwrap() {
                     MajorityType::Simple => self.config.simple_majority_threshold_bps,
                     MajorityType::Strong => self.config.strong_majority_threshold_bps,
@@ -97,7 +97,7 @@ impl Contract {
 
     /// Vetoes a proposal.
     /// * Classic flow: only valid during the Timelock period.
-    /// * V2 flow: valid while the proposal is Scheduled or Voting.
+    /// * FastTrack flow: valid while the proposal is Scheduled or Voting.
     /// Requires 1 yocto attached to the call.
     /// Can only be called by the council members.
     #[payable]
@@ -110,7 +110,7 @@ impl Contract {
 
         match (proposal.flow, proposal.status) {
             (ProposalFlow::Classic, ProposalStatus::Timelock) => {}
-            (ProposalFlow::V2, ProposalStatus::Voting | ProposalStatus::Scheduled) => {}
+            (ProposalFlow::FastTrack, ProposalStatus::Voting | ProposalStatus::Scheduled) => {}
             (_, _) => env::panic_str("Proposal cannot be vetoed in its current state"),
         }
 
@@ -160,8 +160,8 @@ impl Contract {
         let mut proposal = self.internal_expect_proposal_updated(proposal_id);
 
         require!(
-            proposal.flow == ProposalFlow::V2,
-            "Only v2 proposals can be slashed"
+            proposal.flow == ProposalFlow::FastTrack,
+            "Only FastTrack proposals can be slashed"
         );
         if proposal.status != ProposalStatus::Created {
             env::panic_str("Proposal can only be slashed while in Created status");

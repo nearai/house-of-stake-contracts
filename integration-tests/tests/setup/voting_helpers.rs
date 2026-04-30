@@ -62,7 +62,7 @@ pub async fn create_proposal(
     Ok(outcome.json().unwrap())
 }
 
-pub async fn create_proposal_v2(
+pub async fn create_proposal_fst(
     v: &VenearTestWorkspace,
     user: &near_workspaces::Account,
     actions: Option<serde_json::Value>,
@@ -75,7 +75,7 @@ pub async fn create_proposal_v2(
                 "description": "This is a test proposal",
             },
             "actions": actions,
-            "flow": "V2",
+            "flow": "FastTrack",
         }))
         .deposit(NearToken::from_millinear(200))
         .gas(Gas::from_tgas(50))
@@ -129,7 +129,7 @@ pub async fn approve_proposal(
     Ok(())
 }
 
-pub async fn approve_proposal_v2(
+pub async fn approve_proposal_fst(
     v: &VenearTestWorkspace,
     user: &near_workspaces::Account,
     proposal_id: u32,
@@ -253,7 +253,7 @@ pub async fn reject_proposal(
 }
 
 /// Council-only veto helper.
-/// Classic: valid during Timelock. V2: valid during Scheduled or Voting.
+/// Classic: valid during Timelock. FastTrack: valid during Scheduled or Voting.
 pub async fn veto_proposal(
     v: &VenearTestWorkspace,
     caller: &near_workspaces::Account,

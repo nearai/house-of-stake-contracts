@@ -26,7 +26,7 @@ pub struct Config {
     /// The base fee in addition to the storage fee required to create a proposal.
     pub base_proposal_fee: NearToken,
 
-    /// The bond amount required to create a v2 proposal.
+    /// The bond amount required to create a FastTrack proposal.
     pub bond_amount: NearToken,
 
     /// Storage fee required to store a vote for an active proposal. It can be refunded once the
@@ -40,9 +40,9 @@ pub struct Config {
     /// 0 means no expiration.
     pub proposal_expiration_ns: U64,
 
-    /// The maximum time in nanoseconds a V2 proposal can stay in Created status before expiring.
-    /// 0 means no expiration.
-    pub v2_proposal_expiration_ns: U64,
+    /// The maximum time in nanoseconds a FastTrack proposal can stay in Created status before
+    /// expiring. 0 means no expiration.
+    pub fast_track_proposal_expiration_ns: U64,
 
     /// Proposed new owner account ID. The account has to accept ownership.
     pub proposed_new_owner_account_id: Option<AccountId>,
@@ -57,16 +57,16 @@ pub struct Config {
     /// Applied as: for_votes / (for_votes + against_votes) >= approval_threshold_bps / 10000.
     pub approval_threshold_bps: u16,
 
-    /// Simple majority threshold in basis points for v2 proposals (e.g. 5000 = 50%).
+    /// Simple majority threshold in basis points for FastTrack proposals (e.g. 5000 = 50%).
     pub simple_majority_threshold_bps: u16,
 
-    /// Strong (super) majority threshold in basis points for v2 proposals (e.g. 6667 ≈ 66.67%).
+    /// Strong (super) majority threshold in basis points for FastTrack proposals (e.g. 6667 ≈ 66.67%).
     pub strong_majority_threshold_bps: u16,
 
-    /// The duration of the sandbox pre-voting period in nanoseconds for v2 proposals.
+    /// The duration of the sandbox pre-voting period in nanoseconds for FastTrack proposals.
     pub sandbox_duration_ns: U64,
 
-    /// The "For" votes threshold to graduate a v2 proposal from Sandbox to Scheduled.
+    /// The "For" votes threshold to graduate a FastTrack proposal from Sandbox to Scheduled.
     pub sandbox_threshold_bps: u16,
 
     /// Maximum number of proposals allowed in Sandbox/Scheduled/Voting simultaneously.

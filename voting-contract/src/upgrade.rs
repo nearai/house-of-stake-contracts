@@ -16,9 +16,9 @@ const DEFAULT_STRONG_MAJORITY_BPS: u16 = 6_667;
 const DEFAULT_SANDBOX_DURATION_NS: u64 = 14 * 24 * 60 * 60 * 1_000_000_000; // 14 days
 const DEFAULT_SANDBOX_THRESHOLD_BPS: u16 = 3_000;
 const DEFAULT_MAX_ACTIVE_PROPOSALS: u32 = 3;
-const DEFAULT_V2_PROPOSAL_EXPIRATION_NS: u64 = 2 * 24 * 60 * 60 * 1_000_000_000; // 2 days
+const DEFAULT_FAST_TRACK_PROPOSAL_EXPIRATION_NS: u64 = 2 * 24 * 60 * 60 * 1_000_000_000; // 2 days
 
-/// Config from v1.0.3 (pre-merge). No v2 fields.
+/// Config from v1.0.3 (pre-merge). No FastTrack fields.
 #[derive(Clone, BorshDeserialize, near_sdk::borsh::BorshSerialize)]
 #[borsh(crate = "borsh")]
 struct OldConfig {
@@ -215,7 +215,7 @@ impl Contract {
                 vote_storage_fee: old.config.vote_storage_fee,
                 guardians: old.config.guardians,
                 proposal_expiration_ns: old.config.proposal_expiration_ns,
-                v2_proposal_expiration_ns: U64(DEFAULT_V2_PROPOSAL_EXPIRATION_NS),
+                fast_track_proposal_expiration_ns: U64(DEFAULT_FAST_TRACK_PROPOSAL_EXPIRATION_NS),
                 proposed_new_owner_account_id: old.config.proposed_new_owner_account_id,
                 quorum_threshold_bps: old.config.quorum_threshold_bps,
                 quorum_floor: old.config.quorum_floor,

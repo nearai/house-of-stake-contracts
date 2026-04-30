@@ -48,11 +48,11 @@ TIMELOCK_DURATION_NS="${TIMELOCK_DURATION_SEC}000000000"
 : "${PROPOSAL_EXPIRATION_SEC:=600}"
 PROPOSAL_EXPIRATION_NS="${PROPOSAL_EXPIRATION_SEC}000000000"
 # 10 minutes for testing
-: "${V2_PROPOSAL_EXPIRATION_SEC:=600}"
-V2_PROPOSAL_EXPIRATION_NS="${V2_PROPOSAL_EXPIRATION_SEC}000000000"
+: "${FST_PROPOSAL_EXPIRATION_SEC:=600}"
+FST_PROPOSAL_EXPIRATION_NS="${FST_PROPOSAL_EXPIRATION_SEC}000000000"
 # 0.1 NEAR
 : ${BASE_PROPOSAL_FEE:="100000000000000000000000"}
-# 0.1 NEAR (bond for v2)
+# 0.1 NEAR (bond for FastTrack)
 : ${BOND_AMOUNT:="100000000000000000000000"}
 # 0.00125 NEAR (we probably need less)
 : ${VOTE_STORAGE_FEE:="1250000000000000000000"}
@@ -127,7 +127,7 @@ echo "Creating account $VOTING_GUARDIAN_ACCOUNT_ID"
 near --quiet account create-account fund-myself $VOTING_GUARDIAN_ACCOUNT_ID '0.1 NEAR' autogenerate-new-keypair save-to-keychain sign-as $ROOT_ACCOUNT_ID network-config $CHAIN_ID sign-with-keychain send
 
 
-echo "Deploying and initializing voting contract (merged classic + v2 flows)"
+echo "Deploying and initializing voting contract (merged Classic + FastTrack flows)"
 near --quiet contract deploy $VOTING_ACCOUNT_ID use-file res/$CONTRACTS_SOURCE/voting_contract.wasm with-init-call new json-args '{
   "config": {
     "venear_account_id": "'$VENEAR_ACCOUNT_ID'",
@@ -141,7 +141,7 @@ near --quiet contract deploy $VOTING_ACCOUNT_ID use-file res/$CONTRACTS_SOURCE/v
     "vote_storage_fee": "'$VOTE_STORAGE_FEE'",
     "guardians": ["'$GUARDIAN_ACCOUNT_ID'"],
     "proposal_expiration_ns": "'$PROPOSAL_EXPIRATION_NS'",
-    "v2_proposal_expiration_ns": "'$V2_PROPOSAL_EXPIRATION_NS'",
+    "fast_track_proposal_expiration_ns": "'$FST_PROPOSAL_EXPIRATION_NS'",
     "quorum_threshold_bps": '$QUORUM_THRESHOLD_BPS',
     "quorum_floor": "'$QUORUM_FLOOR'",
     "approval_threshold_bps": '$APPROVAL_THRESHOLD_BPS',
