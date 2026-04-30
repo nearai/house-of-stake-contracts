@@ -10,7 +10,7 @@ const MIGRATE_STATE_GAS: Gas = Gas::from_tgas(50);
 const GET_CONFIG_GAS: Gas = Gas::from_tgas(5);
 
 // Defaults applied when migrating a contract that predates the merged flow.
-const DEFAULT_BOND_AMOUNT_NEAR: u128 = 10;
+const DEFAULT_BOND_AMOUNT_NEAR: u128 = 100;
 const DEFAULT_SIMPLE_MAJORITY_BPS: u16 = 5_000;
 const DEFAULT_STRONG_MAJORITY_BPS: u16 = 6_667;
 const DEFAULT_SANDBOX_DURATION_NS: u64 = 14 * 24 * 60 * 60 * 1_000_000_000; // 14 days
