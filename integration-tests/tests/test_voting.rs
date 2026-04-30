@@ -417,20 +417,11 @@ async fn test_voting_veto_proposal() -> Result<(), Box<dyn std::error::Error>> {
     let proposal_id = create_proposal(&v, &user_a, None).await?;
     approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
 
+    let council = &v.voting.as_ref().unwrap().council;
+    let reviewer = &v.voting.as_ref().unwrap().reviewer;
+
     // Council cannot veto while proposal is still in Voting
-    let outcome = v
-        .voting
-        .as_ref()
-        .unwrap()
-        .council
-        .call(v.voting_id(), "veto_proposal")
-        .args_json(json!({
-            "proposal_id": proposal_id,
-        }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(250))
-        .transact()
-        .await?;
+    let outcome = veto_proposal(&v, council, proposal_id).await?;
     assert!(
         outcome.is_failure(),
         "Council should not be able to veto a Voting proposal: {:#?}",
@@ -451,15 +442,7 @@ async fn test_voting_veto_proposal() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Regular user cannot veto during timelock
-    let outcome = user_a
-        .call(v.voting_id(), "veto_proposal")
-        .args_json(json!({
-            "proposal_id": proposal_id,
-        }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(250))
-        .transact()
-        .await?;
+    let outcome = veto_proposal(&v, &user_a, proposal_id).await?;
     assert!(
         outcome.is_failure(),
         "User should not be able to veto proposal: {:#?}",
@@ -467,19 +450,7 @@ async fn test_voting_veto_proposal() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Reviewer cannot veto proposals
-    let outcome = v
-        .voting
-        .as_ref()
-        .unwrap()
-        .reviewer
-        .call(v.voting_id(), "veto_proposal")
-        .args_json(json!({
-            "proposal_id": proposal_id,
-        }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(250))
-        .transact()
-        .await?;
+    let outcome = veto_proposal(&v, reviewer, proposal_id).await?;
     assert!(
         outcome.is_failure(),
         "Reviewer should not be able to veto proposal: {:#?}",
@@ -487,24 +458,7 @@ async fn test_voting_veto_proposal() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Council can veto during timelock
-    let outcome = v
-        .voting
-        .as_ref()
-        .unwrap()
-        .council
-        .call(v.voting_id(), "veto_proposal")
-        .args_json(json!({
-            "proposal_id": proposal_id,
-        }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(250))
-        .transact()
-        .await?;
-    assert!(
-        outcome.is_success(),
-        "Council should be able to veto proposal during timelock: {:#?}",
-        outcome
-    );
+    veto_proposal(&v, council, proposal_id).await?.into_result()?;
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(get_status(&proposal)?, ProposalStatus::Vetoed);
@@ -555,20 +509,10 @@ async fn test_voting_noveto_proposal() -> Result<(), Box<dyn std::error::Error>>
     approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
     approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id_2).await?;
 
+    let council = &v.voting.as_ref().unwrap().council;
+
     // Council cannot noveto while proposal is still in Voting
-    let outcome = v
-        .voting
-        .as_ref()
-        .unwrap()
-        .council
-        .call(v.voting_id(), "noveto_proposal")
-        .args_json(json!({
-            "proposal_id": proposal_id,
-        }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(250))
-        .transact()
-        .await?;
+    let outcome = noveto_proposal(&v, council, proposal_id).await?;
     assert!(
         outcome.is_failure(),
         "Council should not be able to noveto a Voting proposal: {:#?}",
@@ -582,15 +526,7 @@ async fn test_voting_noveto_proposal() -> Result<(), Box<dyn std::error::Error>>
         .await?;
 
     // Regular user cannot noveto during timelock
-    let outcome = user_a
-        .call(v.voting_id(), "noveto_proposal")
-        .args_json(json!({
-            "proposal_id": proposal_id,
-        }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(250))
-        .transact()
-        .await?;
+    let outcome = noveto_proposal(&v, &user_a, proposal_id).await?;
     assert!(
         outcome.is_failure(),
         "User should not be able to noveto proposal: {:#?}",
@@ -598,24 +534,7 @@ async fn test_voting_noveto_proposal() -> Result<(), Box<dyn std::error::Error>>
     );
 
     // Council can noveto during timelock — fast-forwards past timelock to Succeeded
-    let outcome = v
-        .voting
-        .as_ref()
-        .unwrap()
-        .council
-        .call(v.voting_id(), "noveto_proposal")
-        .args_json(json!({
-            "proposal_id": proposal_id,
-        }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(250))
-        .transact()
-        .await?;
-    assert!(
-        outcome.is_success(),
-        "Council should be able to noveto proposal during timelock: {:#?}",
-        outcome
-    );
+    noveto_proposal(&v, council, proposal_id).await?.into_result()?;
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
@@ -625,24 +544,7 @@ async fn test_voting_noveto_proposal() -> Result<(), Box<dyn std::error::Error>>
     );
 
     // Second proposal: noveto from Timelock should go to Executable.
-    let outcome = v
-        .voting
-        .as_ref()
-        .unwrap()
-        .council
-        .call(v.voting_id(), "noveto_proposal")
-        .args_json(json!({
-            "proposal_id": proposal_id_2,
-        }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(250))
-        .transact()
-        .await?;
-    assert!(
-        outcome.is_success(),
-        "Council should be able to noveto proposal with actions: {:#?}",
-        outcome
-    );
+    noveto_proposal(&v, council, proposal_id_2).await?.into_result()?;
 
     let proposal = v.get_proposal(proposal_id_2).await?;
     assert_eq!(
@@ -1513,19 +1415,7 @@ async fn test_voting_pause() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Attempt to veto a proposal while paused (council call, but contract is paused)
-    let outcome = v
-        .voting
-        .as_ref()
-        .unwrap()
-        .council
-        .call(v.voting_id(), "veto_proposal")
-        .args_json(json!({
-            "proposal_id": proposal_id,
-        }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(250))
-        .transact()
-        .await?;
+    let outcome = veto_proposal(&v, &v.voting.as_ref().unwrap().council, proposal_id).await?;
     assert!(
         outcome.is_failure(),
         "Council should not be able to veto proposal while paused: {:#?}",

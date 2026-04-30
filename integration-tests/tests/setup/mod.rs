@@ -376,6 +376,19 @@ impl VenearTestWorkspaceBuilder {
         self.max_active_proposals = max_active_proposals;
         self
     }
+
+    pub fn proposal_expiration_ns(mut self, proposal_expiration_ns: u64) -> Self {
+        self.proposal_expiration_ns = proposal_expiration_ns;
+        self
+    }
+
+    pub fn fast_track_proposal_expiration_ns(
+        mut self,
+        fast_track_proposal_expiration_ns: u64,
+    ) -> Self {
+        self.fast_track_proposal_expiration_ns = fast_track_proposal_expiration_ns;
+        self
+    }
 }
 
 #[allow(dead_code)]

@@ -263,7 +263,23 @@ pub async fn veto_proposal(
         .call(v.voting_id(), "veto_proposal")
         .args_json(json!({ "proposal_id": proposal_id }))
         .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(100))
+        .gas(Gas::from_tgas(250))
+        .transact()
+        .await?;
+    Ok(outcome)
+}
+
+/// Council-only noveto helper. Classic-only; releases a proposal early from Timelock.
+pub async fn noveto_proposal(
+    v: &VenearTestWorkspace,
+    caller: &near_workspaces::Account,
+    proposal_id: u32,
+) -> Result<near_workspaces::result::ExecutionFinalResult, Box<dyn std::error::Error>> {
+    let outcome = caller
+        .call(v.voting_id(), "noveto_proposal")
+        .args_json(json!({ "proposal_id": proposal_id }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(250))
         .transact()
         .await?;
     Ok(outcome)

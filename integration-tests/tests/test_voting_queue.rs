@@ -46,8 +46,7 @@ async fn test_queued_promotes_on_veto() -> Result<(), Box<dyn std::error::Error>
         get_status(&v.get_proposal(ids[0]).await?)?,
         ProposalStatus::Scheduled
     );
-    let outcome = veto_proposal(&v, council, ids[0]).await?;
-    assert!(outcome.is_success(), "Veto should succeed: {:#?}", outcome);
+    veto_proposal(&v, council, ids[0]).await?.into_result()?;
 
     assert_eq!(
         get_status(&v.get_proposal(ids[0]).await?)?,
@@ -68,12 +67,7 @@ async fn test_queued_promotes_on_veto() -> Result<(), Box<dyn std::error::Error>
         get_status(&v.get_proposal(ids[1]).await?)?,
         ProposalStatus::Scheduled
     );
-    let outcome = veto_proposal(&v, council, ids[1]).await?;
-    assert!(
-        outcome.is_success(),
-        "Second veto should succeed: {:#?}",
-        outcome
-    );
+    veto_proposal(&v, council, ids[1]).await?.into_result()?;
 
     assert_eq!(
         get_status(&v.get_proposal(ids[1]).await?)?,

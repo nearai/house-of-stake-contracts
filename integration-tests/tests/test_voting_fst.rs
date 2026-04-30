@@ -2,10 +2,10 @@ mod setup;
 
 use crate::setup::voting_helpers::*;
 use crate::setup::{DEFAULT_BOND_AMOUNT, NS_IN_SECOND, VenearTestWorkspaceBuilder};
+use common::voting::{MajorityType, ProposalStatus, VoteOption};
 use near_sdk::{Gas, NearToken};
 use near_workspaces::AccountId;
 use serde_json::json;
-use common::voting::{MajorityType, ProposalStatus, VoteOption};
 
 #[tokio::test]
 async fn test_voting_fst() -> Result<(), Box<dyn std::error::Error>> {
@@ -343,7 +343,7 @@ async fn test_voting_fst() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[tokio::test]
-async fn test_voting_fst_reject_proposal() -> Result<(), Box<dyn std::error::Error>> {
+async fn test_voting_fst_veto_proposal() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
         .with_voting()
         .build()
@@ -353,139 +353,75 @@ async fn test_voting_fst_reject_proposal() -> Result<(), Box<dyn std::error::Err
     v.transfer_and_lock(&user_a, NearToken::from_near(1000))
         .await?;
 
-    let proposal_id_1 = create_proposal_fst(&v, &user_a, None).await?;
-    approve_proposal_fst(
-        &v,
-        &v.voting.as_ref().unwrap().reviewer,
-        proposal_id_1,
-        MajorityType::Simple,
-    )
-    .await?;
+    let reviewer = &v.voting.as_ref().unwrap().reviewer;
+    let council = &v.voting.as_ref().unwrap().council;
 
-    // Vote For to move from Sandbox to Scheduled
-    vote_for_option(&v, &user_a, proposal_id_1, VoteOption::For).await?;
+    // Proposal 1: veto during Scheduled. Also exercise non-council permission checks here.
+    let proposal_scheduled = create_proposal_fst(&v, &user_a, None).await?;
+    approve_proposal_fst(&v, reviewer, proposal_scheduled, MajorityType::Simple).await?;
+    vote_for_option(&v, &user_a, proposal_scheduled, VoteOption::For).await?;
 
-    // Fast forward to Voting status
-    v.fast_forward_to_proposal_status_fst(proposal_id_1, ProposalStatus::Voting)
-        .await?;
-
-    let proposal = v.get_proposal(proposal_id_1).await?;
+    let proposal = v.get_proposal(proposal_scheduled).await?;
     assert_eq!(
         get_status(&proposal)?,
-        ProposalStatus::Voting,
-        "Proposal 1 should be in Voting status"
+        ProposalStatus::Scheduled,
+        "Proposal should be in Scheduled status"
     );
 
-    // Regular user cannot veto during voting
-    let outcome = user_a
-        .call(v.voting_id(), "veto_proposal")
-        .args_json(json!({
-            "proposal_id": proposal_id_1,
-        }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(250))
-        .transact()
-        .await?;
+    // Regular user cannot veto
+    let outcome = veto_proposal(&v, &user_a, proposal_scheduled).await?;
     assert!(
         outcome.is_failure(),
         "User should not be able to veto proposal: {:#?}",
         outcome
     );
 
-    // Reviewer cannot veto proposals
-    let outcome = v
-        .voting
-        .as_ref()
-        .unwrap()
-        .reviewer
-        .call(v.voting_id(), "veto_proposal")
-        .args_json(json!({
-            "proposal_id": proposal_id_1,
-        }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(250))
-        .transact()
-        .await?;
+    // Reviewer cannot veto
+    let outcome = veto_proposal(&v, reviewer, proposal_scheduled).await?;
     assert!(
         outcome.is_failure(),
         "Reviewer should not be able to veto proposal: {:#?}",
         outcome
     );
 
-    // Council can veto during voting
-    let outcome = v
-        .voting
-        .as_ref()
-        .unwrap()
-        .council
-        .call(v.voting_id(), "veto_proposal")
-        .args_json(json!({
-            "proposal_id": proposal_id_1,
-        }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(250))
-        .transact()
-        .await?;
-    assert!(
-        outcome.is_success(),
-        "Council should be able to veto proposal during voting: {:#?}",
-        outcome
-    );
-
-    let proposal = v.get_proposal(proposal_id_1).await?;
-    assert_eq!(get_status(&proposal)?, ProposalStatus::Vetoed);
-    assert_eq!(
-        proposal["rejecter_id"].as_str().unwrap(),
-        v.voting.as_ref().unwrap().council.id().as_str(),
-        "rejecter_id should be set to the council member"
-    );
-
-    let proposal_id_2 = create_proposal_fst(&v, &user_a, None).await?;
-    approve_proposal_fst(
-        &v,
-        &v.voting.as_ref().unwrap().reviewer,
-        proposal_id_2,
-        MajorityType::Simple,
-    )
-    .await?;
-
-    // Vote For to move from Sandbox to Scheduled
-    vote_for_option(&v, &user_a, proposal_id_2, VoteOption::For).await?;
-
-    let proposal = v.get_proposal(proposal_id_2).await?;
-    assert_eq!(
-        get_status(&proposal)?,
-        ProposalStatus::Scheduled,
-        "Proposal 2 should be in Scheduled status"
-    );
-
-    // Council can veto during scheduled period
-    let outcome = v
-        .voting
-        .as_ref()
-        .unwrap()
-        .council
-        .call(v.voting_id(), "veto_proposal")
-        .args_json(json!({
-            "proposal_id": proposal_id_2,
-        }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(250))
-        .transact()
-        .await?;
+    // Council can veto during Scheduled
+    let outcome = veto_proposal(&v, council, proposal_scheduled).await?;
     assert!(
         outcome.is_success(),
         "Council should be able to veto proposal during scheduled period: {:#?}",
         outcome
     );
 
-    let proposal = v.get_proposal(proposal_id_2).await?;
-    assert_eq!(get_status(&proposal)?, ProposalStatus::Vetoed);
+    // Proposal 2: veto during Voting.
+    let proposal_voting = create_proposal_fst(&v, &user_a, None).await?;
+    approve_proposal_fst(&v, reviewer, proposal_voting, MajorityType::Simple).await?;
+    vote_for_option(&v, &user_a, proposal_voting, VoteOption::For).await?;
+    v.fast_forward_to_proposal_status_fst(proposal_voting, ProposalStatus::Voting)
+        .await?;
+
+    let proposal = v.get_proposal(proposal_voting).await?;
     assert_eq!(
-        proposal["rejecter_id"].as_str().unwrap(),
-        v.voting.as_ref().unwrap().council.id().as_str(),
-        "rejecter_id should be set to the council member"
+        get_status(&proposal)?,
+        ProposalStatus::Voting,
+        "Proposal should be in Voting status"
     );
+
+    let outcome = veto_proposal(&v, council, proposal_voting).await?;
+    assert!(
+        outcome.is_success(),
+        "Council should be able to veto proposal during voting: {:#?}",
+        outcome
+    );
+
+    for id in [proposal_scheduled, proposal_voting] {
+        let proposal = v.get_proposal(id).await?;
+        assert_eq!(get_status(&proposal)?, ProposalStatus::Vetoed);
+        assert_eq!(
+            proposal["rejecter_id"].as_str().unwrap(),
+            council.id().as_str(),
+            "rejecter_id should be set to the council member"
+        );
+    }
 
     Ok(())
 }
@@ -1350,22 +1286,56 @@ async fn test_voting_fst_pause() -> Result<(), Box<dyn std::error::Error>> {
 
 #[tokio::test]
 async fn test_voting_fst_proposal_expiration() -> Result<(), Box<dyn std::error::Error>> {
+    const CLASSIC_EXPIRATION_SECS: u64 = 120;
+    const FST_EXPIRATION_SECS: u64 = 30;
+
     let v = VenearTestWorkspaceBuilder::default()
+        .proposal_expiration_ns(CLASSIC_EXPIRATION_SECS * NS_IN_SECOND)
+        .fast_track_proposal_expiration_ns(FST_EXPIRATION_SECS * NS_IN_SECOND)
         .with_voting()
         .build()
         .await?;
     let user_a = v.create_account_with_lockup().await?;
-    let proposal_id = create_proposal_fst(&v, &user_a, None).await?;
 
-    // Fast-forward past the expiration window
-    v.fast_forward_to_proposal_status_fst(proposal_id, ProposalStatus::Expired)
+    // Create one of each flow back-to-back so their creation times are close.
+    let classic_id = create_proposal(&v, &user_a, None).await?;
+    let fst_id = create_proposal_fst(&v, &user_a, None).await?;
+
+    // Each flow stamps its own configured expiration window.
+    let classic = v.get_proposal(classic_id).await?;
+    let classic_creation: u64 = classic["creation_time_ns"].as_str().unwrap().parse()?;
+    let classic_expiration: u64 = classic["expiration_ns"].as_str().unwrap().parse()?;
+    assert_eq!(
+        classic_expiration - classic_creation,
+        CLASSIC_EXPIRATION_SECS * NS_IN_SECOND,
+        "Classic expiration window should match the configured value"
+    );
+
+    let fst = v.get_proposal(fst_id).await?;
+    let fst_creation: u64 = fst["creation_time_ns"].as_str().unwrap().parse()?;
+    let fst_expiration: u64 = fst["expiration_ns"].as_str().unwrap().parse()?;
+    assert_eq!(
+        fst_expiration - fst_creation,
+        FST_EXPIRATION_SECS * NS_IN_SECOND,
+        "FastTrack expiration window should match the configured value"
+    );
+
+    // Fast-forward past the FastTrack expiration window
+    v.fast_forward_to_proposal_status_fst(fst_id, ProposalStatus::Expired)
         .await?;
 
-    let proposal = v.get_proposal(proposal_id).await?;
+    let fst = v.get_proposal(fst_id).await?;
     assert_eq!(
-        get_status(&proposal)?,
+        get_status(&fst)?,
         ProposalStatus::Expired,
-        "Proposal should be Expired after expiration window"
+        "FastTrack proposal should be Expired after expiration window"
+    );
+    // The Classic proposal's longer window has not elapsed yet.
+    let classic = v.get_proposal(classic_id).await?;
+    assert_eq!(
+        get_status(&classic)?,
+        ProposalStatus::Created,
+        "Classic proposal should still be Created after only the FastTrack window has elapsed"
     );
 
     // Attempt to approve — should fail because the proposal is expired
@@ -1373,7 +1343,7 @@ async fn test_voting_fst_proposal_expiration() -> Result<(), Box<dyn std::error:
         approve_proposal_fst(
             &v,
             &v.voting.as_ref().unwrap().reviewer,
-            proposal_id,
+            fst_id,
             MajorityType::Simple
         )
         .await
@@ -1383,7 +1353,7 @@ async fn test_voting_fst_proposal_expiration() -> Result<(), Box<dyn std::error:
 
     // Bond should be claimable from expired proposals
     let balance_before = user_a.view_account().await?.balance;
-    let outcome = claim_bond(&v, &user_a, proposal_id).await?;
+    let outcome = claim_bond(&v, &user_a, fst_id).await?;
     assert!(
         outcome.is_success(),
         "claim_bond should succeed for expired proposals: {:?}",
@@ -1391,8 +1361,8 @@ async fn test_voting_fst_proposal_expiration() -> Result<(), Box<dyn std::error:
     );
     let balance_after = user_a.view_account().await?.balance;
 
-    let proposal = v.get_proposal(proposal_id).await?;
-    assert_eq!(proposal["bond_amount"].as_str().unwrap(), "0");
+    let fst = v.get_proposal(fst_id).await?;
+    assert_eq!(fst["bond_amount"].as_str().unwrap(), "0");
     assert!(balance_after > balance_before);
 
     Ok(())
