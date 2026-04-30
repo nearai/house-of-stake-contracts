@@ -345,9 +345,9 @@ impl Contract {
     /// Creates a new proposal of the given flow.
     ///
     /// * Classic: requires a deposit covering the storage and `base_proposal_fee`.
-    /// * FastTrack: requires a deposit covering the storage and `bond_amount`. The bond stays locked on
-    ///   the proposal and is recoverable via `claim_bond` once the proposal reaches a terminal
-    ///   non-slashed state.
+    /// * FastTrack: requires a deposit covering the storage, `base_proposal_fee`, and `bond_amount`.
+    ///   The bond stays locked on the proposal and is recoverable via `claim_bond` once the proposal
+    ///   reaches a terminal non-slashed state; the base fee is non-refundable.
     #[payable]
     pub fn create_proposal(
         &mut self,
@@ -369,22 +369,22 @@ impl Contract {
         events::emit::create_proposal_action("create_proposal", &proposer_id, proposal_id);
 
         let creation_time_ns: u64 = env::block_timestamp();
-        let flow_expiration_ns = match flow {
-            ProposalFlow::Classic => self.config.proposal_expiration_ns,
-            ProposalFlow::FastTrack => self.config.fast_track_proposal_expiration_ns,
+        let (flow_expiration_ns, timelock_duration_ns, bond_amount) = match flow {
+            ProposalFlow::Classic => (
+                self.config.proposal_expiration_ns,
+                self.config.timelock_duration_ns,
+                NearToken::from_yoctonear(0),
+            ),
+            ProposalFlow::FastTrack => (
+                self.config.fast_track_proposal_expiration_ns,
+                U64(0),
+                self.config.bond_amount,
+            ),
         };
         let expiration_ns = if flow_expiration_ns.0 > 0 {
             U64(creation_time_ns + flow_expiration_ns.0)
         } else {
             U64(0)
-        };
-        let (timelock_duration_ns, bond_amount, flow_fee) = match flow {
-            ProposalFlow::Classic => (
-                self.config.timelock_duration_ns,
-                NearToken::from_yoctonear(0),
-                self.config.base_proposal_fee,
-            ),
-            ProposalFlow::FastTrack => (U64(0), self.config.bond_amount, self.config.bond_amount),
         };
         let proposal = Proposal {
             id: proposal_id,
@@ -421,7 +421,10 @@ impl Contract {
         let storage_added_cost = env::storage_byte_cost()
             .checked_mul(storage_added as _)
             .unwrap();
-        let required_deposit = near_add(flow_fee, storage_added_cost);
+        let required_deposit = near_add(
+            near_add(bond_amount, self.config.base_proposal_fee),
+            storage_added_cost,
+        );
         require!(
             attached_deposit >= required_deposit,
             format!(

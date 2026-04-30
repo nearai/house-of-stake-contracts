@@ -77,7 +77,7 @@ pub async fn create_proposal_fst(
             "actions": actions,
             "flow": "FastTrack",
         }))
-        .deposit(NearToken::from_millinear(200))
+        .deposit(NearToken::from_millinear(300))
         .gas(Gas::from_tgas(50))
         .transact()
         .await?;
