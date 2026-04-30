@@ -16,6 +16,7 @@ const DEFAULT_STRONG_MAJORITY_BPS: u16 = 6_667;
 const DEFAULT_SANDBOX_DURATION_NS: u64 = 14 * 24 * 60 * 60 * 1_000_000_000; // 14 days
 const DEFAULT_SANDBOX_THRESHOLD_BPS: u16 = 3_000;
 const DEFAULT_MAX_ACTIVE_PROPOSALS: u32 = 3;
+const DEFAULT_V2_PROPOSAL_EXPIRATION_NS: u64 = 2 * 24 * 60 * 60 * 1_000_000_000; // 2 days
 
 /// Config from v1.0.3 (pre-merge). No v2 fields.
 #[derive(Clone, BorshDeserialize, near_sdk::borsh::BorshSerialize)]
@@ -93,7 +94,9 @@ impl From<LegacyProposalClassic> for Proposal {
             proposer_id: c.proposer_id,
             reviewer_id: c.reviewer_id,
             rejecter_id: c.rejecter_id,
-            approval_time_ns: None,
+            // Pre-queue Classic proposals were activated at approval time, so
+            // voting_start_time_ns is the best available approximation of approval_time_ns.
+            approval_time_ns: c.voting_start_time_ns,
             voting_start_time_ns: c.voting_start_time_ns,
             voting_duration_ns: c.voting_duration_ns,
             timelock_duration_ns: c.timelock_duration_ns,
@@ -106,6 +109,7 @@ impl From<LegacyProposalClassic> for Proposal {
             quorum_floor: c.quorum_floor,
             approval_threshold_bps: c.approval_threshold_bps,
             actions: c.actions,
+            sandbox_start_time_ns: None,
             bond_amount: NearToken::from_yoctonear(0),
             sandbox_duration_ns: U64(0),
             sandbox_threshold_bps: 0,
@@ -122,7 +126,7 @@ impl From<LegacyProposalV1> for Proposal {
             proposer_id: v1.proposer_id,
             reviewer_id: v1.reviewer_id,
             rejecter_id: None,
-            approval_time_ns: None,
+            approval_time_ns: v1.voting_start_time_ns,
             voting_start_time_ns: v1.voting_start_time_ns,
             voting_duration_ns: v1.voting_duration_ns,
             timelock_duration_ns: U64(0),
@@ -135,6 +139,7 @@ impl From<LegacyProposalV1> for Proposal {
             quorum_floor: NearToken::from_yoctonear(0),
             approval_threshold_bps: 0,
             actions: None,
+            sandbox_start_time_ns: None,
             bond_amount: NearToken::from_yoctonear(0),
             sandbox_duration_ns: U64(0),
             sandbox_threshold_bps: 0,
@@ -210,6 +215,7 @@ impl Contract {
                 vote_storage_fee: old.config.vote_storage_fee,
                 guardians: old.config.guardians,
                 proposal_expiration_ns: old.config.proposal_expiration_ns,
+                v2_proposal_expiration_ns: U64(DEFAULT_V2_PROPOSAL_EXPIRATION_NS),
                 proposed_new_owner_account_id: old.config.proposed_new_owner_account_id,
                 quorum_threshold_bps: old.config.quorum_threshold_bps,
                 quorum_floor: old.config.quorum_floor,

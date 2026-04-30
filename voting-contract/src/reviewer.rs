@@ -35,6 +35,7 @@ impl Contract {
         events::emit::approve_proposal_action(&env::predecessor_account_id(), proposal_id);
 
         proposal.reviewer_id = Some(env::predecessor_account_id());
+        proposal.approval_time_ns = Some(env::block_timestamp().into());
         proposal.quorum_threshold_bps = self.config.quorum_threshold_bps;
         proposal.quorum_floor = self.config.quorum_floor;
         match proposal.flow {

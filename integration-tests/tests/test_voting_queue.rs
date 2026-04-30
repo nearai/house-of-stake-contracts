@@ -1,10 +1,10 @@
 mod setup;
 
+use crate::setup::VenearTestWorkspaceBuilder;
 use crate::setup::voting_helpers::*;
-use crate::setup::{NS_IN_SECOND, VenearTestWorkspaceBuilder};
+use common::voting::{MajorityType, ProposalStatus, VoteOption};
 use near_sdk::{Gas, NearToken};
 use serde_json::json;
-use common::voting::{MajorityType, ProposalStatus, VoteOption};
 
 /// Vetoing a Scheduled/Timelock proposal frees a slot — `reject_proposal`'s auto-tick promotes
 /// the next queued proposal. Exercises Classic→Voting and V2→Sandbox promotion paths.
@@ -115,8 +115,8 @@ async fn test_queued_promotes_on_sandbox_timeout() -> Result<(), Box<dyn std::er
 
     let p0_pre = v.get_proposal(ids[0]).await?;
     let sandbox_duration: u64 = p0_pre["sandbox_duration_ns"].as_str().unwrap().parse()?;
-    let p0_approval: u64 = p0_pre["approval_time_ns"].as_str().unwrap().parse()?;
-    let earliest_freed_slot_end = p0_approval + sandbox_duration;
+    let p0_sandbox_start: u64 = p0_pre["sandbox_start_time_ns"].as_str().unwrap().parse()?;
+    let earliest_freed_slot_end = p0_sandbox_start + sandbox_duration;
 
     // Fast-forward past the sandbox deadline. The three already-Sandbox proposals all time out.
     v.fast_forward_to_proposal_status_v2(ids[0], ProposalStatus::Defeated)
@@ -170,9 +170,12 @@ async fn test_queued_promotes_on_sandbox_timeout() -> Result<(), Box<dyn std::er
     // Backdating: ids[3] inherits ids[0]'s sandbox_end (earliest freed slot), not `now`.
     // A regression that switches to `now` would silently shift every promoted deadline forward.
     let p3_promoted = v.get_proposal(ids[3]).await?;
-    let p3_approval: u64 = p3_promoted["approval_time_ns"].as_str().unwrap().parse()?;
+    let p3_sandbox_start: u64 = p3_promoted["sandbox_start_time_ns"]
+        .as_str()
+        .unwrap()
+        .parse()?;
     assert_eq!(
-        p3_approval, earliest_freed_slot_end,
+        p3_sandbox_start, earliest_freed_slot_end,
         "Promoted proposal must inherit the earliest freed slot's end_time as its start"
     );
 
@@ -212,8 +215,7 @@ async fn test_classic_timelock_holds_slot() -> Result<(), Box<dyn std::error::Er
         vote_for_option(&v, &user, id, VoteOption::For).await?;
     }
 
-    // Fast-forward past voting_end. All three transition to Timelock and keep their slots.
-    v.fast_forward_to_proposal_status(ids[0], ProposalStatus::Timelock)
+    v.fast_forward_to_proposal_status(ids[2], ProposalStatus::Timelock)
         .await?;
     for &id in &ids {
         assert_eq!(
@@ -452,31 +454,27 @@ async fn test_view_virtual_advance() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap()
         .parse()?;
     for i in 0..3 {
-        let active_approval: u64 = v.get_proposal(ids[i]).await?["approval_time_ns"]
+        let active_sandbox_start: u64 = v.get_proposal(ids[i]).await?["sandbox_start_time_ns"]
             .as_str()
             .unwrap()
             .parse()?;
-        let promoted_approval: u64 = v.get_proposal(ids[3 + i]).await?["approval_time_ns"]
-            .as_str()
-            .unwrap()
-            .parse()?;
+        let promoted_sandbox_start: u64 =
+            v.get_proposal(ids[3 + i]).await?["sandbox_start_time_ns"]
+                .as_str()
+                .unwrap()
+                .parse()?;
         assert_eq!(
-            promoted_approval,
-            active_approval + sandbox_duration,
-            "ids[{}] should inherit ids[{}]'s sandbox_end as its approval_time",
+            promoted_sandbox_start,
+            active_sandbox_start + sandbox_duration,
+            "ids[{}] should inherit ids[{}]'s sandbox_end as its sandbox_start_time",
             3 + i,
             i
         );
     }
 
-    // Phase 3: fast-forward past the *promoted* batch's sandbox window too — every
-    // proposal (originals and chained promotions) ends Defeated.
-    let proposal = v.get_proposal(ids[0]).await?;
-    let approval_time: u64 = proposal["approval_time_ns"].as_str().unwrap().parse()?;
-    let sandbox_duration: u64 = proposal["sandbox_duration_ns"].as_str().unwrap().parse()?;
-    let target = approval_time + sandbox_duration * 5 / 2;
-    let num_blocks = (sandbox_duration * 5 / 2) / NS_IN_SECOND;
-    v.fast_forward(target, num_blocks, 20).await?;
+    // Phase 3: fast-forward past the *promoted* batch's sandbox window
+    v.fast_forward_to_proposal_status_v2(ids[5], ProposalStatus::Defeated)
+        .await?;
 
     for i in 0..6 {
         assert_eq!(

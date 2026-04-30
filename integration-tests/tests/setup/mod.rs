@@ -63,6 +63,7 @@ pub struct VenearTestWorkspaceBuilder {
     pub bond_amount: NearToken,
     pub vote_storage_fee: NearToken,
     pub proposal_expiration_ns: u64,
+    pub v2_proposal_expiration_ns: u64,
     pub quorum_threshold_bps: u16,
     pub quorum_floor: NearToken,
     pub approval_threshold_bps: u16,
@@ -94,6 +95,7 @@ impl Default for VenearTestWorkspaceBuilder {
             bond_amount: DEFAULT_BOND_AMOUNT,
             vote_storage_fee: NearToken::from_yoctonear(125 * 10u128.pow(19)),
             proposal_expiration_ns: PROPOSAL_EXPIRATION_SECONDS * NS_IN_SECOND,
+            v2_proposal_expiration_ns: PROPOSAL_EXPIRATION_SECONDS * NS_IN_SECOND,
             quorum_threshold_bps: 3500,
             quorum_floor: NearToken::from_near(1000),
             approval_threshold_bps: 5000,
@@ -294,6 +296,7 @@ impl VenearTestWorkspaceBuilder {
                     "vote_storage_fee": self.vote_storage_fee,
                     "guardians": &[guardian.id()],
                     "proposal_expiration_ns": self.proposal_expiration_ns.to_string(),
+                    "v2_proposal_expiration_ns": self.v2_proposal_expiration_ns.to_string(),
                     "quorum_threshold_bps": self.quorum_threshold_bps,
                     "quorum_floor": self.quorum_floor,
                     "approval_threshold_bps": self.approval_threshold_bps,
@@ -635,8 +638,8 @@ impl VenearTestWorkspace {
 
         let (target_ns, num_blocks) = match target {
             ProposalStatus::Timelock
-            | ProposalStatus::Succeeded
             | ProposalStatus::Defeated
+            | ProposalStatus::Succeeded
             | ProposalStatus::Executable => {
                 let voting_start: u64 = proposal["voting_start_time_ns"]
                     .as_str()
@@ -646,17 +649,14 @@ impl VenearTestWorkspace {
                     proposal["voting_duration_ns"].as_str().unwrap().parse()?;
                 let timelock_duration: u64 =
                     proposal["timelock_duration_ns"].as_str().unwrap().parse()?;
-                let voting_end = voting_start + voting_duration;
-                match target {
-                    ProposalStatus::Timelock => (voting_end, voting_duration / NS_IN_SECOND),
-                    _ => {
-                        let timelock_end = voting_end + timelock_duration;
-                        (
-                            timelock_end,
-                            (voting_duration + timelock_duration) / NS_IN_SECOND,
-                        )
-                    }
-                }
+                // Timelock and Defeated are both reached at voting_end. Succeeded/Executable
+                // need the additional timelock period to elapse.
+                let extra_ns = match target {
+                    ProposalStatus::Succeeded | ProposalStatus::Executable => timelock_duration,
+                    _ => 0,
+                };
+                let total_duration = voting_duration + extra_ns;
+                (voting_start + total_duration, total_duration / NS_IN_SECOND)
             }
             ProposalStatus::Expired => {
                 let expiration: u64 = proposal["expiration_ns"].as_str().unwrap().parse()?;
@@ -699,13 +699,13 @@ impl VenearTestWorkspace {
             | ProposalStatus::Defeated
             | ProposalStatus::Executable => {
                 if current_status == ProposalStatus::Sandbox {
-                    let approval_time: u64 = proposal["approval_time_ns"]
+                    let sandbox_start: u64 = proposal["sandbox_start_time_ns"]
                         .as_str()
                         .unwrap()
                         .parse()?;
                     let sandbox_duration: u64 =
                         proposal["sandbox_duration_ns"].as_str().unwrap().parse()?;
-                    approval_time + sandbox_duration
+                    sandbox_start + sandbox_duration
                 } else {
                     let voting_start: u64 = proposal["voting_start_time_ns"]
                         .as_str()

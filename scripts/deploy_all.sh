@@ -44,9 +44,12 @@ VOTING_DURATION_NS="${VOTING_DURATION_SEC}000000000"
 # 10 minutes for testing
 : "${TIMELOCK_DURATION_SEC:=600}"
 TIMELOCK_DURATION_NS="${TIMELOCK_DURATION_SEC}000000000"
-# 7 days for proposal expiration
+# 10 minutes for testing
 : "${PROPOSAL_EXPIRATION_SEC:=600}"
 PROPOSAL_EXPIRATION_NS="${PROPOSAL_EXPIRATION_SEC}000000000"
+# 10 minutes for testing
+: "${V2_PROPOSAL_EXPIRATION_SEC:=600}"
+V2_PROPOSAL_EXPIRATION_NS="${V2_PROPOSAL_EXPIRATION_SEC}000000000"
 # 0.1 NEAR
 : ${BASE_PROPOSAL_FEE:="100000000000000000000000"}
 # 0.1 NEAR (bond for v2)
@@ -138,6 +141,7 @@ near --quiet contract deploy $VOTING_ACCOUNT_ID use-file res/$CONTRACTS_SOURCE/v
     "vote_storage_fee": "'$VOTE_STORAGE_FEE'",
     "guardians": ["'$GUARDIAN_ACCOUNT_ID'"],
     "proposal_expiration_ns": "'$PROPOSAL_EXPIRATION_NS'",
+    "v2_proposal_expiration_ns": "'$V2_PROPOSAL_EXPIRATION_NS'",
     "quorum_threshold_bps": '$QUORUM_THRESHOLD_BPS',
     "quorum_floor": "'$QUORUM_FLOOR'",
     "approval_threshold_bps": '$APPROVAL_THRESHOLD_BPS',

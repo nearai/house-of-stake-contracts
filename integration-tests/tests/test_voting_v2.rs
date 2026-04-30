@@ -2076,11 +2076,7 @@ async fn test_sandbox_expiry_defeated() -> Result<(), Box<dyn std::error::Error>
     );
 
     // Fast forward past sandbox period end
-    let proposal = v.get_proposal(proposal_id).await?;
-    let approval_time: u64 = proposal["approval_time_ns"].as_str().unwrap().parse()?;
-    let sandbox_duration: u64 = proposal["sandbox_duration_ns"].as_str().unwrap().parse()?;
-    let sandbox_end = approval_time + sandbox_duration;
-    v.fast_forward(sandbox_end, sandbox_duration / NS_IN_SECOND, 20)
+    v.fast_forward_to_proposal_status_v2(proposal_id, ProposalStatus::Defeated)
         .await?;
 
     let proposal = v.get_proposal(proposal_id).await?;

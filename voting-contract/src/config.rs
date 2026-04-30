@@ -36,9 +36,13 @@ pub struct Config {
     /// The list of account IDs that can pause the contract.
     pub guardians: Vec<AccountId>,
 
-    /// The maximum time in nanoseconds a proposal can stay in Created status before expiring.
+    /// The maximum time in nanoseconds a Classic proposal can stay in Created status before expiring.
     /// 0 means no expiration.
     pub proposal_expiration_ns: U64,
+
+    /// The maximum time in nanoseconds a V2 proposal can stay in Created status before expiring.
+    /// 0 means no expiration.
+    pub v2_proposal_expiration_ns: U64,
 
     /// Proposed new owner account ID. The account has to accept ownership.
     pub proposed_new_owner_account_id: Option<AccountId>,

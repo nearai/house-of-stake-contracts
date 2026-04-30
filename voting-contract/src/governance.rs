@@ -98,7 +98,7 @@ impl Contract {
         self.config.timelock_duration_ns = (timelock_duration_sec as u64 * 10u64.pow(9)).into();
     }
 
-    /// Updates the proposal expiration duration in seconds.
+    /// Updates the Classic proposal expiration duration in seconds.
     /// Set to 0 to disable proposal expiration.
     /// Can only be called by the owner.
     /// Requires 1 yocto NEAR.
@@ -107,6 +107,18 @@ impl Contract {
         assert_one_yocto();
         self.assert_owner();
         self.config.proposal_expiration_ns = (proposal_expiration_sec as u64 * 10u64.pow(9)).into();
+    }
+
+    /// Updates the V2 proposal expiration duration in seconds.
+    /// Set to 0 to disable proposal expiration.
+    /// Can only be called by the owner.
+    /// Requires 1 yocto NEAR.
+    #[payable]
+    pub fn set_v2_proposal_expiration(&mut self, proposal_expiration_sec: u32) {
+        assert_one_yocto();
+        self.assert_owner();
+        self.config.v2_proposal_expiration_ns =
+            (proposal_expiration_sec as u64 * 10u64.pow(9)).into();
     }
 
     /// Updates the quorum threshold in basis points (e.g. 3500 = 35%).

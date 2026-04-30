@@ -46,6 +46,7 @@ pub struct Proposal {
     pub proposer_id: AccountId,
     pub reviewer_id: Option<AccountId>,
     pub rejecter_id: Option<AccountId>,
+    pub approval_time_ns: Option<U64>,
     pub voting_start_time_ns: Option<U64>,
     pub voting_duration_ns: U64,
     pub expiration_ns: U64,
@@ -61,8 +62,7 @@ pub struct Proposal {
     // Classic only
     pub timelock_duration_ns: U64,
     // V2 only
-    //todo approval time to everyone
-    pub approval_time_ns: Option<U64>,
+    pub sandbox_start_time_ns: Option<U64>,
     pub bond_amount: NearToken,
     pub sandbox_duration_ns: U64,
     pub sandbox_threshold_bps: u16,
@@ -165,7 +165,7 @@ impl Proposal {
                 self.status = ProposalStatus::Voting;
             }
             ProposalFlow::V2 => {
-                self.approval_time_ns = Some(start_time);
+                self.sandbox_start_time_ns = Some(start_time);
                 self.status = ProposalStatus::Sandbox;
             }
         }
@@ -187,7 +187,7 @@ impl Proposal {
                 if let Some(voting_start) = self.voting_start_time_ns {
                     voting_start.0 + self.voting_duration_ns.0
                 } else {
-                    self.approval_time_ns.unwrap().0 + self.sandbox_duration_ns.0
+                    self.sandbox_start_time_ns.unwrap().0 + self.sandbox_duration_ns.0
                 }
             }
         }
@@ -275,7 +275,8 @@ impl Proposal {
                 }
             }
             ProposalStatus::Sandbox => {
-                let sandbox_end = self.approval_time_ns.unwrap().0 + self.sandbox_duration_ns.0;
+                let sandbox_end =
+                    self.sandbox_start_time_ns.unwrap().0 + self.sandbox_duration_ns.0;
                 if timestamp.0 >= sandbox_end {
                     self.status = ProposalStatus::Defeated;
                 }
@@ -368,8 +369,12 @@ impl Contract {
         events::emit::create_proposal_action("create_proposal", &proposer_id, proposal_id);
 
         let creation_time_ns: u64 = env::block_timestamp();
-        let expiration_ns = if self.config.proposal_expiration_ns.0 > 0 {
-            U64(creation_time_ns + self.config.proposal_expiration_ns.0)
+        let flow_expiration_ns = match flow {
+            ProposalFlow::Classic => self.config.proposal_expiration_ns,
+            ProposalFlow::V2 => self.config.v2_proposal_expiration_ns,
+        };
+        let expiration_ns = if flow_expiration_ns.0 > 0 {
+            U64(creation_time_ns + flow_expiration_ns.0)
         } else {
             U64(0)
         };
@@ -399,8 +404,9 @@ impl Contract {
             approval_threshold_bps: 0,
             actions,
             flow,
-            timelock_duration_ns,
             approval_time_ns: None,
+            timelock_duration_ns,
+            sandbox_start_time_ns: None,
             bond_amount,
             sandbox_duration_ns: U64(0),
             sandbox_threshold_bps: 0,
