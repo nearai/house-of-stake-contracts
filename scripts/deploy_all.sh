@@ -39,8 +39,11 @@ UNLOCK_DURATION_NS="${UNLOCK_DURATION_SEC}000000000"
 # 2 NEAR
 : ${MIN_LOCKUP_DEPOSIT:="2000000000000000000000000"}
 # 10 minutes for testing
-: "${VOTING_DURATION_SEC:=600}"
-VOTING_DURATION_NS="${VOTING_DURATION_SEC}000000000"
+: "${CLASSIC_VOTING_DURATION_SEC:=600}"
+CLASSIC_VOTING_DURATION_NS="${CLASSIC_VOTING_DURATION_SEC}000000000"
+# 10 minutes for testing
+: "${FST_VOTING_DURATION_SEC:=600}"
+FST_VOTING_DURATION_NS="${FST_VOTING_DURATION_SEC}000000000"
 # 10 minutes for testing
 : "${TIMELOCK_DURATION_SEC:=600}"
 TIMELOCK_DURATION_NS="${TIMELOCK_DURATION_SEC}000000000"
@@ -135,7 +138,8 @@ near --quiet contract deploy $VOTING_ACCOUNT_ID use-file res/$CONTRACTS_SOURCE/v
     "reviewer_ids": ["'$REVIEWER_ACCOUNT_ID'"],
     "council_ids": ["'$COUNCIL_ACCOUNT_ID'"],
     "owner_account_id": "'$OWNER_ACCOUNT_ID'",
-    "voting_duration_ns": "'$VOTING_DURATION_NS'",
+    "classic_voting_duration_ns": "'$CLASSIC_VOTING_DURATION_NS'",
+    "fast_track_voting_duration_ns": "'$FST_VOTING_DURATION_NS'",
     "timelock_duration_ns": "'$TIMELOCK_DURATION_NS'",
     "base_proposal_fee": "'$BASE_PROPOSAL_FEE'",
     "bond_amount": "'$BOND_AMOUNT'",

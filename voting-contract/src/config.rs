@@ -17,8 +17,11 @@ pub struct Config {
     /// The account ID that can upgrade the current contract and modify the config.
     pub owner_account_id: AccountId,
 
-    /// The maximum duration of the voting period in nanoseconds.
-    pub voting_duration_ns: U64,
+    /// The maximum duration of the voting period in nanoseconds for Classic proposals.
+    pub classic_voting_duration_ns: U64,
+
+    /// The maximum duration of the voting period in nanoseconds for FastTrack proposals.
+    pub fast_track_voting_duration_ns: U64,
 
     /// The duration of the timelock period in nanoseconds after voting ends.
     pub timelock_duration_ns: U64,

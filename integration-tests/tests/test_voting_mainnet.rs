@@ -219,13 +219,18 @@ async fn test_voting_upgrade_from_mainnet() -> Result<(), Box<dyn std::error::Er
         config["proposal_expiration_ns"],
         (7u64 * 24 * 60 * 60 * 1_000_000_000).to_string()
     );
+    // Per-flow voting durations are seeded by migrate_state(): 14 days classic, 5 days FastTrack.
+    assert_eq!(
+        config["classic_voting_duration_ns"],
+        (14u64 * 24 * 60 * 60 * 1_000_000_000).to_string()
+    );
+    assert_eq!(
+        config["fast_track_voting_duration_ns"],
+        (5u64 * 24 * 60 * 60 * 1_000_000_000).to_string()
+    );
 
     assert_eq!(config["venear_account_id"], old_config["venear_account_id"]);
     assert_eq!(config["reviewer_ids"], old_config["reviewer_ids"]);
-    assert_eq!(
-        config["voting_duration_ns"],
-        old_config["voting_duration_ns"]
-    );
     assert_eq!(config["base_proposal_fee"], old_config["base_proposal_fee"]);
     assert_eq!(config["vote_storage_fee"], old_config["vote_storage_fee"]);
     assert_eq!(config["guardians"], old_config["guardians"]);

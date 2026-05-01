@@ -23,14 +23,26 @@ impl Contract {
         self.config.reviewer_ids = reviewer_ids;
     }
 
-    /// Updates the maximum duration of the voting period in seconds.
+    /// Updates the Classic-flow voting duration in seconds.
     /// Can only be called by the owner.
     /// Requires 1 yocto NEAR.
     #[payable]
-    pub fn set_voting_duration(&mut self, voting_duration_sec: u32) {
+    pub fn set_classic_voting_duration(&mut self, voting_duration_sec: u32) {
         assert_one_yocto();
         self.assert_owner();
-        self.config.voting_duration_ns = (voting_duration_sec as u64 * 10u64.pow(9)).into();
+        self.config.classic_voting_duration_ns =
+            (voting_duration_sec as u64 * 10u64.pow(9)).into();
+    }
+
+    /// Updates the FastTrack-flow voting duration in seconds.
+    /// Can only be called by the owner.
+    /// Requires 1 yocto NEAR.
+    #[payable]
+    pub fn set_fast_track_voting_duration(&mut self, voting_duration_sec: u32) {
+        assert_one_yocto();
+        self.assert_owner();
+        self.config.fast_track_voting_duration_ns =
+            (voting_duration_sec as u64 * 10u64.pow(9)).into();
     }
 
     /// Updates the base fee required to create a proposal.

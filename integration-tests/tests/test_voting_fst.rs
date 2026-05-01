@@ -535,9 +535,9 @@ async fn test_voting_fst_governance() -> Result<(), Box<dyn std::error::Error>> 
     let reviewer_ids: Vec<AccountId> = serde_json::from_value(new_config["reviewer_ids"].clone())?;
     assert_eq!(reviewer_ids, new_reviewer_ids);
 
-    // Voting duration
+    // FastTrack voting duration
     let original_voting_duration_ns: near_sdk::json_types::U64 =
-        serde_json::from_value(original_config["voting_duration_ns"].clone())?;
+        serde_json::from_value(original_config["fast_track_voting_duration_ns"].clone())?;
     let new_voting_duration_sec: u32 = 1000;
     let new_voting_duration_ns: near_sdk::json_types::U64 =
         (new_voting_duration_sec as u64 * 10u64.pow(9)).into();
@@ -545,7 +545,7 @@ async fn test_voting_fst_governance() -> Result<(), Box<dyn std::error::Error>> 
 
     // Attempt to change config with a regular user
     let outcome = user
-        .call(v.voting_id(), "set_voting_duration")
+        .call(v.voting_id(), "set_fast_track_voting_duration")
         .args_json(json!({
             "voting_duration_sec": new_voting_duration_sec,
         }))
@@ -561,7 +561,7 @@ async fn test_voting_fst_governance() -> Result<(), Box<dyn std::error::Error>> 
 
     // Change config with the owner
     let outcome = voting_owner
-        .call(v.voting_id(), "set_voting_duration")
+        .call(v.voting_id(), "set_fast_track_voting_duration")
         .args_json(json!({
             "voting_duration_sec": new_voting_duration_sec,
         }))
@@ -578,7 +578,7 @@ async fn test_voting_fst_governance() -> Result<(), Box<dyn std::error::Error>> 
     let new_config: serde_json::Value =
         v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
     let voting_duration_ns: near_sdk::json_types::U64 =
-        serde_json::from_value(new_config["voting_duration_ns"].clone())?;
+        serde_json::from_value(new_config["fast_track_voting_duration_ns"].clone())?;
     assert_eq!(voting_duration_ns, new_voting_duration_ns);
 
     // Bond amount
@@ -1420,6 +1420,43 @@ async fn test_voting_fst_proposal_expiration() -> Result<(), Box<dyn std::error:
     // A second claim must fail — the bond has already been refunded.
     let outcome = claim_bond(&v, &user_a, fst_id).await?;
     assert!(outcome.is_failure(), "Second claim should fail");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_voting_fst_voting_duration() -> Result<(), Box<dyn std::error::Error>> {
+    const CLASSIC_VOTING_SECS: u64 = 120;
+    const FST_VOTING_SECS: u64 = 30;
+
+    let v = VenearTestWorkspaceBuilder::default()
+        .classic_voting_duration_ns(CLASSIC_VOTING_SECS * NS_IN_SECOND)
+        .fast_track_voting_duration_ns(FST_VOTING_SECS * NS_IN_SECOND)
+        .with_voting()
+        .build()
+        .await?;
+    let user_a = v.create_account_with_lockup().await?;
+
+    // Create one of each flow back-to-back so their creation times are close.
+    let classic_id = create_proposal(&v, &user_a, None).await?;
+    let fst_id = create_proposal_fst(&v, &user_a, None).await?;
+
+    // Each flow stamps its own configured voting duration onto the proposal.
+    let classic = v.get_proposal(classic_id).await?;
+    let classic_duration: u64 = classic["voting_duration_ns"].as_str().unwrap().parse()?;
+    assert_eq!(
+        classic_duration,
+        CLASSIC_VOTING_SECS * NS_IN_SECOND,
+        "Classic voting duration should match the configured value"
+    );
+
+    let fst = v.get_proposal(fst_id).await?;
+    let fst_duration: u64 = fst["voting_duration_ns"].as_str().unwrap().parse()?;
+    assert_eq!(
+        fst_duration,
+        FST_VOTING_SECS * NS_IN_SECOND,
+        "FastTrack voting duration should match the configured value"
+    );
 
     Ok(())
 }

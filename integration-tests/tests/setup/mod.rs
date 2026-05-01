@@ -58,7 +58,8 @@ pub struct VenearTestWorkspaceBuilder {
     pub min_lockup_deposit: NearToken,
     pub annual_growth_rate_ns: Fraction,
     pub deploy_voting: bool,
-    pub voting_duration_ns: u64,
+    pub classic_voting_duration_ns: u64,
+    pub fast_track_voting_duration_ns: u64,
     pub timelock_duration_ns: u64,
     pub base_proposal_fee: NearToken,
     pub bond_amount: NearToken,
@@ -90,7 +91,8 @@ impl Default for VenearTestWorkspaceBuilder {
                 denominator: 10u128.pow(30).into(),
             },
             deploy_voting: false,
-            voting_duration_ns: VOTING_DURATION_SECONDS * NS_IN_SECOND,
+            classic_voting_duration_ns: VOTING_DURATION_SECONDS * NS_IN_SECOND,
+            fast_track_voting_duration_ns: VOTING_DURATION_SECONDS * NS_IN_SECOND,
             timelock_duration_ns: TIMELOCK_DURATION_SECONDS * NS_IN_SECOND,
             base_proposal_fee: NearToken::from_millinear(100),
             bond_amount: DEFAULT_BOND_AMOUNT,
@@ -291,7 +293,8 @@ impl VenearTestWorkspaceBuilder {
                     "reviewer_ids": &[reviewer.id()],
                     "council_ids": &[council.id()],
                     "owner_account_id": owner.id(),
-                    "voting_duration_ns": self.voting_duration_ns.to_string(),
+                    "classic_voting_duration_ns": self.classic_voting_duration_ns.to_string(),
+                    "fast_track_voting_duration_ns": self.fast_track_voting_duration_ns.to_string(),
                     "timelock_duration_ns": self.timelock_duration_ns.to_string(),
                     "base_proposal_fee": self.base_proposal_fee,
                     "bond_amount": self.bond_amount,
@@ -391,6 +394,16 @@ impl VenearTestWorkspaceBuilder {
         fast_track_proposal_expiration_ns: u64,
     ) -> Self {
         self.fast_track_proposal_expiration_ns = fast_track_proposal_expiration_ns;
+        self
+    }
+
+    pub fn classic_voting_duration_ns(mut self, classic_voting_duration_ns: u64) -> Self {
+        self.classic_voting_duration_ns = classic_voting_duration_ns;
+        self
+    }
+
+    pub fn fast_track_voting_duration_ns(mut self, fast_track_voting_duration_ns: u64) -> Self {
+        self.fast_track_voting_duration_ns = fast_track_voting_duration_ns;
         self
     }
 }

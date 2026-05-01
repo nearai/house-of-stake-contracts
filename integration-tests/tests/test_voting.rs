@@ -676,16 +676,16 @@ async fn test_voting_governance() -> Result<(), Box<dyn std::error::Error>> {
     let reviewer_ids: Vec<AccountId> = serde_json::from_value(new_config["reviewer_ids"].clone())?;
     assert_eq!(reviewer_ids, new_reviewer_ids);
 
-    // Voting duration
+    // Classic voting duration
     let original_voting_duration_ns: U64 =
-        serde_json::from_value(original_config["voting_duration_ns"].clone())?;
+        serde_json::from_value(original_config["classic_voting_duration_ns"].clone())?;
     let new_voting_duration_sec: u32 = 1000;
     let new_voting_duration_ns: U64 = (new_voting_duration_sec as u64 * 10u64.pow(9)).into();
     assert_ne!(original_voting_duration_ns, new_voting_duration_ns);
 
     // Attempt to change config with a regular user
     let outcome = user
-        .call(v.voting_id(), "set_voting_duration")
+        .call(v.voting_id(), "set_classic_voting_duration")
         .args_json(json!({
             "voting_duration_sec": new_voting_duration_sec,
         }))
@@ -701,7 +701,7 @@ async fn test_voting_governance() -> Result<(), Box<dyn std::error::Error>> {
 
     // Change config with the owner
     let outcome = voting_owner
-        .call(v.voting_id(), "set_voting_duration")
+        .call(v.voting_id(), "set_classic_voting_duration")
         .args_json(json!({
             "voting_duration_sec": new_voting_duration_sec,
         }))
@@ -717,7 +717,8 @@ async fn test_voting_governance() -> Result<(), Box<dyn std::error::Error>> {
 
     let new_config: serde_json::Value =
         v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
-    let voting_duration_ns: U64 = serde_json::from_value(new_config["voting_duration_ns"].clone())?;
+    let voting_duration_ns: U64 =
+        serde_json::from_value(new_config["classic_voting_duration_ns"].clone())?;
     assert_eq!(voting_duration_ns, new_voting_duration_ns);
 
     // Base proposal fee

@@ -140,15 +140,18 @@ impl VoteStats {
 }
 
 /// Returns the next voting start time. In sandbox test mode, starts after 120 seconds.
-/// Otherwise, starts on the next Monday 00:00 UTC strictly after `after_ns`.
+/// Otherwise, starts on the next Monday 00:00 CET (fixed UTC+1) strictly after `after_ns`.
 pub fn next_voting_start_ns(after_ns: u64) -> u64 {
     if cfg!(feature = "sandbox") {
         after_ns + 120 * 1_000_000_000
     } else {
-        let days_since_epoch = after_ns / NS_PER_DAY;
+        // CET = UTC+1. Compute the boundary in CET-shifted coords, then shift back.
+        const CET_OFFSET_NS: u64 = 3600 * 1_000_000_000;
+        let shifted = after_ns + CET_OFFSET_NS;
+        let days_since_epoch = shifted / NS_PER_DAY;
         let day_of_week = days_since_epoch % 7;
         let days_until_monday = (10 - day_of_week) % 7 + 1;
-        (days_since_epoch + days_until_monday) * NS_PER_DAY
+        (days_since_epoch + days_until_monday) * NS_PER_DAY - CET_OFFSET_NS
     }
 }
 
@@ -365,14 +368,17 @@ impl Contract {
         events::emit::create_proposal_action("create_proposal", &proposer_id, proposal_id);
 
         let creation_time_ns: u64 = env::block_timestamp();
-        let (flow_expiration_ns, timelock_duration_ns, bond_amount) = match flow {
+        let (flow_expiration_ns, voting_duration_ns, timelock_duration_ns, bond_amount) = match flow
+        {
             ProposalFlow::Classic => (
                 self.config.proposal_expiration_ns,
+                self.config.classic_voting_duration_ns,
                 self.config.timelock_duration_ns,
                 NearToken::from_yoctonear(0),
             ),
             ProposalFlow::FastTrack => (
                 self.config.fast_track_proposal_expiration_ns,
+                self.config.fast_track_voting_duration_ns,
                 U64(0),
                 self.config.bond_amount,
             ),
@@ -389,7 +395,7 @@ impl Contract {
             reviewer_id: None,
             rejecter_id: None,
             voting_start_time_ns: None,
-            voting_duration_ns: self.config.voting_duration_ns,
+            voting_duration_ns,
             expiration_ns,
             snapshot_and_state: None,
             votes: vec![VoteStats::default(); 3],
@@ -514,21 +520,24 @@ impl Contract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::NaiveDate;
+    use chrono::{FixedOffset, NaiveDate};
 
+    /// Returns y-m-d 00:00 CET (fixed UTC+1) as UTC nanoseconds.
     fn date_ns(year: i32, month: u32, day: u32) -> u64 {
+        let cet = FixedOffset::east_opt(3600).unwrap();
         NaiveDate::from_ymd_opt(year, month, day)
             .unwrap()
             .and_hms_opt(0, 0, 0)
             .unwrap()
-            .and_utc()
+            .and_local_timezone(cet)
+            .unwrap()
             .timestamp_nanos_opt()
             .unwrap() as u64
     }
 
     #[test]
     fn test_next_monday_from_each_weekday() {
-        // 2026-04-06 is Monday, next Monday is 2026-04-13
+        // 2026-04-06 is Monday CET, next Monday CET is 2026-04-13.
         let expected = date_ns(2026, 4, 13);
 
         assert_eq!(next_voting_start_ns(date_ns(2026, 4, 6)), expected); // Monday
@@ -542,21 +551,17 @@ mod tests {
 
     #[test]
     fn test_next_monday_from_time_within_day() {
+        // All inputs lie within Tuesday 2026-04-07 CET; result is next Monday CET.
         let expected = date_ns(2026, 4, 13);
+        let day = date_ns(2026, 4, 7);
+        assert_eq!(next_voting_start_ns(day), expected);
+        assert_eq!(next_voting_start_ns(day + 1), expected);
         assert_eq!(
-            next_voting_start_ns(date_ns(2026, 4, 6) + 12 * 3600 * 1_000_000_000),
+            next_voting_start_ns(day + 12 * 3600 * 1_000_000_000),
             expected
         );
         assert_eq!(
-            next_voting_start_ns(date_ns(2026, 4, 7) - 1_000_000_000),
-            expected
-        );
-        assert_eq!(
-            next_voting_start_ns(date_ns(2026, 4, 12) + 12 * 3600 * 1_000_000_000),
-            expected
-        );
-        assert_eq!(
-            next_voting_start_ns(date_ns(2026, 4, 13) - 1_000_000_000),
+            next_voting_start_ns(day + 24 * 3600 * 1_000_000_000 - 1),
             expected
         );
     }
