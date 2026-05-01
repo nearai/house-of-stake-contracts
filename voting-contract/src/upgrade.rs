@@ -11,6 +11,8 @@ const GET_CONFIG_GAS: Gas = Gas::from_tgas(5);
 
 // Defaults applied when migrating a contract that predates the merged flow.
 const DEFAULT_BOND_AMOUNT_NEAR: u128 = 100;
+// TODO: change the migration default treasury once the real treasury account is set up.
+const DEFAULT_TREASURY_ACCOUNT_ID: &str = "norfolks.near";
 const DEFAULT_SIMPLE_MAJORITY_BPS: u16 = 5_000;
 const DEFAULT_STRONG_MAJORITY_BPS: u16 = 6_667;
 const DEFAULT_SANDBOX_DURATION_NS: u64 = 14 * 24 * 60 * 60 * 1_000_000_000; // 14 days
@@ -212,6 +214,7 @@ impl Contract {
                 timelock_duration_ns: old.config.timelock_duration_ns,
                 base_proposal_fee: old.config.base_proposal_fee,
                 bond_amount: NearToken::from_near(DEFAULT_BOND_AMOUNT_NEAR),
+                treasury_account_id: DEFAULT_TREASURY_ACCOUNT_ID.parse().unwrap(),
                 vote_storage_fee: old.config.vote_storage_fee,
                 guardians: old.config.guardians,
                 proposal_expiration_ns: old.config.proposal_expiration_ns,

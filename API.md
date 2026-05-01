@@ -1023,9 +1023,11 @@ pub struct Config {
     /// The maximum duration of the voting period in nanoseconds.
     pub voting_duration_ns: U64,
 
-    /// The bond amount required to create a proposal. Returned to the proposer upon reviewer
-    /// approval, or forfeited if the proposal is slashed. Claimable for expired proposals.
+    /// The bond amount required to create a FastTrack proposal.
     pub bond_amount: NearToken,
+
+    /// The account ID that receives forfeited FastTrack bonds (on reviewer approval or slash).
+    pub treasury_account_id: AccountId,
 
     /// Storage fee required to store a vote for an active proposal.
     pub vote_storage_fee: NearToken,
@@ -1143,7 +1145,7 @@ pub struct Proposal {
     pub approval_threshold_bps: u16,
     /// Optional list of on-chain actions to execute when the proposal succeeds.
     pub actions: Option<Vec<ProposalAction>>,
-    /// The bond amount deposited by the proposer.
+    /// The bond amount currently locked on the proposal.
     pub bond_amount: NearToken,
     /// The duration of the sandbox pre-voting period in nanoseconds.
     pub sandbox_duration_ns: U64,
@@ -1179,7 +1181,7 @@ pub enum ProposalStatus {
     InProgress,
     /// The proposal's on-chain execution failed.
     Failed,
-    /// The proposal was slashed by a reviewer.
+    /// The proposal was slashed by a reviewer; the bond is forwarded to the treasury.
     Slashed,
     /// The proposal is in the sandbox pre-voting period. Only "For" votes are allowed.
     /// Graduates to Scheduled when the sandbox threshold is met.
@@ -1245,6 +1247,12 @@ pub fn set_voting_duration(&mut self, voting_duration_sec: u32);
 /// Requires 1 yocto NEAR.
 #[payable]
 pub fn set_bond_amount(&mut self, bond_amount: NearToken);
+
+/// Updates the treasury account ID.
+/// Can only be called by the owner.
+/// Requires 1 yocto NEAR.
+#[payable]
+pub fn set_treasury_account_id(&mut self, treasury_account_id: AccountId);
 
 /// Proposes the new owner account ID.
 /// Can only be called by the owner.
@@ -1357,7 +1365,7 @@ pub fn get_approved_proposals(&self, from_index: u32, limit: Option<u32>) -> Vec
 
 /// Approves the proposal to enter the sandbox pre-voting period.
 /// The reviewer specifies the majority type (simple or strong) which determines the approval
-/// threshold for the proposal. The bond is returned to the proposer upon approval.
+/// threshold for the proposal.
 /// Requires 1 yocto attached to the call.
 /// Can only be called by the reviewers.
 #[payable]
@@ -1373,18 +1381,16 @@ pub fn approve_proposal(
 #[payable]
 pub fn reject_proposal(&mut self, proposal_id: ProposalId);
 
-/// Slashes the proposal, forfeiting the bond.
+/// Slashes the proposal, forwarding the bond to `treasury_account_id`.
 /// Can only be called while the proposal is in Created status.
 /// Requires 1 yocto attached to the call.
 /// Can only be called by the reviewers.
 #[payable]
 pub fn slash_proposal(&mut self, proposal_id: ProposalId);
 
-/// Allows the proposer to reclaim their bond from a terminal proposal (non-slashed).
-/// Bond is 0 for approved proposals (already returned during approval).
-/// Primary use: expired proposals. Also works as safety-net fallback.
-/// Requires 1 yocto NEAR.
-#[payable]
+/// Allows the proposer of a FastTrack proposal to reclaim their bond. Only valid when the
+/// proposal is in `Expired` or `Rejected` status — any other terminal state means the bond
+/// has already been forwarded to the treasury and is no longer claimable.
 pub fn claim_bond(&mut self, proposal_id: ProposalId);
 
 /// Executes the on-chain actions for a proposal that has passed voting.

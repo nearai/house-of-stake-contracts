@@ -48,6 +48,7 @@ pub struct VotingTestWorkspace {
     pub reviewer: Account,
     pub council: Account,
     pub guardian: Account,
+    pub treasury: Account,
 }
 
 #[derive(Clone, Debug)]
@@ -282,6 +283,7 @@ impl VenearTestWorkspaceBuilder {
             let council = sandbox.dev_create_account().await?;
             let owner = sandbox.dev_create_account().await?;
             let guardian = sandbox.dev_create_account().await?;
+            let treasury = sandbox.dev_create_account().await?;
 
             let args = json!({
                 "config": {
@@ -293,6 +295,7 @@ impl VenearTestWorkspaceBuilder {
                     "timelock_duration_ns": self.timelock_duration_ns.to_string(),
                     "base_proposal_fee": self.base_proposal_fee,
                     "bond_amount": self.bond_amount,
+                    "treasury_account_id": treasury.id(),
                     "vote_storage_fee": self.vote_storage_fee,
                     "guardians": &[guardian.id()],
                     "proposal_expiration_ns": self.proposal_expiration_ns.to_string(),
@@ -327,6 +330,7 @@ impl VenearTestWorkspaceBuilder {
                 reviewer,
                 council,
                 guardian,
+                treasury,
             })
         } else {
             None

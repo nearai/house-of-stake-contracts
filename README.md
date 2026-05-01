@@ -86,12 +86,13 @@ All contracts are designed to be deployed without access keys, to make sure the 
 
 A FastTrack proposal moves through a series of statuses. Each transition is triggered by a specific action or condition:
 
-1. **Created** — Anyone creates a proposal by attaching a deposit (storage + bond).
+1. **Created** — Anyone creates a proposal by attaching a deposit (storage + base proposal fee + bond).
    - The proposal sits in `Created` waiting for a reviewer to act.
-   - If no reviewer acts before the expiration period, the proposal becomes `Expired` and the bond is claimable.
+   - If no reviewer acts before the expiration period, the proposal becomes `Expired` and the bond is claimable via `claim_bond`.
+   - If a reviewer rejects the proposal, the bond is also claimable.
 
 2. **Sandbox** — A reviewer approves the proposal, choosing a majority type (simple or strong).
-   - The bond is returned to the proposer upon approval.
+   - The bond is forwarded to the configured `treasury_account_id` upon approval (no longer claimable by the proposer).
    - A veNEAR snapshot is fetched to determine voting power.
    - Only "For" votes are allowed during this period — no "Against" or "Abstain".
    - If "For" votes reach the sandbox threshold (e.g. 30% of total veNEAR), the proposal graduates to `Scheduled`.
@@ -122,10 +123,13 @@ A FastTrack proposal moves through a series of statuses. Each transition is trig
    - **Failed**: one or more actions failed on-chain.
 
 7. **Slashed** — A reviewer marks a `Created` proposal as malicious/spam.
-   - The proposer's bond is forfeited (kept by the contract). Not claimable.
+   - The proposer's bond is forfeited to the `treasury_account_id`. Not claimable.
 
-8. **Rejected** — A council member vetoes a proposal during `Scheduled` or `Voting`.
-   - The bond remains claimable by the proposer.
+8. **Rejected** — A reviewer rejects a proposal in `Created` status.
+   - The bond remains claimable by the proposer via `claim_bond`.
+
+9. **Vetoed** — A council member vetoes the proposal during `Scheduled` or `Voting`.
+   - The bond was already forwarded to the treasury at approval time and is not claimable.
 
 ### Implementation details
 

@@ -170,6 +170,16 @@ impl Contract {
         self.config.bond_amount = bond_amount;
     }
 
+    /// Updates the treasury account ID that receives forfeited FastTrack bonds.
+    /// Can only be called by the owner.
+    /// Requires 1 yocto NEAR.
+    #[payable]
+    pub fn set_treasury_account_id(&mut self, treasury_account_id: AccountId) {
+        assert_one_yocto();
+        self.assert_owner();
+        self.config.treasury_account_id = treasury_account_id;
+    }
+
     /// Updates the FastTrack simple majority threshold in basis points (e.g. 5000 = 50%).
     /// Can only be called by the owner.
     /// Requires 1 yocto NEAR.

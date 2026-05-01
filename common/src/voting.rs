@@ -59,7 +59,7 @@ pub enum ProposalStatus {
     InProgress,
     /// The proposal's on-chain execution failed.
     Failed,
-    /// The proposal was slashed by a reviewer; bond is forfeited.
+    /// The proposal was slashed by a reviewer; bond is forfeited to the treasury.
     Slashed,
     /// Graduates to Scheduled when the sandbox threshold is met.
     Sandbox,

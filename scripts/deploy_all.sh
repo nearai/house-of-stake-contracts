@@ -78,6 +78,7 @@ export VENEAR_ACCOUNT_ID="v.$ROOT_ACCOUNT_ID"
 export REVIEWER_ACCOUNT_ID="reviewer.$ROOT_ACCOUNT_ID"
 export VOTING_ACCOUNT_ID="vote.$ROOT_ACCOUNT_ID"
 export OWNER_ACCOUNT_ID="owner.$ROOT_ACCOUNT_ID"
+export TREASURY_ACCOUNT_ID="${TREASURY_ACCOUNT_ID:-$OWNER_ACCOUNT_ID}"
 export GUARDIAN_ACCOUNT_ID="guardian.$ROOT_ACCOUNT_ID"
 export VOTING_GUARDIAN_ACCOUNT_ID="voting-guardian.$ROOT_ACCOUNT_ID"
 export LOCKUP_DEPLOYER_ACCOUNT_ID="lockup-deployer.$ROOT_ACCOUNT_ID"
@@ -138,6 +139,7 @@ near --quiet contract deploy $VOTING_ACCOUNT_ID use-file res/$CONTRACTS_SOURCE/v
     "timelock_duration_ns": "'$TIMELOCK_DURATION_NS'",
     "base_proposal_fee": "'$BASE_PROPOSAL_FEE'",
     "bond_amount": "'$BOND_AMOUNT'",
+    "treasury_account_id": "'$TREASURY_ACCOUNT_ID'",
     "vote_storage_fee": "'$VOTE_STORAGE_FEE'",
     "guardians": ["'$GUARDIAN_ACCOUNT_ID'"],
     "proposal_expiration_ns": "'$PROPOSAL_EXPIRATION_NS'",

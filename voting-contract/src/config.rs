@@ -29,8 +29,10 @@ pub struct Config {
     /// The bond amount required to create a FastTrack proposal.
     pub bond_amount: NearToken,
 
-    /// Storage fee required to store a vote for an active proposal. It can be refunded once the
-    /// proposal is finalized.
+    /// The account ID that receives forfeited bonds.
+    pub treasury_account_id: AccountId,
+
+    /// Storage fee required to store a vote.
     pub vote_storage_fee: NearToken,
 
     /// The list of account IDs that can pause the contract.

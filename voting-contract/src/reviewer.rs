@@ -1,10 +1,8 @@
-use crate::proposal::{
-    MajorityType, ProposalFlow, ProposalInfo, ProposalStatus, SnapshotAndState,
-};
+use crate::proposal::{MajorityType, ProposalFlow, ProposalInfo, ProposalStatus, SnapshotAndState};
 use crate::*;
 use common::global_state::{GlobalState, VGlobalState};
 use common::{TimestampNs, events};
-use near_sdk::{Gas, PromiseOrValue, assert_one_yocto};
+use near_sdk::{Gas, Promise, PromiseOrValue, assert_one_yocto};
 
 pub const GAS_FOR_ON_GET_SNAPSHOT: Gas = Gas::from_tgas(30);
 
@@ -38,6 +36,11 @@ impl Contract {
         proposal.approval_time_ns = Some(env::block_timestamp().into());
         proposal.quorum_threshold_bps = self.config.quorum_threshold_bps;
         proposal.quorum_floor = self.config.quorum_floor;
+
+        if proposal.bond_amount.as_yoctonear() > 0 {
+            Promise::new(self.config.treasury_account_id.clone()).transfer(proposal.bond_amount);
+            proposal.bond_amount = NearToken::from_yoctonear(0);
+        }
         match proposal.flow {
             ProposalFlow::Classic => {
                 proposal.approval_threshold_bps = self.config.approval_threshold_bps;
@@ -170,6 +173,11 @@ impl Contract {
         proposal.status = ProposalStatus::Slashed;
 
         events::emit::slash_proposal_action(&env::predecessor_account_id(), proposal_id);
+
+        if proposal.bond_amount.as_yoctonear() > 0 {
+            Promise::new(self.config.treasury_account_id.clone()).transfer(proposal.bond_amount);
+            proposal.bond_amount = NearToken::from_yoctonear(0);
+        }
 
         self.internal_set_proposal(proposal);
     }

@@ -342,12 +342,8 @@ impl Proposal {
 
 #[near]
 impl Contract {
-    /// Creates a new proposal of the given flow.
-    ///
-    /// * Classic: requires a deposit covering the storage and `base_proposal_fee`.
-    /// * FastTrack: requires a deposit covering the storage, `base_proposal_fee`, and `bond_amount`.
-    ///   The bond stays locked on the proposal and is recoverable via `claim_bond` once the proposal
-    ///   reaches a terminal non-slashed state; the base fee is non-refundable.
+    /// Creates a new proposal. Deposit covers storage, `base_proposal_fee`, and (FastTrack only)
+    /// `bond_amount`.
     #[payable]
     pub fn create_proposal(
         &mut self,

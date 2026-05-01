@@ -4,8 +4,7 @@ use near_sdk::Promise;
 
 #[near]
 impl Contract {
-    /// Allows the proposer of a FastTrack proposal to reclaim their bond if the proposal expired
-    /// before it was approved. Any other terminal state forfeits the bond.
+    /// Refunds the bond to the proposer. Only valid for `Expired` or `Rejected` proposals.
     pub fn claim_bond(&mut self, proposal_id: ProposalId) {
         let mut proposal = self.internal_expect_proposal_updated(proposal_id);
 
@@ -19,8 +18,11 @@ impl Contract {
         );
         require!(proposal.bond_amount.as_yoctonear() > 0, "No bond to claim");
         require!(
-            proposal.status == ProposalStatus::Expired,
-            "Bond can only be claimed from expired proposals"
+            matches!(
+                proposal.status,
+                ProposalStatus::Expired | ProposalStatus::Rejected
+            ),
+            "Bond can only be claimed from expired or rejected proposals"
         );
 
         let bond = proposal.bond_amount;

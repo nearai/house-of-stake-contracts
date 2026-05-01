@@ -53,6 +53,9 @@ async fn test_voting_fst() -> Result<(), Box<dyn std::error::Error>> {
         "Regular user should not be able to approve the proposal"
     );
 
+    let treasury = v.voting.as_ref().unwrap().treasury.clone();
+    let treasury_before = treasury.view_account().await?.balance;
+
     approve_proposal_fst(
         &v,
         &v.voting.as_ref().unwrap().reviewer,
@@ -61,6 +64,13 @@ async fn test_voting_fst() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
+    let treasury_after = treasury.view_account().await?.balance;
+    assert_eq!(
+        treasury_after.as_yoctonear() - treasury_before.as_yoctonear(),
+        DEFAULT_BOND_AMOUNT.as_yoctonear(),
+        "treasury should receive the bond on approval"
+    );
+
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(proposal["total_votes"]["total_votes"].as_u64().unwrap(), 0);
     assert_eq!(get_status(&proposal)?, ProposalStatus::Sandbox);
@@ -68,11 +78,11 @@ async fn test_voting_fst() -> Result<(), Box<dyn std::error::Error>> {
         proposal["reviewer_id"].as_str().unwrap(),
         v.voting.as_ref().unwrap().reviewer.id().as_str()
     );
-    // Bond stays locked through approval; only refundable from Expired via claim_bond.
+    // Bond is forwarded to the treasury when the reviewer approves the proposal.
     assert_eq!(
         proposal["bond_amount"].as_str().unwrap(),
-        DEFAULT_BOND_AMOUNT.as_yoctonear().to_string(),
-        "bond_amount should stay locked after approval"
+        "0",
+        "bond_amount should be cleared on approval (forwarded to treasury)"
     );
     let num_proposals: u32 = v
         .sandbox
@@ -613,6 +623,48 @@ async fn test_voting_fst_governance() -> Result<(), Box<dyn std::error::Error>> 
         v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
     let bond_amount: NearToken = serde_json::from_value(new_config["bond_amount"].clone())?;
     assert_eq!(bond_amount, new_bond_amount);
+
+    // Treasury account ID
+    let original_treasury_account_id: AccountId =
+        serde_json::from_value(original_config["treasury_account_id"].clone())?;
+    let new_treasury_account_id: AccountId = "new-treasury.near".parse()?;
+    assert_ne!(original_treasury_account_id, new_treasury_account_id);
+
+    let outcome = user
+        .call(v.voting_id(), "set_treasury_account_id")
+        .args_json(json!({
+            "treasury_account_id": new_treasury_account_id,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_failure(),
+        "Regular user should not be able to change treasury_account_id: {:#?}",
+        outcome
+    );
+
+    let outcome = voting_owner
+        .call(v.voting_id(), "set_treasury_account_id")
+        .args_json(json!({
+            "treasury_account_id": new_treasury_account_id,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_success(),
+        "Owner should be able to change treasury_account_id: {:#?}",
+        outcome
+    );
+
+    let new_config: serde_json::Value =
+        v.sandbox.view(v.voting_id(), "get_config").await?.json()?;
+    let treasury_account_id: AccountId =
+        serde_json::from_value(new_config["treasury_account_id"].clone())?;
+    assert_eq!(treasury_account_id, new_treasury_account_id);
 
     // Note, vote storage fee cannot be changed without contract upgrade
 
@@ -1365,6 +1417,10 @@ async fn test_voting_fst_proposal_expiration() -> Result<(), Box<dyn std::error:
     assert_eq!(fst["bond_amount"].as_str().unwrap(), "0");
     assert!(balance_after > balance_before);
 
+    // A second claim must fail — the bond has already been refunded.
+    let outcome = claim_bond(&v, &user_a, fst_id).await?;
+    assert!(outcome.is_failure(), "Second claim should fail");
+
     Ok(())
 }
 
@@ -1810,7 +1866,9 @@ async fn test_fst_slash_proposal() -> Result<(), Box<dyn std::error::Error>> {
         "Non-reviewer should not be able to slash"
     );
 
-    // Reviewer slashes proposal — bond is forfeited
+    // Reviewer slashes proposal — bond is forfeited to the treasury
+    let treasury = v.voting.as_ref().unwrap().treasury.clone();
+    let treasury_before = treasury.view_account().await?.balance;
     let outcome = slash_proposal(&v, &reviewer, proposal_id).await?;
     assert!(
         outcome.is_success(),
@@ -1820,10 +1878,16 @@ async fn test_fst_slash_proposal() -> Result<(), Box<dyn std::error::Error>> {
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(get_status(&proposal)?, ProposalStatus::Slashed,);
-    assert_ne!(
+    assert_eq!(
         proposal["bond_amount"].as_str().unwrap(),
         "0",
-        "bond_amount should remain non-zero (forfeited)"
+        "bond_amount should be cleared on slash (forwarded to treasury)"
+    );
+    let treasury_after = treasury.view_account().await?.balance;
+    assert_eq!(
+        treasury_after.as_yoctonear() - treasury_before.as_yoctonear(),
+        DEFAULT_BOND_AMOUNT.as_yoctonear(),
+        "treasury should receive the bond on slash"
     );
 
     // Cannot claim bond from slashed proposal
@@ -1858,22 +1922,57 @@ async fn test_bond_claim_by_non_proposer_fails() -> Result<(), Box<dyn std::erro
 }
 
 #[tokio::test]
-async fn test_bond_double_claim_fails() -> Result<(), Box<dyn std::error::Error>> {
+async fn test_bond_claim_after_rejection() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default()
         .with_voting()
         .build()
         .await?;
     let user = v.create_account_with_lockup().await?;
+    let reviewer = v.voting.as_ref().unwrap().reviewer.clone();
+    let treasury = v.voting.as_ref().unwrap().treasury.clone();
 
     let proposal_id = create_proposal_fst(&v, &user, None).await?;
-    v.fast_forward_to_proposal_status_fst(proposal_id, ProposalStatus::Expired)
-        .await?;
 
+    // Reviewer rejects the proposal — bond stays with the proposal (not the treasury).
+    let treasury_before = treasury.view_account().await?.balance;
+    let outcome = reject_proposal(&v, &reviewer, proposal_id).await?;
+    assert!(
+        outcome.is_success(),
+        "Reviewer should be able to reject: {:?}",
+        outcome.failures()
+    );
+    assert_eq!(
+        treasury.view_account().await?.balance.as_yoctonear(),
+        treasury_before.as_yoctonear(),
+        "treasury must not receive a bond from a rejected proposal"
+    );
+
+    let proposal = v.get_proposal(proposal_id).await?;
+    assert_eq!(get_status(&proposal)?, ProposalStatus::Rejected);
+    assert_eq!(
+        proposal["bond_amount"].as_str().unwrap(),
+        DEFAULT_BOND_AMOUNT.as_yoctonear().to_string(),
+        "bond should remain on the proposal until claimed"
+    );
+
+    // Proposer reclaims the bond.
+    let balance_before = user.view_account().await?.balance;
     let outcome = claim_bond(&v, &user, proposal_id).await?;
-    assert!(outcome.is_success(), "First claim should succeed");
+    assert!(
+        outcome.is_success(),
+        "claim_bond should succeed for rejected proposals: {:?}",
+        outcome.failures()
+    );
+    let balance_after = user.view_account().await?.balance;
+    assert!(balance_after > balance_before);
 
+    let proposal = v.get_proposal(proposal_id).await?;
+    assert_eq!(proposal["bond_amount"].as_str().unwrap(), "0");
+
+    // A second claim must fail.
     let outcome = claim_bond(&v, &user, proposal_id).await?;
     assert!(outcome.is_failure(), "Second claim should fail");
+
     Ok(())
 }
 
