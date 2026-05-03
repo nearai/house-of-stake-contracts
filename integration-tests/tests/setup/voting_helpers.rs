@@ -1,5 +1,5 @@
 use super::{VenearTestWorkspace, VOTING_WASM_FILEPATH};
-use voting_contract::proposal::VoteOption;
+use common::voting::VoteOption;
 use near_sdk::{Gas, NearToken};
 use serde_json::json;
 

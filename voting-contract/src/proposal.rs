@@ -4,6 +4,8 @@ use common::{events, near_add, near_sub, TimestampNs};
 use near_sdk::json_types::{Base64VecU8, U64};
 use near_sdk::{Gas, Promise};
 
+pub use common::voting::{ProposalStatus, VoteOption};
+
 pub type ProposalId = u32;
 
 /// A single action that the voting contract can execute on behalf of a passed proposal.
@@ -21,15 +23,6 @@ pub enum ProposalAction {
         receiver_id: AccountId,
         amount: NearToken,
     },
-}
-
-/// The fixed voting options for proposals.
-#[derive(Clone, Copy, PartialEq)]
-#[near(serializers=[borsh, json])]
-pub enum VoteOption {
-    For,
-    Against,
-    Abstain,
 }
 
 /// The old proposal structure (V1) that includes the `rejected` field.
@@ -99,9 +92,9 @@ pub struct Proposal {
     pub creation_time_ns: U64,
     /// The account ID of the proposer.
     pub proposer_id: AccountId,
-    /// The account ID of the reviewer, who approved the proposal.
+    /// The account ID of the reviewer who approved or rejected the proposal.
     pub reviewer_id: Option<AccountId>,
-    /// The account ID of the council member who rejected (vetoed) the proposal.
+    /// The account ID of the council member who vetoed the proposal.
     pub rejecter_id: Option<AccountId>,
     /// The timestamp when the voting starts.
     pub voting_start_time_ns: Option<U64>,
@@ -137,32 +130,6 @@ pub struct ProposalInfo {
     pub proposal: Proposal,
     #[serde(flatten)]
     pub metadata: ProposalMetadata,
-}
-
-/// The status of the proposal
-#[derive(Clone, Copy, Debug, PartialEq)]
-#[near(serializers=[borsh, json])]
-pub enum ProposalStatus {
-    /// The proposal was created and is waiting for the approver to approve it.
-    Created,
-    /// The proposal was rejected by the council during the timelock period.
-    Rejected,
-    /// The proposal is in the voting phase.
-    Voting,
-    /// The proposal voting has finished, quorum was met and approval threshold was met.
-    Succeeded,
-    /// The voting has ended and the proposal is in the timelock period awaiting potential council veto.
-    Timelock,
-    /// The proposal expired before being approved by a reviewer.
-    Expired,
-    /// The proposal voting has finished, but quorum was not met or approval threshold was not met.
-    Defeated,
-    /// The proposal passed and has actions ready for on-chain execution.
-    Executable,
-    /// The proposal actions are being executed (dispatched, awaiting callback).
-    InProgress,
-    /// The proposal's on-chain execution failed.
-    Failed,
 }
 
 /// The snapshot of the Merkle tree and the global state at the moment when the proposal was
@@ -212,12 +179,15 @@ impl Proposal {
     pub fn update(&mut self, timestamp: TimestampNs) {
         match self.status {
             ProposalStatus::Rejected
+            | ProposalStatus::Vetoed
             | ProposalStatus::Succeeded
             | ProposalStatus::Expired
             | ProposalStatus::Defeated
             | ProposalStatus::Executable
             | ProposalStatus::InProgress
-            | ProposalStatus::Failed => {
+            | ProposalStatus::Failed
+            | ProposalStatus::ApprovalLegacy
+            | ProposalStatus::FinishLegacy => {
                 return;
             }
             ProposalStatus::Created => {

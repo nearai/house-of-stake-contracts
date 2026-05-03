@@ -25,22 +25,8 @@ impl Contract {
 
         match proposal.status {
             ProposalStatus::Voting => {}
-            ProposalStatus::Created => {
-                env::panic_str("Voting is not started yet");
-            }
-            ProposalStatus::Rejected => {
-                env::panic_str("Proposal is rejected");
-            }
-            ProposalStatus::Expired => {
-                env::panic_str("Proposal is expired");
-            }
-            ProposalStatus::Succeeded
-            | ProposalStatus::Defeated
-            | ProposalStatus::Timelock
-            | ProposalStatus::Executable
-            | ProposalStatus::InProgress
-            | ProposalStatus::Failed => {
-                env::panic_str("Voting is finished");
+            _ => {
+                env::panic_str("Proposal is not in the voting phase");
             }
         }
 
