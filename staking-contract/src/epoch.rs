@@ -1,5 +1,6 @@
 use crate::gas::{callbacks, staking_pool};
 use crate::*;
+use crate::events;
 use near_sdk::ext_contract;
 use near_sdk::{env, near, require, AccountId, NearToken, Promise, PromiseOrValue};
 
@@ -42,6 +43,7 @@ impl Contract {
     pub fn epoch_stake(&mut self, validator_pool: AccountId) -> Promise {
         self.assert_not_paused();
         self.assert_operator();
+        events::log_epoch_operation("epoch_stake", &validator_pool);
 
         let mut v = self
             .validators
@@ -73,6 +75,7 @@ impl Contract {
     pub fn epoch_unstake(&mut self, validator_pool: AccountId) -> Promise {
         self.assert_not_paused();
         self.assert_operator();
+        events::log_epoch_operation("epoch_unstake", &validator_pool);
 
         let mut v = self
             .validators
@@ -104,6 +107,7 @@ impl Contract {
     pub fn epoch_withdraw(&mut self, validator_pool: AccountId) -> Promise {
         self.assert_not_paused();
         self.assert_operator();
+        events::log_epoch_operation("epoch_withdraw", &validator_pool);
 
         let mut v = self
             .validators

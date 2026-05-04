@@ -20,6 +20,8 @@ impl Default for Account {
 #[near]
 impl Contract {
     /// NEP-145-style: attach NEAR to register an account for locks and withdrawals.
+    /// **Storage bounds:** the contract does not yet meter per-lock state against this balance; keep
+    /// `min_storage_deposit` high enough for your expected lock count (see `ACTION_ITEMS.md` P2).
     #[payable]
     pub fn storage_deposit(&mut self) {
         self.assert_not_paused();

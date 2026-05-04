@@ -27,6 +27,7 @@ impl Contract {
             usage_count: 0,
         };
         self.products.insert(id.clone(), product);
+        crate::events::log_product_created(id.as_str(), &validator_id);
         id
     }
 

@@ -51,7 +51,8 @@ impl Contract {
             tx_status: TransactionStatus::Idle,
         };
         self.validators.insert(pool_account_id.clone(), v);
-        self.validator_ids.push(pool_account_id);
+        self.validator_ids.push(pool_account_id.clone());
+        crate::events::log_validator_added(&pool_account_id);
     }
 
     pub fn get_validator(&self, pool_account_id: AccountId) -> Option<Validator> {

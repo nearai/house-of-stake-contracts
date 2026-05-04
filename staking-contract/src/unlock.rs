@@ -11,7 +11,11 @@ impl Contract {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
 
-        let mut lock = self.locks.get(&lock_id).cloned().expect("Unknown lock");
+        let mut lock = self
+            .locks
+            .get(&lock_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("Unknown lock"));
         require!(
             env::predecessor_account_id() == lock.account_id,
             "Only lock owner"
@@ -27,7 +31,7 @@ impl Contract {
             .validators
             .get(&validator_id)
             .cloned()
-            .expect("validator");
+            .unwrap_or_else(|| env::panic_str("Unknown validator"));
 
         let eff = effective_stake_yocto(v.total_staked_balance, v.pending_to_stake);
         let ts = v.total_shares.0;
@@ -69,8 +73,12 @@ impl Contract {
             pending.checked_add(near_token).expect("pending"),
         );
 
+        let account_log = lock.account_id.clone();
+        let validator_log = lock.validator_id.clone();
         lock.status = LockStatus::UnlockRequested;
-        self.locks.insert(lock_id, lock);
+        self.locks.insert(lock_id.clone(), lock);
         self.validators.insert(validator_id, v);
+
+        crate::events::log_unlock(lock_id.as_str(), &account_log, &validator_log);
     }
 }

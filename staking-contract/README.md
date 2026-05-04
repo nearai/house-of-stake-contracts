@@ -21,6 +21,20 @@ cargo near build non-reproducible-wasm --manifest-path staking-contract/Cargo.to
 
 `build_all.sh` also builds this crate and copies `staking_contract.wasm` to `res/local/`.
 
+## Operator / user cadence (unlock → cash)
+
+Typical sequence after locks exist:
+
+1. **`epoch_stake`** — Move `pending_to_stake` into the pool (when safe).
+2. User **`unlock`** — After lock period; queues NEAR into `user_pending_unstake` / `pending_to_unstake`.
+3. **`epoch_unstake`** — Drain `pending_to_unstake` into the pool’s unstaked bucket.
+4. Wait **`epoch_unstake_settle_epochs`** (config).
+5. **`epoch_withdraw`** — Pull unstaked NEAR from the pool into `pending_to_withdraw` on the validator record.
+6. User **`claim_unlocked_near`** — Pro-rata claim into `withdrawable_balance`.
+7. User **`withdraw`** — Transfer `withdrawable_balance` out.
+
+USD-priced catalog entries use **`oracle_on_call`** (see [`src/oracle_receiver.rs`](src/oracle_receiver.rs)) with a Burrow-style oracle relay, not `lock_for_product`.
+
 ## Implementation status (snapshot)
 
 Implemented in code:
@@ -29,16 +43,15 @@ Implemented in code:
 - On-contract validator **allowlist** (`add_validator`, `set_validator_owner`, `pause_validator`, `remove_validator`)
 - Validator-owner **catalog** (`create_product`, `create_price`, …)
 - Stripe-like deterministic IDs (`prod_*`, `price_*`, `lock_*`, `sub_*`)
-- Share minting helpers (`internal.rs`) and **Near-priced** `lock_for_product`
-- `unlock` (user-driven); operator **`epoch_stake`**, **`epoch_unstake`**, **`epoch_withdraw`** (two-step unstaked balance query + `withdraw`, like lockup); user **`claim_unlocked_near`** → `withdrawable_balance`; **`withdraw`**
-- `refresh_validator_balance` + pool callbacks; **`storage_withdraw`** (NEP-145 excess above `min_storage_deposit`)
-- Lock **EVENT_JSON** on product lock (`events.rs`)
+- Share minting helpers (`internal.rs`) and **Near-priced** `lock_for_product`; **USD** via **`oracle_on_call`** ([`oracle_receiver.rs`](src/oracle_receiver.rs)) + relay
+- `unlock` (user-driven); operator **`epoch_stake`**, **`epoch_unstake`**, **`epoch_withdraw`**; user **`claim_unlocked_near`** → **`withdraw`**
+- `refresh_validator_balance` + pool callbacks; **`storage_withdraw`**
+- **EVENT_JSON** for lock/unlock, catalog, validators, epoch ops, claim/withdraw, pool withdraw-in ([`events.rs`](src/events.rs))
 
 Still to wire per [PLAN.md](PLAN.md) / [ACTION_ITEMS.md](ACTION_ITEMS.md):
 
-- USD locks via Burrow-style **`oracle_on_call`** + relay (see ACTION_ITEMS P1)
-- `lock_for_subscription` + calendar-month extension ([subscriptions.rs](src/subscriptions.rs))
-- More EVENT_JSON coverage and sandbox integration tests
+- **`lock_for_subscription`** + calendar-accurate billing ([`subscriptions.rs`](src/subscriptions.rs) — average-month helper only)
+- Integration / sandbox tests
 
 ## Workspace
 

@@ -25,7 +25,7 @@ impl Contract {
             .validators
             .get(&validator_pool)
             .cloned()
-            .expect("Unknown validator");
+            .unwrap_or_else(|| env::panic_str("Unknown validator"));
         let w = v.pending_to_withdraw;
         let t = v.pending_user_unstake_total;
         require!(
@@ -60,13 +60,15 @@ impl Contract {
             .accounts
             .get(&account_id)
             .cloned()
-            .expect("No account; call storage_deposit");
+            .unwrap_or_else(|| env::panic_str("No account; call storage_deposit"));
         acc.withdrawable_balance = acc
             .withdrawable_balance
             .checked_add(credit)
             .expect("withdrawable overflow");
-        self.accounts.insert(account_id, acc);
-        self.validators.insert(validator_pool, v);
+        self.accounts.insert(account_id.clone(), acc);
+        self.validators.insert(validator_pool.clone(), v);
+
+        crate::events::log_claim_unlocked(&account_id, &validator_pool);
     }
 
     /// Withdraw NEAR that has been credited to `withdrawable_balance` after epoch withdraw completes.
@@ -76,7 +78,11 @@ impl Contract {
         self.assert_not_paused();
 
         let pred = env::predecessor_account_id();
-        let mut acc = self.accounts.get(&pred).cloned().expect("No account");
+        let mut acc = self
+            .accounts
+            .get(&pred)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("No account; call storage_deposit"));
         let bal = acc.withdrawable_balance.as_yoctonear();
         let withdraw_yocto = match amount {
             Some(a) => {
@@ -89,6 +95,8 @@ impl Contract {
 
         acc.withdrawable_balance = NearToken::from_yoctonear(bal - withdraw_yocto);
         self.accounts.insert(pred.clone(), acc);
+
+        crate::events::log_withdraw(&pred, withdraw_yocto);
 
         Promise::new(pred).transfer(NearToken::from_yoctonear(withdraw_yocto))
     }

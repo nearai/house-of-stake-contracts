@@ -6,7 +6,7 @@ use near_sdk::{env, near, require, NearToken};
 #[near]
 impl Contract {
     /// Lock NEAR for a one-off product purchase. Attach the NEAR to lock.
-    /// **v1:** [`Currency::Usd`] prices require a follow-up `lock_for_product_usd` (oracle XCC) — not implemented yet; calling with USD returns an error.
+    /// For [`Currency::Usd`] catalog prices, use [`crate::oracle_receiver::Contract::oracle_on_call`] with a Burrow-style relay instead.
     #[payable]
     pub fn lock_for_product(&mut self, price_id: PriceId, lock_duration_ns: U64) -> LockId {
         self.assert_not_paused();
@@ -27,12 +27,12 @@ impl Contract {
             "lock_duration_ns out of bounds"
         );
 
-        let price = self.prices.get(&price_id).cloned().expect("Unknown price");
-        let product = self
-            .products
-            .get(&price.product_id)
-            .cloned()
-            .expect("Unknown product");
+        let price_opt = self.prices.get(&price_id).cloned();
+        require!(price_opt.is_some(), "Unknown price");
+        let price = price_opt.unwrap();
+        let product_opt = self.products.get(&price.product_id).cloned();
+        require!(product_opt.is_some(), "Unknown product");
+        let product = product_opt.unwrap();
         require!(price.status == CatalogStatus::Active, "Price not active");
         require!(
             product.status == CatalogStatus::Active,
@@ -40,7 +40,7 @@ impl Contract {
         );
         require!(
             price.currency == Currency::Near,
-            "USD-priced locks: use lock_for_product_usd (TODO oracle callback)"
+            "USD-priced locks: use oracle_on_call (see oracle_receiver)"
         );
 
         let validator_id = product.validator_id.clone();

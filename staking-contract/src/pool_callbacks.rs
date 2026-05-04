@@ -1,3 +1,9 @@
+//! Callbacks from staking pool promises.
+//!
+//! `on_refresh_total_balance` overwrites `Validator::total_staked_balance` with the pool-reported aggregate.
+//! That figure can diverge from internal share accounting (`total_shares`, `pending_to_stake`, `pending_to_unstake`)
+//! when staking rewards accrue or rounding differs—use as an operator diagnostics aid unless reconciled later.
+
 use crate::epoch::{ext_self_epoch, ext_staking_pool};
 use crate::gas::{callbacks, staking_pool};
 use crate::*;
@@ -125,6 +131,10 @@ impl Contract {
                 .pending_to_withdraw
                 .checked_add(withdrawn)
                 .expect("pending_to_withdraw overflow");
+            crate::events::log_pool_withdraw_in(
+                withdrawn.as_yoctonear(),
+                &validator_pool,
+            );
         }
         self.validators.insert(validator_pool, v);
         ok
