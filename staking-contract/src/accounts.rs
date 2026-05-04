@@ -66,13 +66,13 @@ impl Contract {
 
         Promise::new(pred).transfer(amount)
     }
-}
 
-impl Contract {
     pub fn get_account(&self, account_id: AccountId) -> Option<Account> {
         self.accounts.get(&account_id).cloned()
     }
+}
 
+impl Contract {
     /// `extra_locks` = additional locks we are about to add (0 when not creating a lock).
     pub(crate) fn required_storage_deposit_yocto(
         &self,
