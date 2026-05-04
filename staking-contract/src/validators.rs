@@ -16,7 +16,10 @@ pub struct Validator {
     pub pending_to_stake: NearToken,
     pub pending_to_unstake: NearToken,
     pub last_unstake_epoch: u64,
+    /// NEAR returned from the pool (`epoch_withdraw`) not yet claimed into user accounts.
     pub pending_to_withdraw: NearToken,
+    /// Sum of `user_pending_unstake` for this pool; used with `pending_to_withdraw` for pro-rata claims.
+    pub pending_user_unstake_total: NearToken,
 
     pub tx_status: TransactionStatus,
 }
@@ -44,6 +47,7 @@ impl Contract {
             pending_to_unstake: NearToken::from_near(0),
             last_unstake_epoch: 0,
             pending_to_withdraw: NearToken::from_near(0),
+            pending_user_unstake_total: NearToken::from_near(0),
             tx_status: TransactionStatus::Idle,
         };
         self.validators.insert(pool_account_id.clone(), v);
@@ -106,7 +110,8 @@ impl Contract {
             v.total_shares.0 == 0
                 && v.pending_to_stake.as_yoctonear() == 0
                 && v.pending_to_unstake.as_yoctonear() == 0
-                && v.pending_to_withdraw.as_yoctonear() == 0,
+                && v.pending_to_withdraw.as_yoctonear() == 0
+                && v.pending_user_unstake_total.as_yoctonear() == 0,
             "Validator still has stake or pending operations"
         );
         let mut v = v;

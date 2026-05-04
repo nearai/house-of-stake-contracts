@@ -1,5 +1,5 @@
 use crate::*;
-use near_sdk::{env, near, require, NearToken};
+use near_sdk::{env, near, require, NearToken, Promise};
 
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
@@ -36,6 +36,33 @@ impl Contract {
             .checked_add(dep)
             .expect("storage_deposit overflow");
         self.accounts.insert(pred, acc);
+    }
+
+    /// Withdraw prepaid storage above [`crate::config::Config::min_storage_deposit`].
+    #[payable]
+    pub fn storage_withdraw(&mut self, amount: NearToken) -> Promise {
+        near_sdk::assert_one_yocto();
+        self.assert_not_paused();
+        require!(amount.as_yoctonear() > 0, "amount");
+
+        let pred = env::predecessor_account_id();
+        let mut acc = self
+            .accounts
+            .get(&pred)
+            .cloned()
+            .expect("No account; call storage_deposit");
+
+        let min = self.config.min_storage_deposit.as_yoctonear();
+        let after = acc
+            .storage_deposit
+            .as_yoctonear()
+            .saturating_sub(amount.as_yoctonear());
+        require!(after >= min, "Must retain min_storage_deposit");
+
+        acc.storage_deposit = NearToken::from_yoctonear(after);
+        self.accounts.insert(pred.clone(), acc);
+
+        Promise::new(pred).transfer(amount)
     }
 }
 

@@ -1,6 +1,10 @@
+use crate::epoch::{ext_self_epoch, ext_staking_pool};
+use crate::gas::{callbacks, staking_pool};
 use crate::*;
 use near_sdk::json_types::U64;
-use near_sdk::{env, is_promise_success, near, require, NearToken};
+use near_sdk::{
+    env, is_promise_success, near, require, NearToken, PromiseOrValue,
+};
 
 #[near]
 impl Contract {
@@ -55,24 +59,75 @@ impl Contract {
         ok
     }
 
+    /// After `get_account_unstaked_balance`: if zero, release `Busy`; else `withdraw` unstaked NEAR into this contract.
     #[private]
-    pub fn on_withdraw_all_to_contract(
+    pub fn on_get_unstaked_for_epoch_withdraw(
+        &mut self,
+        #[callback] unstaked_balance: NearToken,
+        validator_pool: AccountId,
+    ) -> PromiseOrValue<bool> {
+        require!(
+            env::predecessor_account_id() == env::current_account_id(),
+            "private"
+        );
+        if !is_promise_success() {
+            let mut v = self
+                .validators
+                .get(&validator_pool)
+                .cloned()
+                .expect("validator");
+            v.tx_status = TransactionStatus::Idle;
+            self.validators.insert(validator_pool, v);
+            return PromiseOrValue::Value(false);
+        }
+
+        if unstaked_balance.as_yoctonear() == 0 {
+            let mut v = self
+                .validators
+                .get(&validator_pool)
+                .cloned()
+                .expect("validator");
+            v.tx_status = TransactionStatus::Idle;
+            self.validators.insert(validator_pool, v);
+            return PromiseOrValue::Value(true);
+        }
+
+        ext_staking_pool::ext(validator_pool.clone())
+            .with_static_gas(staking_pool::WITHDRAW)
+            .withdraw(unstaked_balance)
+            .then(
+                ext_self_epoch::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_WITHDRAW_TRANSFER)
+                    .on_epoch_withdraw_transfer_done(validator_pool, unstaked_balance),
+            )
+            .into()
+    }
+
+    #[private]
+    pub fn on_epoch_withdraw_transfer_done(
         &mut self,
         validator_pool: AccountId,
-        #[callback] amount: NearToken,
+        withdrawn: NearToken,
     ) -> bool {
         require!(
             env::predecessor_account_id() == env::current_account_id(),
             "private"
         );
         let ok = is_promise_success();
-        if !ok {
-            return false;
+        let mut v = self
+            .validators
+            .get(&validator_pool)
+            .cloned()
+            .expect("validator");
+        v.tx_status = TransactionStatus::Idle;
+        if ok && withdrawn.as_yoctonear() > 0 {
+            v.pending_to_withdraw = v
+                .pending_to_withdraw
+                .checked_add(withdrawn)
+                .expect("pending_to_withdraw overflow");
         }
-        let _ = validator_pool;
-        let _ = amount;
-        // Credit users proportionally: simplified v1 credits entire pending_to_withdraw split — TODO.
-        true
+        self.validators.insert(validator_pool, v);
+        ok
     }
 
     #[private]

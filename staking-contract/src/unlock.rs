@@ -36,10 +36,15 @@ impl Contract {
         require!(ts >= sh && ts > 0, "share underflow");
 
         v.total_shares = U128(ts - sh);
+        let near_token = NearToken::from_yoctonear(near_amt);
         v.pending_to_unstake = v
             .pending_to_unstake
-            .checked_add(NearToken::from_yoctonear(near_amt))
+            .checked_add(near_token)
             .expect("pending unstake overflow");
+        v.pending_user_unstake_total = v
+            .pending_user_unstake_total
+            .checked_add(near_token)
+            .expect("pending user total overflow");
 
         let ukey = (lock.account_id.clone(), validator_id.clone());
         let us = self
@@ -61,9 +66,7 @@ impl Contract {
             .unwrap_or(NearToken::from_near(0));
         self.user_pending_unstake.insert(
             ukey,
-            pending
-                .checked_add(NearToken::from_yoctonear(near_amt))
-                .expect("pending"),
+            pending.checked_add(near_token).expect("pending"),
         );
 
         lock.status = LockStatus::UnlockRequested;

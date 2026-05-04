@@ -118,6 +118,8 @@ impl Contract {
         self.products.insert(product.product_id.clone(), product);
         self.validators.insert(validator_id, v);
 
+        crate::events::log_lock(lock_id.as_str(), &buyer);
+
         lock_id
     }
 }

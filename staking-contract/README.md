@@ -30,14 +30,15 @@ Implemented in code:
 - Validator-owner **catalog** (`create_product`, `create_price`, …)
 - Stripe-like deterministic IDs (`prod_*`, `price_*`, `lock_*`, `sub_*`)
 - Share minting helpers (`internal.rs`) and **Near-priced** `lock_for_product`
-- `unlock` (user-driven), `withdraw`, `epoch_stake`, `refresh_validator_balance` + pool callbacks (partial)
+- `unlock` (user-driven); operator **`epoch_stake`**, **`epoch_unstake`**, **`epoch_withdraw`** (two-step unstaked balance query + `withdraw`, like lockup); user **`claim_unlocked_near`** → `withdrawable_balance`; **`withdraw`**
+- `refresh_validator_balance` + pool callbacks; **`storage_withdraw`** (NEP-145 excess above `min_storage_deposit`)
+- Lock **EVENT_JSON** on product lock (`events.rs`)
 
-Still to wire per [PLAN.md](PLAN.md):
+Still to wire per [PLAN.md](PLAN.md) / [ACTION_ITEMS.md](ACTION_ITEMS.md):
 
-- USD `lock_for_product` via oracle XCC
-- `lock_for_subscription` + calendar-month extension ([subscriptions.rs](src/subscriptions.rs) currently stubs duration)
-- Full **epoch_unstake** / **epoch_withdraw** and crediting `withdrawable_balance` from `user_pending_unstake`
-- EVENT_JSON standardization and integration tests
+- USD locks via Burrow-style **`oracle_on_call`** + relay (see ACTION_ITEMS P1)
+- `lock_for_subscription` + calendar-month extension ([subscriptions.rs](src/subscriptions.rs))
+- More EVENT_JSON coverage and sandbox integration tests
 
 ## Workspace
 
