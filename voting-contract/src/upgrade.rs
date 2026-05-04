@@ -6,6 +6,7 @@ use near_sdk::Gas;
 use near_sdk::borsh::{self, BorshDeserialize};
 use near_sdk::json_types::U64;
 use near_sdk::store::{LookupMap, Vector};
+use near_sdk::sys;
 
 const MIGRATE_STATE_GAS: Gas = Gas::from_tgas(50);
 const GET_CONFIG_GAS: Gas = Gas::from_tgas(5);
