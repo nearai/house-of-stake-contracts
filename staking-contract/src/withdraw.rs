@@ -150,4 +150,18 @@ mod tests {
         let c = ((U256::from(w) * U256::from(o)) / U256::from(t)).as_u128();
         assert_eq!(c, 30);
     }
+
+    /// `w * o` can exceed `u128::MAX` at yocto scale; pro-rata must use `U256` for the product.
+    #[test]
+    fn pro_rata_large_product_needs_u256() {
+        let w_y: u128 = 1u128 << 64;
+        let o_y: u128 = 1u128 << 64;
+        let t_y: u128 = 1u128 << 64;
+        assert!(
+            w_y.checked_mul(o_y).is_none(),
+            "sanity: product overflows u128; math must use U256"
+        );
+        let credit_raw = (U256::from(w_y) * U256::from(o_y)) / U256::from(t_y);
+        assert_eq!(credit_raw.as_u128(), 1u128 << 64);
+    }
 }

@@ -482,7 +482,7 @@ There is no `ext_whitelist`: the validator allowlist is internal to stake.dao an
 
 ## 9. Events
 
-Extend [common/src/events.rs](house-of-stake-contracts/common/src/events.rs) (new module, standard `"stakedao"`, version `"1.0.0"`):
+Extend [common/src/events.rs](house-of-stake-contracts/common/src/events.rs) (new module, standard `"stake.dao"`, version `"1.0.0"`):
 - Catalog: `product_create`, `product_edit`, `product_archive`, `product_delete`, `price_create`, `price_edit`, `price_archive`, `price_delete`.
 - Validators: `validator_add`, `validator_pause`, `validator_remove`.
 - Lifecycle: `lock_create` (with `lock_id`, `account_id`, `validator_id`, `amount`, `duration_ns`, `order`, frozen `near_per_usd` if USD-priced), `unlock_request`, `unlock_settled`, `withdraw`.

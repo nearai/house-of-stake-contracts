@@ -4,10 +4,14 @@
 
 use near_sdk::json_types::{U64, U128};
 use near_sdk::test_utils::VMContextBuilder;
-use near_sdk::{AccountId, NearToken, VMContext, testing_env};
+use near_sdk::{
+    AccountId, NearToken, PromiseResult, RuntimeFeesConfig, VMContext, serde_json, test_vm_config,
+    testing_env,
+};
 use staking_contract::internal::LOCK_FACTOR_DENOM;
 use staking_contract::types::{BillingPeriod, Currency, PriceType};
 use staking_contract::{Config, Contract};
+use std::collections::HashMap;
 use std::str::FromStr;
 
 pub fn acct(s: &str) -> AccountId {
@@ -53,6 +57,32 @@ pub fn ctx(pred: AccountId, attached: NearToken) -> VMContext {
         .build()
 }
 
+/// Context for `#[private]` catalog callbacks (`*_after_get_owner`): contract calls itself.
+fn ctx_catalog_callback() -> VMContext {
+    let id = acct(STAKING);
+    VMContextBuilder::new()
+        .current_account_id(id.clone())
+        .predecessor_account_id(id.clone())
+        .signer_account_id(id)
+        .attached_deposit(NearToken::from_near(0))
+        .account_balance(NearToken::from_near(500))
+        .block_height(42)
+        .block_timestamp(1_700_000_000_000_000_000)
+        .build()
+}
+
+/// Simulates `get_owner_id` resolving to `pool_owner` so `is_promise_success()` passes in callbacks.
+pub fn testing_env_catalog_callback(pool_owner: AccountId) {
+    let payload = serde_json::to_vec(&pool_owner).expect("serialize pool owner AccountId");
+    testing_env!(
+        ctx_catalog_callback(),
+        test_vm_config(),
+        RuntimeFeesConfig::test(),
+        HashMap::default(),
+        vec![PromiseResult::Successful(payload)],
+    );
+}
+
 pub fn deploy_with_config(config: Config) -> Contract {
     Contract::new(config)
 }
@@ -66,10 +96,18 @@ pub fn setup_catalog_near_oneoff(contract: &mut Contract) -> (String, String) {
     testing_env!(ctx(acct(OWNER), NearToken::from_yoctonear(1)));
     contract.add_validator(acct(POOL), acct(VOWNER));
 
-    testing_env!(ctx(acct(VOWNER), NearToken::from_yoctonear(1)));
-    let product_id = contract.create_product(acct(POOL), "Plan".into(), "Desc".into());
+    testing_env_catalog_callback(acct(VOWNER));
+    let product_id = contract.create_product_after_get_owner(
+        acct(VOWNER),
+        acct(POOL),
+        "Plan".into(),
+        "Desc".into(),
+        acct(VOWNER),
+    );
 
-    let price_id = contract.create_price(
+    testing_env_catalog_callback(acct(VOWNER));
+    let price_id = contract.create_price_after_get_owner(
+        acct(VOWNER),
         product_id.clone(),
         "Price".into(),
         "".into(),
@@ -78,6 +116,7 @@ pub fn setup_catalog_near_oneoff(contract: &mut Contract) -> (String, String) {
         PriceType::OneOff,
         None,
         U128(LOCK_FACTOR_DENOM),
+        acct(VOWNER),
     );
     (product_id, price_id)
 }
@@ -87,10 +126,18 @@ pub fn setup_catalog_near_subscription(contract: &mut Contract) -> (String, Stri
     testing_env!(ctx(acct(OWNER), NearToken::from_yoctonear(1)));
     contract.add_validator(acct(POOL), acct(VOWNER));
 
-    testing_env!(ctx(acct(VOWNER), NearToken::from_yoctonear(1)));
-    let product_id = contract.create_product(acct(POOL), "Sub product".into(), "Desc".into());
+    testing_env_catalog_callback(acct(VOWNER));
+    let product_id = contract.create_product_after_get_owner(
+        acct(VOWNER),
+        acct(POOL),
+        "Sub product".into(),
+        "Desc".into(),
+        acct(VOWNER),
+    );
 
-    let price_id = contract.create_price(
+    testing_env_catalog_callback(acct(VOWNER));
+    let price_id = contract.create_price_after_get_owner(
+        acct(VOWNER),
         product_id.clone(),
         "Monthly".into(),
         "".into(),
@@ -99,6 +146,7 @@ pub fn setup_catalog_near_subscription(contract: &mut Contract) -> (String, Stri
         PriceType::Recurring,
         Some(BillingPeriod::Monthly),
         U128(LOCK_FACTOR_DENOM),
+        acct(VOWNER),
     );
     (product_id, price_id)
 }

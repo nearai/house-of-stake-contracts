@@ -52,6 +52,8 @@ impl Contract {
             .expect("No account; call storage_deposit");
 
         let storage_yocto = acc.storage_deposit.as_yoctonear();
+        // Never withdraw more than prepaid: avoids transferring more than recorded storage when
+        // `min_storage_deposit` is zero or small (do not rely on saturating math alone).
         require!(
             amount.as_yoctonear() <= storage_yocto,
             "Withdraw exceeds prepaid storage"
