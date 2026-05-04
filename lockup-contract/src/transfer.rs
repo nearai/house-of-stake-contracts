@@ -1,4 +1,4 @@
-use crate::*;
+use crate::LockupContract;
 use near_sdk::json_types::U128;
 use near_sdk::serde_json;
 use near_sdk::{env, require};

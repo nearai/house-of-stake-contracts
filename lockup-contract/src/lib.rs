@@ -158,7 +158,6 @@ impl LockupContract {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[cfg(test)]
 mod tests {
     use near_sdk::{AccountId, NearToken, VMContext, testing_env};

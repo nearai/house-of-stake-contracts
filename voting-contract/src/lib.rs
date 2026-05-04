@@ -16,7 +16,7 @@ use crate::proposal::{ProposalId, VProposal};
 use common::account::*;
 use common::venear::VenearGrowthConfig;
 use near_sdk::store::{LookupMap, Vector};
-use near_sdk::{AccountId, BorshStorageKey, NearToken, PanicOnDefault, env, near, require, sys};
+use near_sdk::{AccountId, BorshStorageKey, NearToken, PanicOnDefault, env, near, require};
 
 #[derive(BorshStorageKey)]
 #[near]

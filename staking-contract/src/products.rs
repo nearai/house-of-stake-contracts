@@ -1,6 +1,75 @@
+use crate::epoch::ext_staking_pool;
+use crate::gas::{callbacks, staking_pool};
 use crate::*;
+use near_sdk::ext_contract;
 use near_sdk::json_types::{U64, U128};
-use near_sdk::{env, near, require};
+use near_sdk::{AccountId, Promise, env, is_promise_success, near, require};
+
+/// Self callbacks after `get_owner_id` on the staking pool.
+#[ext_contract(ext_self_products)]
+pub trait ExtSelfProducts {
+    fn create_product_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        validator_id: AccountId,
+        name: String,
+        description: String,
+        expected_caller: AccountId,
+    ) -> ProductId;
+    fn edit_product_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        product_id: ProductId,
+        name: String,
+        description: String,
+        expected_caller: AccountId,
+    );
+    fn archive_product_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        product_id: ProductId,
+        expected_caller: AccountId,
+    );
+    fn delete_product_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        product_id: ProductId,
+        expected_caller: AccountId,
+    );
+    fn create_price_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        product_id: ProductId,
+        name: String,
+        description: String,
+        currency: Currency,
+        amount: U128,
+        price_type: PriceType,
+        billing_period: Option<BillingPeriod>,
+        lock_factor_near_months: U128,
+        expected_caller: AccountId,
+    ) -> PriceId;
+    fn edit_price_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        price_id: PriceId,
+        name: String,
+        description: String,
+        expected_caller: AccountId,
+    );
+    fn archive_price_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        price_id: PriceId,
+        expected_caller: AccountId,
+    );
+    fn delete_price_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        price_id: PriceId,
+        expected_caller: AccountId,
+    );
+}
 
 #[near]
 impl Contract {
@@ -10,10 +79,215 @@ impl Contract {
         validator_id: AccountId,
         name: String,
         description: String,
-    ) -> ProductId {
+    ) -> Promise {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
-        self.assert_validator_owner(&validator_id);
+        self.assert_validator_allowlisted(&validator_id);
+        let expected_caller = env::predecessor_account_id();
+        ext_staking_pool::ext(validator_id.clone())
+            .with_static_gas(staking_pool::GET_OWNER_ID)
+            .get_owner_id()
+            .then(
+                ext_self_products::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
+                    .create_product_after_get_owner(
+                        validator_id,
+                        name,
+                        description,
+                        expected_caller,
+                    ),
+            )
+    }
+
+    #[payable]
+    pub fn edit_product(
+        &mut self,
+        product_id: ProductId,
+        name: String,
+        description: String,
+    ) -> Promise {
+        near_sdk::assert_one_yocto();
+        self.assert_not_paused();
+        let p = self.products.get(&product_id).cloned();
+        require!(p.is_some(), "Unknown product");
+        let p = p.unwrap();
+        self.assert_validator_allowlisted(&p.validator_id);
+        let expected_caller = env::predecessor_account_id();
+        let validator_id = p.validator_id.clone();
+        ext_staking_pool::ext(validator_id)
+            .with_static_gas(staking_pool::GET_OWNER_ID)
+            .get_owner_id()
+            .then(
+                ext_self_products::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
+                    .edit_product_after_get_owner(product_id, name, description, expected_caller),
+            )
+    }
+
+    #[payable]
+    pub fn archive_product(&mut self, product_id: ProductId) -> Promise {
+        near_sdk::assert_one_yocto();
+        self.assert_not_paused();
+        let p = self.products.get(&product_id).cloned();
+        require!(p.is_some(), "Unknown product");
+        let p = p.unwrap();
+        self.assert_validator_allowlisted(&p.validator_id);
+        let expected_caller = env::predecessor_account_id();
+        let validator_id = p.validator_id.clone();
+        ext_staking_pool::ext(validator_id)
+            .with_static_gas(staking_pool::GET_OWNER_ID)
+            .get_owner_id()
+            .then(
+                ext_self_products::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
+                    .archive_product_after_get_owner(product_id, expected_caller),
+            )
+    }
+
+    #[payable]
+    pub fn delete_product(&mut self, product_id: ProductId) -> Promise {
+        near_sdk::assert_one_yocto();
+        self.assert_not_paused();
+        let p = self.products.get(&product_id).cloned();
+        require!(p.is_some(), "Unknown product");
+        let p = p.unwrap();
+        self.assert_validator_allowlisted(&p.validator_id);
+        let expected_caller = env::predecessor_account_id();
+        let validator_id = p.validator_id.clone();
+        ext_staking_pool::ext(validator_id)
+            .with_static_gas(staking_pool::GET_OWNER_ID)
+            .get_owner_id()
+            .then(
+                ext_self_products::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
+                    .delete_product_after_get_owner(product_id, expected_caller),
+            )
+    }
+
+    #[payable]
+    pub fn create_price(
+        &mut self,
+        product_id: ProductId,
+        name: String,
+        description: String,
+        currency: Currency,
+        amount: U128,
+        price_type: PriceType,
+        billing_period: Option<BillingPeriod>,
+        lock_factor_near_months: U128,
+    ) -> Promise {
+        near_sdk::assert_one_yocto();
+        self.assert_not_paused();
+        let product = self.products.get(&product_id).cloned();
+        require!(product.is_some(), "Unknown product");
+        let product = product.unwrap();
+        self.assert_validator_allowlisted(&product.validator_id);
+        let expected_caller = env::predecessor_account_id();
+        let validator_id = product.validator_id.clone();
+        ext_staking_pool::ext(validator_id)
+            .with_static_gas(staking_pool::GET_OWNER_ID)
+            .get_owner_id()
+            .then(
+                ext_self_products::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
+                    .create_price_after_get_owner(
+                        product_id,
+                        name,
+                        description,
+                        currency,
+                        amount,
+                        price_type,
+                        billing_period,
+                        lock_factor_near_months,
+                        expected_caller,
+                    ),
+            )
+    }
+
+    #[payable]
+    pub fn edit_price(&mut self, price_id: PriceId, name: String, description: String) -> Promise {
+        near_sdk::assert_one_yocto();
+        self.assert_not_paused();
+        let pr = self.prices.get(&price_id).cloned();
+        require!(pr.is_some(), "Unknown price");
+        let pr = pr.unwrap();
+        let product = self.products.get(&pr.product_id).cloned();
+        require!(product.is_some(), "Unknown product");
+        let product = product.unwrap();
+        self.assert_validator_allowlisted(&product.validator_id);
+        let expected_caller = env::predecessor_account_id();
+        let validator_id = product.validator_id.clone();
+        ext_staking_pool::ext(validator_id)
+            .with_static_gas(staking_pool::GET_OWNER_ID)
+            .get_owner_id()
+            .then(
+                ext_self_products::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
+                    .edit_price_after_get_owner(price_id, name, description, expected_caller),
+            )
+    }
+
+    #[payable]
+    pub fn archive_price(&mut self, price_id: PriceId) -> Promise {
+        near_sdk::assert_one_yocto();
+        self.assert_not_paused();
+        let pr = self.prices.get(&price_id).cloned();
+        require!(pr.is_some(), "Unknown price");
+        let pr = pr.unwrap();
+        let product = self.products.get(&pr.product_id).cloned();
+        require!(product.is_some(), "Unknown product");
+        let product = product.unwrap();
+        self.assert_validator_allowlisted(&product.validator_id);
+        let expected_caller = env::predecessor_account_id();
+        let validator_id = product.validator_id.clone();
+        ext_staking_pool::ext(validator_id)
+            .with_static_gas(staking_pool::GET_OWNER_ID)
+            .get_owner_id()
+            .then(
+                ext_self_products::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
+                    .archive_price_after_get_owner(price_id, expected_caller),
+            )
+    }
+
+    #[payable]
+    pub fn delete_price(&mut self, price_id: PriceId) -> Promise {
+        near_sdk::assert_one_yocto();
+        self.assert_not_paused();
+        let pr = self.prices.get(&price_id).cloned();
+        require!(pr.is_some(), "Unknown price");
+        let pr = pr.unwrap();
+        let product = self.products.get(&pr.product_id).cloned();
+        require!(product.is_some(), "Unknown product");
+        let product = product.unwrap();
+        self.assert_validator_allowlisted(&product.validator_id);
+        let expected_caller = env::predecessor_account_id();
+        let validator_id = product.validator_id.clone();
+        ext_staking_pool::ext(validator_id)
+            .with_static_gas(staking_pool::GET_OWNER_ID)
+            .get_owner_id()
+            .then(
+                ext_self_products::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
+                    .delete_price_after_get_owner(price_id, expected_caller),
+            )
+    }
+
+    #[private]
+    pub fn create_product_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        validator_id: AccountId,
+        name: String,
+        description: String,
+        expected_caller: AccountId,
+    ) -> ProductId {
+        require!(is_promise_success(), "get_owner_id failed");
+        self.assert_not_paused();
+        require!(
+            pool_owner == expected_caller,
+            "Only the validator owner can call this method"
+        );
 
         let id = crate::ids::next_product_id(&mut self.id_nonce);
         let product = Product {
@@ -32,39 +306,71 @@ impl Contract {
         id
     }
 
-    #[payable]
-    pub fn edit_product(&mut self, product_id: ProductId, name: String, description: String) {
-        near_sdk::assert_one_yocto();
+    #[private]
+    pub fn edit_product_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        product_id: ProductId,
+        name: String,
+        description: String,
+        expected_caller: AccountId,
+    ) {
+        require!(is_promise_success(), "get_owner_id failed");
         self.assert_not_paused();
-        let p = self.products.get(&product_id).cloned();
-        require!(p.is_some(), "Unknown product");
-        let mut p = p.unwrap();
-        self.assert_validator_owner(&p.validator_id);
+        require!(
+            pool_owner == expected_caller,
+            "Only the validator owner can call this method"
+        );
+        let mut p = self
+            .products
+            .get(&product_id)
+            .cloned()
+            .expect("Unknown product");
         p.name = name;
         p.description = description;
         self.products.insert(product_id, p);
     }
 
-    #[payable]
-    pub fn archive_product(&mut self, product_id: ProductId) {
-        near_sdk::assert_one_yocto();
+    #[private]
+    pub fn archive_product_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        product_id: ProductId,
+        expected_caller: AccountId,
+    ) {
+        require!(is_promise_success(), "get_owner_id failed");
         self.assert_not_paused();
-        let p = self.products.get(&product_id).cloned();
-        require!(p.is_some(), "Unknown product");
-        let mut p = p.unwrap();
-        self.assert_validator_owner(&p.validator_id);
+        require!(
+            pool_owner == expected_caller,
+            "Only the validator owner can call this method"
+        );
+        let mut p = self
+            .products
+            .get(&product_id)
+            .cloned()
+            .expect("Unknown product");
         p.status = CatalogStatus::Archived;
         self.products.insert(product_id, p);
     }
 
-    #[payable]
-    pub fn delete_product(&mut self, product_id: ProductId) {
-        near_sdk::assert_one_yocto();
+    #[private]
+    pub fn delete_product_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        product_id: ProductId,
+        expected_caller: AccountId,
+    ) {
+        require!(is_promise_success(), "get_owner_id failed");
         self.assert_not_paused();
-        let p = self.products.get(&product_id).cloned();
-        require!(p.is_some(), "Unknown product");
-        let p = p.unwrap();
-        self.assert_validator_owner(&p.validator_id);
+        require!(
+            pool_owner == expected_caller,
+            "Only the validator owner can call this method"
+        );
+        let p = self
+            .products
+            .get(&product_id)
+            .cloned()
+            .expect("Unknown product");
         require!(p.usage_count == 0, "Product in use");
         require!(
             p.price_ids.is_empty(),
@@ -74,9 +380,10 @@ impl Contract {
         self.products.remove(&product_id);
     }
 
-    #[payable]
-    pub fn create_price(
+    #[private]
+    pub fn create_price_after_get_owner(
         &mut self,
+        #[callback] pool_owner: AccountId,
         product_id: ProductId,
         name: String,
         description: String,
@@ -85,13 +392,19 @@ impl Contract {
         price_type: PriceType,
         billing_period: Option<BillingPeriod>,
         lock_factor_near_months: U128,
+        expected_caller: AccountId,
     ) -> PriceId {
-        near_sdk::assert_one_yocto();
+        require!(is_promise_success(), "get_owner_id failed");
         self.assert_not_paused();
-        let product = self.products.get(&product_id).cloned();
-        require!(product.is_some(), "Unknown product");
-        let mut product = product.unwrap();
-        self.assert_validator_owner(&product.validator_id);
+        require!(
+            pool_owner == expected_caller,
+            "Only the validator owner can call this method"
+        );
+        let mut product = self
+            .products
+            .get(&product_id)
+            .cloned()
+            .expect("Unknown product");
         require!(product.status == CatalogStatus::Active, "Product archived");
 
         let price_id = crate::ids::next_price_id(&mut self.id_nonce);
@@ -114,49 +427,65 @@ impl Contract {
         price_id
     }
 
-    #[payable]
-    pub fn edit_price(&mut self, price_id: PriceId, name: String, description: String) {
-        near_sdk::assert_one_yocto();
+    #[private]
+    pub fn edit_price_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        price_id: PriceId,
+        name: String,
+        description: String,
+        expected_caller: AccountId,
+    ) {
+        require!(is_promise_success(), "get_owner_id failed");
         self.assert_not_paused();
-        let pr = self.prices.get(&price_id).cloned();
-        require!(pr.is_some(), "Unknown price");
-        let mut pr = pr.unwrap();
-        let product = self.products.get(&pr.product_id).cloned();
-        require!(product.is_some(), "Unknown product");
-        let product = product.unwrap();
-        self.assert_validator_owner(&product.validator_id);
+        require!(
+            pool_owner == expected_caller,
+            "Only the validator owner can call this method"
+        );
+        let mut pr = self.prices.get(&price_id).cloned().expect("Unknown price");
         pr.name = name;
         pr.description = description;
         self.prices.insert(price_id, pr);
     }
 
-    #[payable]
-    pub fn archive_price(&mut self, price_id: PriceId) {
-        near_sdk::assert_one_yocto();
+    #[private]
+    pub fn archive_price_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        price_id: PriceId,
+        expected_caller: AccountId,
+    ) {
+        require!(is_promise_success(), "get_owner_id failed");
         self.assert_not_paused();
-        let pr = self.prices.get(&price_id).cloned();
-        require!(pr.is_some(), "Unknown price");
-        let mut pr = pr.unwrap();
-        let product = self.products.get(&pr.product_id).cloned();
-        require!(product.is_some(), "Unknown product");
-        let product = product.unwrap();
-        self.assert_validator_owner(&product.validator_id);
+        require!(
+            pool_owner == expected_caller,
+            "Only the validator owner can call this method"
+        );
+        let mut pr = self.prices.get(&price_id).cloned().expect("Unknown price");
         pr.status = CatalogStatus::Archived;
         self.prices.insert(price_id, pr);
     }
 
-    #[payable]
-    pub fn delete_price(&mut self, price_id: PriceId) {
-        near_sdk::assert_one_yocto();
+    #[private]
+    pub fn delete_price_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        price_id: PriceId,
+        expected_caller: AccountId,
+    ) {
+        require!(is_promise_success(), "get_owner_id failed");
         self.assert_not_paused();
-        let pr = self.prices.get(&price_id).cloned();
-        require!(pr.is_some(), "Unknown price");
-        let pr = pr.unwrap();
-        let product = self.products.get(&pr.product_id).cloned();
-        require!(product.is_some(), "Unknown product");
-        let mut product = product.unwrap();
-        self.assert_validator_owner(&product.validator_id);
+        require!(
+            pool_owner == expected_caller,
+            "Only the validator owner can call this method"
+        );
+        let pr = self.prices.get(&price_id).cloned().expect("Unknown price");
         require!(pr.usage_count == 0, "Price in use");
+        let mut product = self
+            .products
+            .get(&pr.product_id)
+            .cloned()
+            .expect("Unknown product");
         product.price_ids.retain(|x| x != &price_id);
         self.products.insert(pr.product_id.clone(), product);
         self.prices.remove(&price_id);

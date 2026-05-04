@@ -5,7 +5,7 @@ use near_sdk::{NearToken, env, near, require};
 
 #[near]
 impl Contract {
-    /// User-driven unlock after `lock.end_ns` (Solution 1).
+    /// User-driven unlock: only the lock owner, after `lock.end_ns`; shares convert to NEAR at unlock time.
     #[payable]
     pub fn unlock(&mut self, lock_id: LockId) {
         near_sdk::assert_one_yocto();

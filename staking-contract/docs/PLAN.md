@@ -27,7 +27,7 @@ todos:
     content: "Implement lock.rs: lock_for_product, lock_for_subscription, hybrid pricing rule, share minting, pending_to_stake accounting"
     status: pending
   - id: unlock_module
-    content: "Implement unlock.rs: user-driven unlock (Solution 1 only); refresh validator balance (or assert recent), share->NEAR conversion, pending_to_unstake bookkeeping"
+    content: "Implement unlock.rs: user-driven unlock; refresh validator balance (or assert recent), share->NEAR conversion, pending_to_unstake bookkeeping"
     status: pending
   - id: subscription_calendar_month
     content: "Implement subscriptions.rs calendar-month extension (Stripe-style anchor day, last-day-of-month clamp); compute new_end_ns and use (new_end - old_end) for price-formula duration"
@@ -115,7 +115,7 @@ Add a new crate inside the workspace mirroring sibling crates. Suggested files (
 - `accounts.rs` — `Account` (per-user balances, locks, share holdings), storage deposit pattern (NEP-145).
 - `ids.rs` — Stripe-style identifier wrappers (`ProductId`, `PriceId`, `SubscriptionId`, `LockId`) plus deterministic on-chain ID generator.
 - `lock.rs` — `lock_for_product`, `lock_for_subscription`, internal "create order + take payment + record lock + accrue shares".
-- `unlock.rs` — `unlock(lock_id)`, user-initiated only (Solution 1).
+- `unlock.rs` — `unlock(lock_id)`, user-initiated only.
 - `withdraw.rs` — user `withdraw` (after pool's 4-epoch settlement returns NEAR to `stake.dao`).
 - `epoch.rs` — `epoch_stake(validator_id)`, `epoch_unstake(validator_id)`, `epoch_withdraw(validator_id)`, `refresh_validator_balance(validator_id)` (mirrors [lockup-contract/src/owner.rs](house-of-stake-contracts/lockup-contract/src/owner.rs)).
 - `pool_callbacks.rs` — `on_*` callbacks for staking pool external calls.
@@ -376,15 +376,15 @@ Notes:
 - Subscription's `end_ns` is moved forward to `new_end_ns` per top-up lock; cancellation is implicit (just don't top up).
 - Same share-minting and `pending_to_stake` accounting as one-off purchases.
 
-### 5.3 Unlocking (`unlock`) — Solution 1 only
+### 5.3 Unlocking (`unlock`)
 
-Only the user-driven flow is supported. There is no operator sweep, no `operator_unlock_due`.
+Unlock is always user-driven: only `lock.account_id` may call it, and there is no operator sweep or `operator_unlock_due`.
 
-- `unlock(lock_id)` is callable by `lock.account_id` once `now >= lock.end_ns`.
+- `unlock(lock_id)` is callable once `now >= lock.end_ns`.
 - The contract refreshes the validator's `total_staked_balance` first (or asserts a recent enough `last_balance_refresh_ns`) so share→NEAR conversion captures any rewards accrued since the lock was created.
 - It then marks `lock.status = UnlockRequested`, frees `lock.shares` from the user's reserved-shares total, and converts those shares to `near_amount = near_for(shares, validator)`, which is added to `validator.pending_to_unstake` and to a per-user `pending_unstake_near` counter.
 
-Why Solution 1 (not an operator sweep): keeping unlock user-initiated leaves room for **future per-validator reward sharing** without protocol changes. Some validators may run with <100% commission, and rewards earned over the lock period naturally accrue to the user's shares; with Solution 1 the conversion to NEAR happens at unlock time so the user automatically receives any shared rewards (and bears any slashing) that occurred during the lock. An operator sweep would either need extra bookkeeping to credit the same rewards to the right user or would have to lock the share→NEAR rate at `end_ns`, which forecloses that flexibility. It also avoids the operator becoming a liveness dependency for users to receive their funds.
+**Rationale:** Conversion at **unlock** time (rather than a hypothetical operator-driven sweep at `end_ns`) keeps room for **per-validator reward sharing** without protocol changes: some validators may run with less than 100% commission, so rewards over the lock period accrue to the user’s shares, and pricing the exit at unlock reflects those rewards (and slashing) correctly. A sweep-style flow would need extra bookkeeping to credit the same economics or would freeze the share→NEAR rate at `end_ns` and give up that flexibility. User-initiated unlock also avoids making operators a liveness dependency for users to receive funds.
 
 After unlock, NEAR is unavailable until two epoch jobs run: `epoch_unstake` (sends `unstake` to the pool) and after the pool's 4-epoch settlement, `epoch_withdraw` (calls `withdraw_all` on the pool). The contract increments user `withdrawable_balance` only after the `epoch_withdraw` callback succeeds, proportional to the per-user `pending_unstake_near` snapshot.
 

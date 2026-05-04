@@ -6,7 +6,7 @@ pub use crate::internal::AVG_MONTH_NS;
 ///
 /// `anchor_day` (1–31) is the Stripe-style **billing-cycle day-of-month** hint for future calendar-accurate
 /// billing (end-of-month clamping, leap years). It is validated but **not yet** applied in this helper until a
-/// full calendar implementation lands; see `ACTION_ITEMS.md` (subscriptions section).
+/// full calendar implementation lands; see `docs/ACTION_ITEMS.md` (subscriptions section).
 pub fn add_months_stripe_style(anchor_day: u8, months: u32, from_ns: u64) -> u64 {
     let _anchor_day = anchor_day.clamp(1, 31);
     let add_ns = (months as u128).saturating_mul(AVG_MONTH_NS);

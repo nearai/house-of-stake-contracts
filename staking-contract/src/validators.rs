@@ -126,14 +126,12 @@ impl Contract {
 }
 
 impl Contract {
-    pub fn assert_validator_owner(&self, pool_account_id: &AccountId) {
-        let v = self
-            .validators
-            .get(pool_account_id)
-            .expect("Unknown validator");
+    /// Pool must be on the allowlist. Catalog methods confirm the caller against the pool's
+    /// `get_owner_id()` via a cross-contract call (see `products.rs`).
+    pub fn assert_validator_allowlisted(&self, pool_account_id: &AccountId) {
         require!(
-            env::predecessor_account_id() == v.owner_account_id,
-            "Only the validator owner can call this method"
+            self.validators.get(pool_account_id).is_some(),
+            "Unknown validator"
         );
     }
 

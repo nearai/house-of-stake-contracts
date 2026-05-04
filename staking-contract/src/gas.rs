@@ -10,6 +10,8 @@ pub mod staking_pool {
     pub const WITHDRAW: Gas = Gas::from_gas(super::BASE_GAS.as_gas() * 3);
     pub const GET_ACCOUNT_TOTAL_BALANCE: Gas = super::BASE_GAS;
     pub const GET_ACCOUNT_UNSTAKED_BALANCE: Gas = super::BASE_GAS;
+    /// View call to the pool's `get_owner_id`.
+    pub const GET_OWNER_ID: Gas = super::BASE_GAS;
 }
 
 pub mod oracle {
@@ -26,4 +28,6 @@ pub mod callbacks {
     pub const ON_GET_UNSTAKED_FOR_WITHDRAW: Gas = Gas::from_gas(BASE_GAS.as_gas() * 4);
     pub const ON_WITHDRAW_TRANSFER: Gas = Gas::from_gas(BASE_GAS.as_gas() * 2);
     pub const ON_TOTAL_BALANCE: Gas = BASE_GAS;
+    /// After `get_owner_id`: catalog mutations (storage writes).
+    pub const ON_VALIDATOR_OWNER_CHECK: Gas = Gas::from_gas(BASE_GAS.as_gas() * 5);
 }

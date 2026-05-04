@@ -1,10 +1,12 @@
 use crate::account::AccountInternal;
 use crate::config::LockupContractConfig;
 use crate::*;
+use common::events;
 use common::lockup_update::{LockupUpdateV1, VLockupUpdate};
 use common::near_add;
-use common::{events, near_sub};
-use near_sdk::json_types::{Base58CryptoHash, U64};
+use common::near_sub;
+use near_sdk::json_types::Base58CryptoHash;
+use near_sdk::json_types::U64;
 use near_sdk::{Gas, IntoStorageKey, Promise, env, is_promise_success};
 
 const LOCKUP_DEPLOY_MIN_GAS: Gas = Gas::from_tgas(20);
@@ -317,7 +319,6 @@ impl Contract {
 /// Returns the contract hash.
 /// Requires the caller to attach the deposit to cover the storage cost.
 /// Requires the caller to be one of the lockup code deployers.
-#[cfg(target_arch = "wasm32")]
 #[unsafe(no_mangle)]
 pub extern "C" fn prepare_lockup_code() {
     env::setup_panic_hook();

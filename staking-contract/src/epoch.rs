@@ -28,6 +28,8 @@ pub trait ExtSelfEpoch {
 
 #[ext_contract(ext_staking_pool)]
 pub trait ExtStakingPool {
+    /// Staking-pool view: on-chain source of truth for who may operate the pool off this contract.
+    fn get_owner_id(&self) -> AccountId;
     fn deposit_and_stake(&mut self);
     fn unstake(&mut self, amount: NearToken);
     /// Unstaked balance available to transfer to this contract (query).

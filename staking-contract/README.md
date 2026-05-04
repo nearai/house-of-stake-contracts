@@ -6,8 +6,9 @@ NEAR smart contract for pooled staking tied to NEAR AI **products** and **prices
 
 | File | Purpose |
 |------|---------|
-| [DESIGN.md](DESIGN.md) | Readable architecture summary + pointers |
-| [PLAN.md](PLAN.md) | Full detailed design (exported from planning session) |
+| [docs/DESIGN.md](docs/DESIGN.md) | Readable architecture summary + pointers |
+| [docs/PLAN.md](docs/PLAN.md) | Full detailed design (exported from planning session) |
+| [docs/ACTION_ITEMS.md](docs/ACTION_ITEMS.md) | Open work / backlog vs design |
 
 ## Build
 
@@ -49,7 +50,7 @@ Implemented in code:
 - **EVENT_JSON** for lock/unlock, catalog, validators, epoch ops, claim/withdraw, pool withdraw-in ([`events.rs`](src/events.rs)) — `standard: stakedao`, `version: 1.0.0`, nested `data`
 - **`list_product_ids`** (+ [`get_product`](src/products.rs)) for catalog discovery
 
-Still to refine per [PLAN.md](PLAN.md) / [ACTION_ITEMS.md](ACTION_ITEMS.md):
+Still to refine per [docs/PLAN.md](docs/PLAN.md) / [docs/ACTION_ITEMS.md](docs/ACTION_ITEMS.md):
 
 - **Calendar-accurate** subscription billing (average-month linear helper only in [`subscriptions.rs`](src/subscriptions.rs); **`lock_for_subscription`** exists but uses linear months)
 - Deeper integration tests (full epoch/pool loop beyond smoke deploy / storage)
