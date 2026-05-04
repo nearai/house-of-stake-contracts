@@ -1,9 +1,10 @@
-# Rustfmt check — not run on push/PR yet (avoids large noisy diffs). Re-enable by adding:
-#   push: { branches: [main, master] }
-#   pull_request: { branches: [main, master] }
 name: Format
 
 on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
   workflow_dispatch:
 
 env:
