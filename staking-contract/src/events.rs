@@ -1,68 +1,93 @@
-//! `EVENT_JSON` logs for indexers (standard: `stakedao`).
+//! `EVENT_JSON` logs for indexers (NEP-297-style payload; standard `stakedao`).
 
-use near_sdk::AccountId;
 use near_sdk::log;
+use near_sdk::AccountId;
+
+fn emit(event: &str, data: serde_json::Value) {
+    let payload = serde_json::json!({
+        "standard": "stakedao",
+        "version": "1.0.0",
+        "event": event,
+        "data": data,
+    });
+    log!("EVENT_JSON:{}", payload);
+}
 
 pub fn log_validator_added(pool: &AccountId) {
-    log!(
-        "EVENT_JSON:{{\"standard\":\"stakedao\",\"event\":\"validator_add\",\"pool\":\"{}\"}}",
-        pool
+    emit(
+        "validator_add",
+        serde_json::json!({
+            "pool": pool.to_string(),
+        }),
     );
 }
 
 pub fn log_product_created(product_id: &str, validator_id: &AccountId) {
-    log!(
-        "EVENT_JSON:{{\"standard\":\"stakedao\",\"event\":\"product_create\",\"product_id\":\"{}\",\"validator\":\"{}\"}}",
-        product_id,
-        validator_id
+    emit(
+        "product_create",
+        serde_json::json!({
+            "product_id": product_id,
+            "validator_id": validator_id.to_string(),
+        }),
     );
 }
 
 pub fn log_lock(lock_id: &str, account: &AccountId) {
-    log!(
-        "EVENT_JSON:{{\"standard\":\"stakedao\",\"event\":\"lock_create\",\"lock_id\":\"{}\",\"account\":\"{}\"}}",
-        lock_id,
-        account
+    emit(
+        "lock_create",
+        serde_json::json!({
+            "lock_id": lock_id,
+            "account_id": account.to_string(),
+        }),
     );
 }
 
 pub fn log_unlock(lock_id: &str, account: &AccountId, validator: &AccountId) {
-    log!(
-        "EVENT_JSON:{{\"standard\":\"stakedao\",\"event\":\"unlock\",\"lock_id\":\"{}\",\"account\":\"{}\",\"validator\":\"{}\"}}",
-        lock_id,
-        account,
-        validator
+    emit(
+        "unlock",
+        serde_json::json!({
+            "lock_id": lock_id,
+            "account_id": account.to_string(),
+            "validator_id": validator.to_string(),
+        }),
     );
 }
 
 pub fn log_claim_unlocked(account: &AccountId, validator_pool: &AccountId) {
-    log!(
-        "EVENT_JSON:{{\"standard\":\"stakedao\",\"event\":\"claim_unlocked\",\"account\":\"{}\",\"validator\":\"{}\"}}",
-        account,
-        validator_pool
+    emit(
+        "claim_unlocked",
+        serde_json::json!({
+            "account_id": account.to_string(),
+            "validator_id": validator_pool.to_string(),
+        }),
     );
 }
 
 pub fn log_withdraw(account: &AccountId, amount_yocto: u128) {
-    log!(
-        "EVENT_JSON:{{\"standard\":\"stakedao\",\"event\":\"withdraw\",\"account\":\"{}\",\"amount_yocto\":\"{}\"}}",
-        account,
-        amount_yocto
+    emit(
+        "withdraw",
+        serde_json::json!({
+            "account_id": account.to_string(),
+            "amount_yocto": amount_yocto.to_string(),
+        }),
     );
 }
 
 pub fn log_epoch_operation(event: &str, validator_pool: &AccountId) {
-    log!(
-        "EVENT_JSON:{{\"standard\":\"stakedao\",\"event\":\"{}\",\"validator\":\"{}\"}}",
+    emit(
         event,
-        validator_pool
+        serde_json::json!({
+            "validator_id": validator_pool.to_string(),
+        }),
     );
 }
 
 pub fn log_pool_withdraw_in(amount_yocto: u128, validator_pool: &AccountId) {
-    log!(
-        "EVENT_JSON:{{\"standard\":\"stakedao\",\"event\":\"pool_withdraw_in\",\"validator\":\"{}\",\"amount_yocto\":\"{}\"}}",
-        validator_pool,
-        amount_yocto
+    emit(
+        "pool_withdraw_in",
+        serde_json::json!({
+            "validator_id": validator_pool.to_string(),
+            "amount_yocto": amount_yocto.to_string(),
+        }),
     );
 }

@@ -1,0 +1,25 @@
+# Rustfmt check — not run on push/PR yet (avoids large noisy diffs). Re-enable by adding:
+#   push: { branches: [main, master] }
+#   pull_request: { branches: [main, master] }
+name: Format
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rustfmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.86.0
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check

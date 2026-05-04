@@ -29,6 +29,7 @@ pub fn base_config() -> Config {
         guardians: vec![],
         operators: vec![],
         oracle_account_id: acct(ORACLE),
+        oracle_usd_price_asset_id: String::new(),
         oracle_max_age_ns: U64(86_400_000_000_000_000),
         oracle_max_recency_duration_sec: 0,
         min_lock_duration_ns: U64(1),

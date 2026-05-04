@@ -31,6 +31,7 @@ fn staking_new_args(owner: &near_workspaces::AccountId) -> serde_json::Value {
             "guardians": [],
             "operators": [],
             "oracle_account_id": owner,
+            "oracle_usd_price_asset_id": "",
             "oracle_max_age_ns": "1000000000000000000",
             "oracle_max_recency_duration_sec": 0,
             "min_lock_duration_ns": "1",

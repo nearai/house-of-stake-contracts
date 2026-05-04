@@ -46,12 +46,13 @@ Implemented in code:
 - Share minting helpers (`internal.rs`) and **Near-priced** `lock_for_product`; **USD** via **`oracle_on_call`** ([`oracle_receiver.rs`](src/oracle_receiver.rs)) + relay
 - `unlock` (user-driven); operator **`epoch_stake`**, **`epoch_unstake`**, **`epoch_withdraw`**; user **`claim_unlocked_near`** → **`withdraw`**
 - `refresh_validator_balance` + pool callbacks; **`storage_withdraw`**
-- **EVENT_JSON** for lock/unlock, catalog, validators, epoch ops, claim/withdraw, pool withdraw-in ([`events.rs`](src/events.rs))
+- **EVENT_JSON** for lock/unlock, catalog, validators, epoch ops, claim/withdraw, pool withdraw-in ([`events.rs`](src/events.rs)) — `standard: stakedao`, `version: 1.0.0`, nested `data`
+- **`list_product_ids`** (+ [`get_product`](src/products.rs)) for catalog discovery
 
-Still to wire per [PLAN.md](PLAN.md) / [ACTION_ITEMS.md](ACTION_ITEMS.md):
+Still to refine per [PLAN.md](PLAN.md) / [ACTION_ITEMS.md](ACTION_ITEMS.md):
 
-- **`lock_for_subscription`** + calendar-accurate billing ([`subscriptions.rs`](src/subscriptions.rs) — average-month helper only)
-- Integration / sandbox tests
+- **Calendar-accurate** subscription billing (average-month linear helper only in [`subscriptions.rs`](src/subscriptions.rs); **`lock_for_subscription`** exists but uses linear months)
+- Deeper integration tests (full epoch/pool loop beyond smoke deploy / storage)
 
 ## Workspace
 

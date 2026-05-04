@@ -85,7 +85,21 @@ impl Contract {
         base.saturating_add(per.saturating_mul(total_locks))
     }
 
-    /// For views and claims: no new lock.
+    /// Account registered and still meets global [`crate::config::Config::min_storage_deposit`] only (no per-lock surcharge).
+    /// Use for claim / withdraw paths so older locks do not force endless storage top-ups.
+    pub(crate) fn ensure_min_base_storage(&self, account_id: &AccountId) {
+        let a = self
+            .accounts
+            .get(account_id)
+            .expect("Account not registered; call storage_deposit");
+        let min = self.config.min_storage_deposit.as_yoctonear();
+        require!(
+            a.storage_deposit.as_yoctonear() >= min,
+            "Top up storage (minimum prepaid)"
+        );
+    }
+
+    /// Full prepaid requirement including `per_lock_storage_stake` × locks recorded in [`crate::Contract::user_lock_count`].
     pub fn ensure_min_storage(&self, account_id: &AccountId) {
         let a = self
             .accounts

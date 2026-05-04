@@ -1,7 +1,6 @@
-//! Calendar-month helpers for subscription end dates (Stripe-style). Used by future `lock_for_subscription`.
+//! Calendar-month helpers for subscription end dates (Stripe-style). Used by [`crate::lock`] subscription locks.
 
-/// Average Gregorian month length in nanoseconds: 30.4375 days.
-pub const AVG_MONTH_NS: u128 = 2_629_746_000_000_000_000;
+pub use crate::internal::AVG_MONTH_NS;
 
 /// Extend `from_ns` by `months` × average Gregorian months (linear approximation).
 ///

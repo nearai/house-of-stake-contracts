@@ -34,6 +34,7 @@ use near_sdk::{AccountId, BorshStorageKey, NearToken, PanicOnDefault, near};
 enum StorageKeys {
     Validators,
     ValidatorIds,
+    ProductIds,
     Products,
     Prices,
     Accounts,
@@ -52,6 +53,8 @@ pub struct Contract {
     pub paused: bool,
     pub validators: LookupMap<AccountId, Validator>,
     pub validator_ids: Vector<AccountId>,
+    /// Stable ordering for [`crate::products::Contract::list_product_ids`].
+    pub product_ids: Vector<ProductId>,
     pub products: LookupMap<ProductId, Product>,
     pub prices: LookupMap<PriceId, Price>,
     pub accounts: LookupMap<AccountId, Account>,
@@ -61,7 +64,7 @@ pub struct Contract {
     pub user_validator_shares: LookupMap<(AccountId, AccountId), u128>,
     /// NEAR queued from unlock, waiting for epoch distribution after withdraw from pool.
     pub user_pending_unstake: LookupMap<(AccountId, AccountId), NearToken>,
-    /// Count of finished locks (used for per-lock storage bounds).
+    /// Locks ever created per account (increments on each new lock; used for per-lock storage prepaid).
     pub user_lock_count: LookupMap<AccountId, u32>,
     /// At most one subscription per (user, recurring price id).
     pub subscription_by_account_price: LookupMap<(AccountId, PriceId), SubscriptionId>,
@@ -77,6 +80,7 @@ impl Contract {
             paused: false,
             validators: LookupMap::new(StorageKeys::Validators),
             validator_ids: Vector::new(StorageKeys::ValidatorIds),
+            product_ids: Vector::new(StorageKeys::ProductIds),
             products: LookupMap::new(StorageKeys::Products),
             prices: LookupMap::new(StorageKeys::Prices),
             accounts: LookupMap::new(StorageKeys::Accounts),

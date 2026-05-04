@@ -11,7 +11,7 @@ impl Contract {
         self.assert_not_paused();
 
         let account_id = env::predecessor_account_id();
-        self.ensure_min_storage(&account_id);
+        self.ensure_min_base_storage(&account_id);
 
         let ukey = (account_id.clone(), validator_pool.clone());
         let o = self

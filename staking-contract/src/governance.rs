@@ -47,6 +47,13 @@ impl Contract {
     }
 
     #[payable]
+    pub fn set_oracle_usd_price_asset_id(&mut self, asset_id: String) {
+        assert_one_yocto();
+        self.assert_owner();
+        self.config.oracle_usd_price_asset_id = asset_id;
+    }
+
+    #[payable]
     pub fn set_oracle_recency_cap(&mut self, oracle_max_recency_duration_sec: u32) {
         assert_one_yocto();
         self.assert_owner();

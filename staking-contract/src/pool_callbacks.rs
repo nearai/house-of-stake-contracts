@@ -9,9 +9,10 @@
 //! re-minted, user NEAR-on-exit can slightly trail the pool’s notional balance; a future version could
 //! periodically mint “donation” shares to the protocol or run a share/NEAR true-up. Not implemented here.
 //!
-//! `on_epoch_withdraw_transfer_done` credits `pending_to_withdraw` using **actual** NEAR received
-//! (contract balance delta before/after pool `withdraw`), capped by the requested amount, so short
-//! transfers do not inflate the claim bucket.
+//! `on_epoch_withdraw_transfer_done` credits the **requested** `withdrawn` amount on a successful
+//! pool `withdraw` return. (A balance-delta approach is unsafe if multiple pool withdrawals overlap in
+//! time and share the contract’s single account balance; operators should run one `epoch_withdraw` at
+//! a time if their pool can short-pay.)
 
 use crate::epoch::{ext_self_epoch, ext_staking_pool};
 use crate::gas::{callbacks, staking_pool};
@@ -105,15 +106,6 @@ impl Contract {
             return PromiseOrValue::Value(true);
         }
 
-        let snap = env::account_balance().as_yoctonear();
-        let mut v = self
-            .validators
-            .get(&validator_pool)
-            .cloned()
-            .expect("validator");
-        v.balance_before_epoch_withdraw_yocto = Some(snap);
-        self.validators.insert(validator_pool.clone(), v);
-
         ext_staking_pool::ext(validator_pool.clone())
             .with_static_gas(staking_pool::WITHDRAW)
             .withdraw(unstaked_balance)
@@ -142,14 +134,8 @@ impl Contract {
             .cloned()
             .expect("validator");
         v.tx_status = TransactionStatus::Idle;
-        let before = v.balance_before_epoch_withdraw_yocto.take();
         let credited_yocto = if ok {
-            if let Some(b) = before {
-                let after = env::account_balance().as_yoctonear();
-                after.saturating_sub(b).min(withdrawn.as_yoctonear())
-            } else {
-                withdrawn.as_yoctonear()
-            }
+            withdrawn.as_yoctonear()
         } else {
             0
         };

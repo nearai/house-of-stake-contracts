@@ -27,6 +27,7 @@ impl Contract {
             usage_count: 0,
         };
         self.products.insert(id.clone(), product);
+        self.product_ids.push(id.clone());
         crate::events::log_product_created(id.as_str(), &validator_id);
         id
     }
@@ -69,6 +70,7 @@ impl Contract {
             p.price_ids.is_empty(),
             "Remove or delete all prices for this product first"
         );
+        self.remove_product_id_from_list(&product_id);
         self.products.remove(&product_id);
     }
 
@@ -166,5 +168,31 @@ impl Contract {
 
     pub fn get_price(&self, price_id: PriceId) -> Option<Price> {
         self.prices.get(&price_id).cloned()
+    }
+
+    /// Paginated catalog index (creation order). Pair with [`Contract::get_product`].
+    pub fn list_product_ids(&self, from_index: u64, limit: u64) -> Vec<ProductId> {
+        let len_u64 = self.product_ids.len() as u64;
+        let mut out = Vec::new();
+        let mut i = from_index;
+        while i < len_u64 && (out.len() as u64) < limit {
+            if let Some(id) = self.product_ids.get(i as u32) {
+                out.push(id.clone());
+            }
+            i += 1;
+        }
+        out
+    }
+}
+
+impl Contract {
+    fn remove_product_id_from_list(&mut self, product_id: &ProductId) {
+        let len = self.product_ids.len();
+        for i in 0..len {
+            if self.product_ids.get(i).is_some_and(|s| s == product_id) {
+                self.product_ids.swap_remove(i);
+                return;
+            }
+        }
     }
 }

@@ -1,6 +1,8 @@
-//! Deploy this contract at [`staking_contract::Config::oracle_account_id`]. Users call
-//! [`OracleRelay::forward`] with attached deposit; the relay invokes `oracle_on_call` on the staking
-//! contract with `sender_id` set to the **caller** (Burrow test-oracle pattern).
+//! Deploy at the staking contract’s configured `oracle_account_id`. [`OracleRelay::forward`] forwards
+//! attached deposit and user-supplied `price_data`—**unsafe** if arbitrary users can call it: they can
+//! forge oracle rows. Production: restrict callers, verify signatures, or replace `forward` with an
+//! implementation that pulls quotes via XCC from the real Burrow/oracle contract before calling
+//! `oracle_on_call`.
 
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::{AccountId, Gas, Promise, env, ext_contract, near};

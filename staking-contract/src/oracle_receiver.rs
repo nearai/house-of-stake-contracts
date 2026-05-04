@@ -1,6 +1,11 @@
 //! Burrow-style oracle callback: only [`crate::config::Config::oracle_account_id`] may call
-//! `oracle_on_call` on this contract. Use an oracle relay (see `ACTION_ITEMS.md` in this crate) that
-//! forwards the user as `sender_id` and attaches the user’s NEAR deposit to this call.
+//! `oracle_on_call` on this contract. Use an oracle relay that forwards the user as `sender_id` and
+//! attaches the user’s NEAR deposit.
+//!
+//! **Trusted relay:** If a thin relay is deployed at `oracle_account_id` and end users pass arbitrary
+//! `price_data`, they could forge quotes—only use that pattern when the relay fills `price_data` from a
+//! real oracle (XCC or trusted batch), or keep `oracle_account_id` as a dedicated trusted oracle account.
+//! USD rows are selected by [`crate::config::Config::oracle_usd_price_asset_id`] (Burrow `asset_id`).
 
 use crate::internal::check_usd_price_lock_burrow_row;
 use crate::*;
@@ -103,11 +108,23 @@ impl Contract {
             "lock_duration_ns out of bounds"
         );
 
-        let row = price_data
-            .prices
-            .iter()
-            .find_map(|p| p.price.as_ref())
-            .unwrap_or_else(|| env::panic_str("PriceData must include at least one price"));
+        let want = self.config.oracle_usd_price_asset_id.as_str();
+        let row = {
+            let prices = &price_data.prices;
+            let row_opt = if want.is_empty() {
+                prices.iter().find(|p| p.price.is_some())
+            } else {
+                prices
+                    .iter()
+                    .find(|p| p.asset_id == want && p.price.is_some())
+            };
+            row_opt.and_then(|p| p.price.as_ref())
+        }
+        .unwrap_or_else(|| {
+            env::panic_str(
+                "No matching oracle price row (set Config.oracle_usd_price_asset_id or include that asset in PriceData)",
+            )
+        });
 
         let price = self
             .prices

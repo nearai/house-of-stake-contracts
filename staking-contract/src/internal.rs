@@ -7,8 +7,10 @@ use near_sdk::NearToken;
 /// Fixed-point denominator for `Price.lock_factor_near_months`.
 pub const LOCK_FACTOR_DENOM: u128 = 1_000_000_000_000_000_000_000_000;
 
-/// Average month in nanoseconds: 30.4375 * 86400 * 1e9.
-pub const AVG_MONTH_NS: u128 = 2_629_746_000_000_000_000;
+/// Nanoseconds in one Gregorian day (`86400 * 10^9`).
+pub const NS_PER_DAY: u128 = 86_400_000_000_000;
+/// Average Gregorian month length in nanoseconds: `30.4375` days = `(487 / 16) * NS_PER_DAY`.
+pub const AVG_MONTH_NS: u128 = NS_PER_DAY * 487 / 16;
 
 pub fn effective_stake_yocto(total_staked_balance: NearToken, pending_to_stake: NearToken) -> u128 {
     total_staked_balance

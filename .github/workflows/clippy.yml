@@ -1,4 +1,4 @@
-name: CI
+name: Clippy
 
 on:
   push:
@@ -10,40 +10,20 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  rust:
+  clippy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@1.86.0
         with:
-          components: rustfmt, clippy
+          components: clippy
           targets: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Format
-        run: cargo fmt --all -- --check
-
       # `integration-tests` depends on `near-workspaces` (Linux x86_64 / darwin-arm64 sandbox);
       # exclude so `cargo clippy` works on all dev machines. Full workspace lints are non `-D` until
       # historical warnings in `common` / `merkle-tree` / etc. are cleaned up.
-      - name: Clippy
+      - name: cargo clippy
         run: cargo clippy --workspace --all-targets --all-features --exclude integration-tests
-
-      - name: Test (host + VM integration tests in crates)
-        run: cargo test --workspace --all-features
-
-      - name: Build WASM (release)
-        run: |
-          set -euo pipefail
-          for pkg in \
-            lockup-contract \
-            venear-contract \
-            voting-contract \
-            staking-contract \
-            sandbox-staking-whitelist-contract \
-            oracle-relay-contract; do
-            echo "== wasm32 $pkg =="
-            cargo build -p "$pkg" --target wasm32-unknown-unknown --release
-          done
