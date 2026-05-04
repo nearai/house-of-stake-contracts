@@ -47,6 +47,20 @@ impl Contract {
     }
 
     #[payable]
+    pub fn set_oracle_recency_cap(&mut self, oracle_max_recency_duration_sec: u32) {
+        assert_one_yocto();
+        self.assert_owner();
+        self.config.oracle_max_recency_duration_sec = oracle_max_recency_duration_sec;
+    }
+
+    #[payable]
+    pub fn set_per_lock_storage_stake(&mut self, per_lock_storage_stake: NearToken) {
+        assert_one_yocto();
+        self.assert_owner();
+        self.config.per_lock_storage_stake = per_lock_storage_stake;
+    }
+
+    #[payable]
     pub fn set_lock_bounds(&mut self, min_lock_duration_ns: U64, max_lock_duration_ns: U64) {
         assert_one_yocto();
         self.assert_owner();

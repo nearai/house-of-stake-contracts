@@ -41,6 +41,8 @@ enum StorageKeys {
     Locks,
     UserValidatorShares,
     UserPendingUnstake,
+    UserLockCount,
+    SubscriptionByAccountPrice,
 }
 
 #[derive(PanicOnDefault)]
@@ -59,6 +61,10 @@ pub struct Contract {
     pub user_validator_shares: LookupMap<(AccountId, AccountId), u128>,
     /// NEAR queued from unlock, waiting for epoch distribution after withdraw from pool.
     pub user_pending_unstake: LookupMap<(AccountId, AccountId), NearToken>,
+    /// Count of finished locks (used for per-lock storage bounds).
+    pub user_lock_count: LookupMap<AccountId, u32>,
+    /// At most one subscription per (user, recurring price id).
+    pub subscription_by_account_price: LookupMap<(AccountId, PriceId), SubscriptionId>,
     pub id_nonce: u64,
 }
 
@@ -78,6 +84,8 @@ impl Contract {
             locks: LookupMap::new(StorageKeys::Locks),
             user_validator_shares: LookupMap::new(StorageKeys::UserValidatorShares),
             user_pending_unstake: LookupMap::new(StorageKeys::UserPendingUnstake),
+            user_lock_count: LookupMap::new(StorageKeys::UserLockCount),
+            subscription_by_account_price: LookupMap::new(StorageKeys::SubscriptionByAccountPrice),
             id_nonce: 0,
         }
     }

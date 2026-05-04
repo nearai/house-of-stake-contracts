@@ -22,6 +22,8 @@ pub struct Validator {
     pub pending_user_unstake_total: NearToken,
 
     pub tx_status: TransactionStatus,
+    /// Contract balance (`yoctoNEAR`) snapshot immediately before scheduling pool `withdraw` during epoch withdraw.
+    pub balance_before_epoch_withdraw_yocto: Option<u128>,
 }
 
 #[near]
@@ -49,6 +51,7 @@ impl Contract {
             pending_to_withdraw: NearToken::from_near(0),
             pending_user_unstake_total: NearToken::from_near(0),
             tx_status: TransactionStatus::Idle,
+            balance_before_epoch_withdraw_yocto: None,
         };
         self.validators.insert(pool_account_id.clone(), v);
         self.validator_ids.push(pool_account_id.clone());

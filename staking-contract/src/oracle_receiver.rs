@@ -6,9 +6,10 @@ use crate::internal::check_usd_price_lock_burrow_row;
 use crate::*;
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::{env, near, require, AccountId};
+use schemars::JsonSchema;
 
 /// Compatible with Burrow `contracts/common` [`PriceData`] JSON shape (subset).
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(crate = "near_sdk::serde")]
 pub struct OraclePriceData {
     /// Block time of the quote (nanoseconds), as in Burrow.
@@ -18,14 +19,14 @@ pub struct OraclePriceData {
     pub prices: Vec<OracleAssetOptionalPrice>,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(crate = "near_sdk::serde")]
 pub struct OracleAssetOptionalPrice {
     pub asset_id: String,
     pub price: Option<OracleBurrowPrice>,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(crate = "near_sdk::serde")]
 pub struct OracleBurrowPrice {
     /// Burrow JSON uses decimal strings for large integers.
@@ -37,6 +38,9 @@ pub struct OracleBurrowPrice {
 #[derive(Deserialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct LockForProductUsdMsg {
+    /// `1` is the current JSON shape; reject higher values until supported.
+    #[serde(default)]
+    pub schema_version: u8,
     pub price_id: PriceId,
     pub lock_duration_ns: u64,
 }
@@ -53,6 +57,13 @@ impl Contract {
             now - data.timestamp <= max_age,
             "Oracle price data is too stale"
         );
+        let cap = self.config.oracle_max_recency_duration_sec;
+        if cap > 0 {
+            require!(
+                data.recency_duration_sec <= cap,
+                "Oracle recency_duration_sec exceeds configured cap"
+            );
+        }
     }
 }
 
@@ -71,6 +82,7 @@ impl Contract {
 
         let intent = serde_json::from_str::<LockForProductUsdMsg>(&msg)
             .unwrap_or_else(|_| env::panic_str("invalid oracle msg JSON"));
+        require!(intent.schema_version <= 1, "Unsupported oracle msg schema_version");
 
         let locked = env::attached_deposit();
         require!(
@@ -112,7 +124,7 @@ impl Contract {
 
         let validator_id = product.validator_id.clone();
         self.assert_validator_active_for_lock(&validator_id);
-        self.ensure_min_storage(&sender_id);
+        self.ensure_min_storage_for_new_lock(&sender_id);
 
         let dur_u128 = u128::from(intent.lock_duration_ns);
         let mult = row.multiplier.parse::<u128>().unwrap_or_else(|_| {
@@ -127,13 +139,6 @@ impl Contract {
         )
         .unwrap_or_else(|e| env::panic_str(e));
 
-        let _ = self.finalize_product_lock(
-            sender_id,
-            intent.price_id,
-            price,
-            product,
-            locked,
-            dur_u128,
-        );
+        let _ = self.finalize_product_lock(sender_id, price, product, locked, dur_u128);
     }
 }

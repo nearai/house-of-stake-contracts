@@ -11,10 +11,14 @@ pub struct Config {
     pub operators: Vec<AccountId>,
     pub oracle_account_id: AccountId,
     pub oracle_max_age_ns: U64,
+    /// If non-zero, [`crate::oracle_receiver::OraclePriceData::recency_duration_sec`] must not exceed this (Burrow-style).
+    pub oracle_max_recency_duration_sec: u32,
     pub min_lock_duration_ns: U64,
     pub max_lock_duration_ns: U64,
     pub epoch_unstake_settle_epochs: u64,
     pub min_storage_deposit: NearToken,
+    /// Per active lock; zero disables extra requirement beyond [`Self::min_storage_deposit`].
+    pub per_lock_storage_stake: NearToken,
     pub min_lock_amount: NearToken,
 }
 

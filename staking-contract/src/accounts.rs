@@ -20,8 +20,8 @@ impl Default for Account {
 #[near]
 impl Contract {
     /// NEP-145-style: attach NEAR to register an account for locks and withdrawals.
-    /// **Storage bounds:** the contract does not yet meter per-lock state against this balance; keep
-    /// `min_storage_deposit` high enough for your expected lock count (see `ACTION_ITEMS.md` P2).
+    /// **Storage bounds:** `min_storage_deposit` + `per_lock_storage_stake` × active lock count
+    /// (see [`crate::config::Config`]).
     #[payable]
     pub fn storage_deposit(&mut self) {
         self.assert_not_paused();
@@ -54,12 +54,12 @@ impl Contract {
             .cloned()
             .expect("No account; call storage_deposit");
 
-        let min = self.config.min_storage_deposit.as_yoctonear();
+        let required = self.required_storage_deposit_yocto(&pred, 0);
         let after = acc
             .storage_deposit
             .as_yoctonear()
             .saturating_sub(amount.as_yoctonear());
-        require!(after >= min, "Must retain min_storage_deposit");
+        require!(after >= required, "Must retain required storage (min + per-lock stake)");
 
         acc.storage_deposit = NearToken::from_yoctonear(after);
         self.accounts.insert(pred.clone(), acc);
@@ -73,11 +73,46 @@ impl Contract {
         self.accounts.get(&account_id).cloned()
     }
 
+    /// `extra_locks` = additional locks we are about to add (0 when not creating a lock).
+    pub(crate) fn required_storage_deposit_yocto(
+        &self,
+        account_id: &AccountId,
+        extra_locks: u32,
+    ) -> u128 {
+        let base = self.config.min_storage_deposit.as_yoctonear();
+        let per = self.config.per_lock_storage_stake.as_yoctonear();
+        let cnt = self
+            .user_lock_count
+            .get(account_id)
+            .copied()
+            .unwrap_or(0) as u128;
+        let total_locks = cnt.saturating_add(u128::from(extra_locks));
+        base.saturating_add(per.saturating_mul(total_locks))
+    }
+
+    /// For views and claims: no new lock.
     pub fn ensure_min_storage(&self, account_id: &AccountId) {
-        let a = self.accounts.get(account_id).expect("Account not registered; call storage_deposit");
+        let a = self
+            .accounts
+            .get(account_id)
+            .expect("Account not registered; call storage_deposit");
+        let need = self.required_storage_deposit_yocto(account_id, 0);
         require!(
-            a.storage_deposit >= self.config.min_storage_deposit,
+            a.storage_deposit.as_yoctonear() >= need,
             "Top up storage"
+        );
+    }
+
+    /// Before creating a lock: require prepaid storage for one more lock entry.
+    pub(crate) fn ensure_min_storage_for_new_lock(&self, account_id: &AccountId) {
+        let a = self
+            .accounts
+            .get(account_id)
+            .expect("Account not registered; call storage_deposit");
+        let need = self.required_storage_deposit_yocto(account_id, 1);
+        require!(
+            a.storage_deposit.as_yoctonear() >= need,
+            "Top up storage for another lock"
         );
     }
 }
