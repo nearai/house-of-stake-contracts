@@ -95,7 +95,14 @@ pub fn check_usd_price_lock_burrow_row(
     if price.currency != Currency::Usd {
         return Err("expected Usd price");
     }
-    let den = U256::from(10u128.pow(u32::from(decimals)).max(1));
+    if decimals > 38 {
+        return Err("oracle decimals too large");
+    }
+    let mut den = U256::from(1u8);
+    for _ in 0..decimals {
+        den = den * U256::from(10u8);
+    }
+    let den = den.max(U256::from(1u8));
     let near_per_usd_yocto =
         U256::from(multiplier).saturating_mul(U256::from(10u128.pow(24))) / den;
     let near_equiv =
@@ -128,6 +135,34 @@ mod tests {
     fn mint_pro_rata() {
         let s = mint_shares(2_000, 4_000, 1_000);
         assert_eq!(s, 500);
+    }
+
+    #[test]
+    fn usd_burrow_row_rejects_huge_decimals() {
+        use crate::types::{CatalogStatus, Currency, Price, PriceType};
+        use near_sdk::json_types::U128;
+
+        let price = Price {
+            price_id: "p1".to_string(),
+            product_id: "pr1".to_string(),
+            name: String::new(),
+            description: String::new(),
+            currency: Currency::Usd,
+            amount: U128(1_000_000),
+            price_type: PriceType::OneOff,
+            billing_period: None,
+            lock_factor_near_months: U128(LOCK_FACTOR_DENOM / 10),
+            status: CatalogStatus::Active,
+            usage_count: 0,
+        };
+        let r = check_usd_price_lock_burrow_row(
+            &price,
+            1_000_000_000_000_000_000_000_000,
+            AVG_MONTH_NS,
+            1,
+            50,
+        );
+        assert_eq!(r, Err("oracle decimals too large"));
     }
 
     #[test]

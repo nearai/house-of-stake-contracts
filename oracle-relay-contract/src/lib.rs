@@ -1,11 +1,13 @@
 //! Deploy at the staking contract’s configured `oracle_account_id`. [`OracleRelay::forward`] forwards
-//! attached deposit and user-supplied `price_data`—**unsafe** if arbitrary users can call it: they can
-//! forge oracle rows. Production: restrict callers, verify signatures, or replace `forward` with an
-//! implementation that pulls quotes via XCC from the real Burrow/oracle contract before calling
-//! `oracle_on_call`.
+//! attached deposit and user-supplied `price_data`—**unsafe** if arbitrary users can call it with forged rows.
+//!
+//! **Mitigations:** set [`OracleRelay::forward_caller`] at deploy time to a single bot account that pulls
+//! verified quotes off-chain or via XCC before calling `forward`; use NEAR access keys on the relay account
+//! to restrict callers; or replace `forward` with an implementation that validates signatures / calls Burrow
+//! on-chain before `oracle_on_call`.
 
 use near_sdk::serde::{Deserialize, Serialize};
-use near_sdk::{AccountId, Gas, Promise, env, ext_contract, near};
+use near_sdk::{AccountId, Gas, Promise, env, ext_contract, near, require};
 
 /// Must match `staking-contract` `OraclePriceData` JSON (subset of Burrow `PriceData`).
 #[derive(Clone, Deserialize, Serialize)]
@@ -38,19 +40,25 @@ pub trait StakingOracle {
 const FORWARD_GAS: Gas = Gas::from_tgas(200);
 
 #[near(contract_state)]
-pub struct OracleRelay {}
+pub struct OracleRelay {
+    /// If `Some`, only this account may invoke [`Self::forward`]. If `None`, any account may forward
+    /// (localnet / tests only).
+    pub forward_caller: Option<AccountId>,
+}
 
 impl Default for OracleRelay {
     fn default() -> Self {
-        Self::new()
+        Self {
+            forward_caller: None,
+        }
     }
 }
 
 #[near]
 impl OracleRelay {
     #[init]
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(forward_caller: Option<AccountId>) -> Self {
+        Self { forward_caller }
     }
 
     /// `receiver_id` = house-of-stake staking contract. Forwards full attached deposit and `msg` JSON.
@@ -61,6 +69,12 @@ impl OracleRelay {
         price_data: OraclePriceData,
         msg: String,
     ) -> Promise {
+        if let Some(ref allowed) = self.forward_caller {
+            require!(
+                env::predecessor_account_id() == *allowed,
+                "Only configured forward caller"
+            );
+        }
         let sender_id = env::predecessor_account_id();
         ext_staking::ext(receiver_id)
             .with_attached_deposit(env::attached_deposit())

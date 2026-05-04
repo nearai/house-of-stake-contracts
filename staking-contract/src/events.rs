@@ -1,11 +1,11 @@
-//! `EVENT_JSON` logs for indexers (NEP-297-style payload; standard `stakedao`).
+//! `EVENT_JSON` logs for indexers (NEP-297-style payload; standard `stake.dao`).
 
-use near_sdk::log;
 use near_sdk::AccountId;
+use near_sdk::log;
 
 fn emit(event: &str, data: serde_json::Value) {
     let payload = serde_json::json!({
-        "standard": "stakedao",
+        "standard": "stake.dao",
         "version": "1.0.0",
         "event": event,
         "data": data,

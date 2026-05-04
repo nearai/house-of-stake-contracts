@@ -5,6 +5,8 @@ use near_sdk::{NearToken, env, near, require};
 
 const NS_PER_DAY: u64 = 86_400_000_000_000;
 
+/// Stripe-style **billing anchor day** (1–31). Not the real UTC calendar day-of-month; it is a stable
+/// fingerprint from block time until civil-calendar billing is implemented (see `subscriptions` / `ACTION_ITEMS.md`).
 fn anchor_day_from_timestamp(ts: u64) -> u8 {
     let d = (ts / NS_PER_DAY) % 31;
     (d as u8 + 1).min(31)
@@ -121,7 +123,8 @@ impl Contract {
                     );
                 }
             } else {
-                let start = sub.end_ns.0;
+                // Late renewal: start the new period at `now` if the previous `end_ns` is already in the past.
+                let start = sub.end_ns.0.max(now);
                 let end = crate::subscriptions::add_months_stripe_style(sub.anchor_day, 1, start);
                 sub.start_ns = U64(start);
                 sub.end_ns = U64(end);

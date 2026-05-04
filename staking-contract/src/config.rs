@@ -19,7 +19,8 @@ pub struct Config {
     pub max_lock_duration_ns: U64,
     pub epoch_unstake_settle_epochs: u64,
     pub min_storage_deposit: NearToken,
-    /// Per active lock; zero disables extra requirement beyond [`Self::min_storage_deposit`].
+    /// Per **lock ever created** (see [`crate::Contract::user_lock_count`]); zero disables the extra
+    /// requirement beyond [`Self::min_storage_deposit`].
     pub per_lock_storage_stake: NearToken,
     pub min_lock_amount: NearToken,
 }

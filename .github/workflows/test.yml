@@ -21,25 +21,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # `res/local` is gitignored; integration tests expect prebuilt wasm (see `build_all.sh`).
+      # `res/local` is gitignored; integration tests need wasm from `cargo near build` (see
+      # `build_all.sh`). Plain `cargo build --target wasm32-unknown-unknown` can produce modules
+      # that fail with PrepareError(Deserialization) on the near-workspaces sandbox.
+      - name: Install cargo-near
+        run: cargo install cargo-near --version 0.17.0 --locked --no-default-features
+
       - name: Build contract wasm for integration tests
-        run: |
-          set -euo pipefail
-          mkdir -p res/local
-          cargo build \
-            -p lockup-contract \
-            -p venear-contract \
-            -p voting-contract \
-            -p sandbox-staking-whitelist-contract \
-            -p staking-contract \
-            --target wasm32-unknown-unknown \
-            --release
-          d=target/wasm32-unknown-unknown/release
-          cp "$d/lockup_contract.wasm" res/local/
-          cp "$d/venear_contract.wasm" res/local/
-          cp "$d/voting_contract.wasm" res/local/
-          cp "$d/sandbox_staking_whitelist_contract.wasm" res/local/
-          cp "$d/staking_contract.wasm" res/local/
+        run: bash build_all.sh
 
       - name: cargo test
         run: cargo test --workspace --all-features

@@ -20,8 +20,9 @@ impl Default for Account {
 #[near]
 impl Contract {
     /// NEP-145-style: attach NEAR to register an account for locks and withdrawals.
-    /// **Storage bounds:** `min_storage_deposit` + `per_lock_storage_stake` × active lock count
-    /// (see [`crate::config::Config`]).
+    /// **Storage:** [`crate::config::Config::min_storage_deposit`] +
+    /// [`crate::config::Config::per_lock_storage_stake`] × [`crate::Contract::user_lock_count`] (locks ever
+    /// created; not decremented on unlock).
     #[payable]
     pub fn storage_deposit(&mut self) {
         self.assert_not_paused();

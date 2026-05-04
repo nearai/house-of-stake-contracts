@@ -1,9 +1,8 @@
 //! Sandbox tests for `staking-contract` WASM (Linux CI / Apple Silicon).
 //! Build WASM: `make staking-contract` from `house-of-stake-contracts/`.
 
-use near_sdk::Gas;
-use near_sdk::NearToken;
 use near_workspaces::operations::Function;
+use near_workspaces::types::{Gas, NearToken};
 use serde_json::json;
 
 fn staking_wasm_bytes() -> Result<Vec<u8>, std::io::Error> {

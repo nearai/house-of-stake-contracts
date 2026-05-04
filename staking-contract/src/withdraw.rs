@@ -32,14 +32,20 @@ impl Contract {
         let w = v.pending_to_withdraw;
         let t = v.pending_user_unstake_total;
         require!(
-            w.as_yoctonear() > 0 && t.as_yoctonear() > 0,
+            w.as_yoctonear() > 0,
             "Nothing in withdraw bucket yet; wait for epoch_withdraw"
+        );
+        require!(
+            t.as_yoctonear() > 0,
+            "Nothing to claim (liability total is zero). If the pool bucket still holds NEAR after all users have claimed, call sweep_stranded_withdraw_bucket"
         );
 
         let w_y = w.as_yoctonear();
         let o_y = o.as_yoctonear();
         let t_y = t.as_yoctonear();
 
+        // Pro-rata: credit <= o and sum of credits across users equals min(w, t) when w <= t; when w > t,
+        // the last claims leave stranded NEAR in `pending_to_withdraw` for `sweep_stranded_withdraw_bucket`.
         let mut credit_yocto = w_y.saturating_mul(o_y).checked_div(t_y).unwrap_or(0);
         credit_yocto = credit_yocto.min(o_y).min(w_y);
         require!(credit_yocto > 0, "Nothing to claim (rounding)");
@@ -71,6 +77,31 @@ impl Contract {
         self.validators.insert(validator_pool.clone(), v);
 
         crate::events::log_claim_unlocked(&account_id, &validator_pool);
+    }
+
+    /// When [`Validator::pending_user_unstake_total`] is zero but [`Validator::pending_to_withdraw`] is still
+    /// positive (e.g. pool rounding so `w > t` after the last user claims), transfer that remainder to the
+    /// contract owner.
+    #[payable]
+    pub fn sweep_stranded_withdraw_bucket(&mut self, validator_pool: AccountId) -> Promise {
+        near_sdk::assert_one_yocto();
+        self.assert_not_paused();
+        self.assert_owner();
+
+        let mut v = self
+            .validators
+            .get(&validator_pool)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("Unknown validator"));
+        let w_y = v.pending_to_withdraw.as_yoctonear();
+        let t_y = v.pending_user_unstake_total.as_yoctonear();
+        require!(t_y == 0, "User liability must be zero before sweeping");
+        require!(w_y > 0, "No stranded balance in withdraw bucket");
+
+        v.pending_to_withdraw = NearToken::from_near(0);
+        self.validators.insert(validator_pool, v);
+
+        Promise::new(self.config.owner_account_id.clone()).transfer(NearToken::from_yoctonear(w_y))
     }
 
     /// Withdraw NEAR that has been credited to `withdrawable_balance` after epoch withdraw completes.

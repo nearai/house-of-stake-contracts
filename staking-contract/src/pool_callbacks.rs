@@ -134,11 +134,7 @@ impl Contract {
             .cloned()
             .expect("validator");
         v.tx_status = TransactionStatus::Idle;
-        let credited_yocto = if ok {
-            withdrawn.as_yoctonear()
-        } else {
-            0
-        };
+        let credited_yocto = if ok { withdrawn.as_yoctonear() } else { 0 };
         if ok && credited_yocto > 0 {
             let add = NearToken::from_yoctonear(credited_yocto);
             v.pending_to_withdraw = v
