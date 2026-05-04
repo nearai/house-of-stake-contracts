@@ -70,6 +70,10 @@ impl Contract {
             .expect("Unknown product");
         self.assert_validator_owner(&p.validator_id);
         require!(p.usage_count == 0, "Product in use");
+        require!(
+            p.price_ids.is_empty(),
+            "Remove or delete all prices for this product first"
+        );
         self.products.remove(&product_id);
     }
 

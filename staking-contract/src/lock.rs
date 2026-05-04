@@ -9,7 +9,6 @@ impl Contract {
     /// **v1:** [`Currency::Usd`] prices require a follow-up `lock_for_product_usd` (oracle XCC) — not implemented yet; calling with USD returns an error.
     #[payable]
     pub fn lock_for_product(&mut self, price_id: PriceId, lock_duration_ns: U64) -> LockId {
-        near_sdk::assert_one_yocto();
         self.assert_not_paused();
 
         let buyer = env::predecessor_account_id();
