@@ -5,7 +5,7 @@
 use crate::internal::check_usd_price_lock_burrow_row;
 use crate::*;
 use near_sdk::serde::{Deserialize, Serialize};
-use near_sdk::{env, near, require, AccountId};
+use near_sdk::{AccountId, env, near, require};
 use schemars::JsonSchema;
 
 /// Compatible with Burrow `contracts/common` [`PriceData`] JSON shape (subset).
@@ -72,7 +72,12 @@ impl Contract {
     /// Finish a USD-priced lock using oracle-supplied NEAR/USD (Burrow-style `PriceData`) + JSON intent.
     /// **Attach** the NEAR to lock (relay must forward attached deposit from the user).
     #[payable]
-    pub fn oracle_on_call(&mut self, sender_id: AccountId, price_data: OraclePriceData, msg: String) {
+    pub fn oracle_on_call(
+        &mut self,
+        sender_id: AccountId,
+        price_data: OraclePriceData,
+        msg: String,
+    ) {
         require!(
             env::predecessor_account_id() == self.config.oracle_account_id,
             "Only the configured oracle account may call oracle_on_call"
@@ -82,7 +87,10 @@ impl Contract {
 
         let intent = serde_json::from_str::<LockForProductUsdMsg>(&msg)
             .unwrap_or_else(|_| env::panic_str("invalid oracle msg JSON"));
-        require!(intent.schema_version <= 1, "Unsupported oracle msg schema_version");
+        require!(
+            intent.schema_version <= 1,
+            "Unsupported oracle msg schema_version"
+        );
 
         let locked = env::attached_deposit();
         require!(

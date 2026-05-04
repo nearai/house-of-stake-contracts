@@ -1,6 +1,6 @@
 use crate::*;
 use near_sdk::json_types::U64;
-use near_sdk::{near, AccountId, NearToken};
+use near_sdk::{AccountId, NearToken, near};
 
 #[derive(Clone, Debug)]
 #[near(serializers = [borsh, json])]

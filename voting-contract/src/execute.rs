@@ -1,7 +1,7 @@
 use crate::proposal::{ProposalAction, ProposalId, ProposalStatus};
 use crate::*;
 use common::events;
-use near_sdk::{ext_contract, Gas, Promise, PromiseResult};
+use near_sdk::{Gas, Promise, PromiseResult, ext_contract};
 
 const GAS_FOR_ON_EXECUTE_CALLBACK: Gas = Gas::from_tgas(10);
 

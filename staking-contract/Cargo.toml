@@ -24,6 +24,7 @@ container_build_command = [
 
 [dependencies]
 common = { path = "../common" }
-near-sdk.workspace = true
+# `unit-testing` enables `testing_env!` / `VMContextBuilder` for `tests/*.rs` (host only).
+near-sdk = { workspace = true, features = ["unit-testing"] }
 serde_json.workspace = true
 schemars = { version = "0.8", features = ["derive"] }

@@ -1,7 +1,7 @@
 use crate::internal::{effective_stake_yocto, near_from_shares};
 use crate::*;
 use near_sdk::json_types::U128;
-use near_sdk::{env, near, require, NearToken};
+use near_sdk::{NearToken, env, near, require};
 
 #[near]
 impl Contract {
@@ -21,10 +21,7 @@ impl Contract {
             "Only lock owner"
         );
         require!(lock.status == LockStatus::Active, "Lock not active");
-        require!(
-            env::block_timestamp() >= lock.end_ns.0,
-            "Lock still active"
-        );
+        require!(env::block_timestamp() >= lock.end_ns.0, "Lock still active");
 
         let validator_id = lock.validator_id.clone();
         let mut v = self
@@ -51,11 +48,7 @@ impl Contract {
             .expect("pending user total overflow");
 
         let ukey = (lock.account_id.clone(), validator_id.clone());
-        let us = self
-            .user_validator_shares
-            .get(&ukey)
-            .copied()
-            .unwrap_or(0);
+        let us = self.user_validator_shares.get(&ukey).copied().unwrap_or(0);
         require!(us >= sh, "user shares");
         if us == sh {
             self.user_validator_shares.remove(&ukey);
@@ -68,10 +61,8 @@ impl Contract {
             .get(&ukey)
             .cloned()
             .unwrap_or(NearToken::from_near(0));
-        self.user_pending_unstake.insert(
-            ukey,
-            pending.checked_add(near_token).expect("pending"),
-        );
+        self.user_pending_unstake
+            .insert(ukey, pending.checked_add(near_token).expect("pending"));
 
         let account_log = lock.account_id.clone();
         let validator_log = lock.validator_id.clone();

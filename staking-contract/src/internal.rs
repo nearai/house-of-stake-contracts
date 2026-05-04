@@ -10,10 +10,7 @@ pub const LOCK_FACTOR_DENOM: u128 = 1_000_000_000_000_000_000_000_000;
 /// Average month in nanoseconds: 30.4375 * 86400 * 1e9.
 pub const AVG_MONTH_NS: u128 = 2_629_746_000_000_000_000;
 
-pub fn effective_stake_yocto(
-    total_staked_balance: NearToken,
-    pending_to_stake: NearToken,
-) -> u128 {
+pub fn effective_stake_yocto(total_staked_balance: NearToken, pending_to_stake: NearToken) -> u128 {
     total_staked_balance
         .as_yoctonear()
         .saturating_add(pending_to_stake.as_yoctonear())
@@ -73,9 +70,8 @@ pub fn check_usd_price_lock(
         return Err("expected Usd price");
     }
     let near_equiv = *near_per_usd * price.amount.0;
-    let required_nm = near_equiv
-        .saturating_mul(price.lock_factor_near_months.0)
-        / LOCK_FACTOR_DENOM;
+    let required_nm =
+        near_equiv.saturating_mul(price.lock_factor_near_months.0) / LOCK_FACTOR_DENOM;
     let lhs = U256::from(locked_yocto) * U256::from(duration_ns);
     let rhs = U256::from(required_nm) * U256::from(AVG_MONTH_NS);
     if lhs >= rhs {
@@ -98,16 +94,13 @@ pub fn check_usd_price_lock_burrow_row(
         return Err("expected Usd price");
     }
     let den = U256::from(10u128.pow(u32::from(decimals)).max(1));
-    let near_per_usd_yocto = U256::from(multiplier)
-        .saturating_mul(U256::from(10u128.pow(24)))
-        / den;
-    let near_equiv = near_per_usd_yocto
-        .saturating_mul(U256::from(price.amount.0))
-        / U256::from(1_000_000u128);
+    let near_per_usd_yocto =
+        U256::from(multiplier).saturating_mul(U256::from(10u128.pow(24))) / den;
+    let near_equiv =
+        near_per_usd_yocto.saturating_mul(U256::from(price.amount.0)) / U256::from(1_000_000u128);
     let near_equiv_u128 = near_equiv.as_u128();
-    let required_nm = near_equiv_u128
-        .saturating_mul(price.lock_factor_near_months.0)
-        / LOCK_FACTOR_DENOM;
+    let required_nm =
+        near_equiv_u128.saturating_mul(price.lock_factor_near_months.0) / LOCK_FACTOR_DENOM;
     let lhs = U256::from(locked_yocto) * U256::from(duration_ns);
     let rhs = U256::from(required_nm) * U256::from(AVG_MONTH_NS);
     if lhs >= rhs {
@@ -123,7 +116,10 @@ mod tests {
 
     #[test]
     fn mint_first_deposit_one_to_one() {
-        assert_eq!(mint_shares(0, 0, 1_000_000_000_000_000_000_000_000), 1_000_000_000_000_000_000_000_000);
+        assert_eq!(
+            mint_shares(0, 0, 1_000_000_000_000_000_000_000_000),
+            1_000_000_000_000_000_000_000_000
+        );
     }
 
     #[test]
@@ -151,13 +147,9 @@ mod tests {
             usage_count: 0,
         };
         // 1 NEAR per 1 USD, 1 micro-USD notional, long duration → pass
-        assert!(check_usd_price_lock_burrow_row(
-            &price,
-            10u128.pow(24),
-            AVG_MONTH_NS * 12,
-            1,
-            0,
-        )
-        .is_ok());
+        assert!(
+            check_usd_price_lock_burrow_row(&price, 10u128.pow(24), AVG_MONTH_NS * 12, 1, 0,)
+                .is_ok()
+        );
     }
 }

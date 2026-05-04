@@ -1,7 +1,7 @@
 use crate::*;
 use near_sdk::assert_one_yocto;
 use near_sdk::json_types::U64;
-use near_sdk::{env, near, require, AccountId, NearToken};
+use near_sdk::{AccountId, NearToken, env, near, require};
 
 #[near]
 impl Contract {

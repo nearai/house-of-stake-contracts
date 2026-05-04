@@ -1,6 +1,6 @@
 use crate::*;
-use near_sdk::json_types::{U128, U64};
-use near_sdk::{env, near, require, AccountId, NearToken};
+use near_sdk::json_types::{U64, U128};
+use near_sdk::{AccountId, NearToken, env, near, require};
 
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
@@ -30,7 +30,11 @@ pub struct Validator {
 impl Contract {
     /// Contract owner: add a validator to the allowlist.
     #[payable]
-    pub fn add_validator(&mut self, pool_account_id: AccountId, validator_owner_account_id: AccountId) {
+    pub fn add_validator(
+        &mut self,
+        pool_account_id: AccountId,
+        validator_owner_account_id: AccountId,
+    ) {
         near_sdk::assert_one_yocto();
         self.assert_owner();
         require!(

@@ -2,7 +2,7 @@
 
 pub use crate::types::*;
 use near_sdk::json_types::U64;
-use near_sdk::{env, ext_contract, near, require, AccountId, PanicOnDefault};
+use near_sdk::{AccountId, PanicOnDefault, env, ext_contract, near, require};
 use near_sdk::{Gas, NearToken};
 
 pub mod gas;
@@ -161,7 +161,7 @@ impl LockupContract {
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg(test)]
 mod tests {
-    use near_sdk::{testing_env, AccountId, NearToken, VMContext};
+    use near_sdk::{AccountId, NearToken, VMContext, testing_env};
     use std::convert::TryInto;
     use std::str::FromStr;
     use test_utils::*;

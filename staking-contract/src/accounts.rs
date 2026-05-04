@@ -1,5 +1,5 @@
 use crate::*;
-use near_sdk::{env, near, require, NearToken, Promise};
+use near_sdk::{NearToken, Promise, env, near, require};
 
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
@@ -28,11 +28,7 @@ impl Contract {
         let dep = env::attached_deposit();
         require!(dep.as_yoctonear() > 0, "Attach NEAR for storage");
         let pred = env::predecessor_account_id();
-        let mut acc = self
-            .accounts
-            .get(&pred)
-            .cloned()
-            .unwrap_or_default();
+        let mut acc = self.accounts.get(&pred).cloned().unwrap_or_default();
         acc.storage_deposit = acc
             .storage_deposit
             .checked_add(dep)
@@ -59,7 +55,10 @@ impl Contract {
             .storage_deposit
             .as_yoctonear()
             .saturating_sub(amount.as_yoctonear());
-        require!(after >= required, "Must retain required storage (min + per-lock stake)");
+        require!(
+            after >= required,
+            "Must retain required storage (min + per-lock stake)"
+        );
 
         acc.storage_deposit = NearToken::from_yoctonear(after);
         self.accounts.insert(pred.clone(), acc);
@@ -81,11 +80,7 @@ impl Contract {
     ) -> u128 {
         let base = self.config.min_storage_deposit.as_yoctonear();
         let per = self.config.per_lock_storage_stake.as_yoctonear();
-        let cnt = self
-            .user_lock_count
-            .get(account_id)
-            .copied()
-            .unwrap_or(0) as u128;
+        let cnt = self.user_lock_count.get(account_id).copied().unwrap_or(0) as u128;
         let total_locks = cnt.saturating_add(u128::from(extra_locks));
         base.saturating_add(per.saturating_mul(total_locks))
     }
@@ -97,10 +92,7 @@ impl Contract {
             .get(account_id)
             .expect("Account not registered; call storage_deposit");
         let need = self.required_storage_deposit_yocto(account_id, 0);
-        require!(
-            a.storage_deposit.as_yoctonear() >= need,
-            "Top up storage"
-        );
+        require!(a.storage_deposit.as_yoctonear() >= need, "Top up storage");
     }
 
     /// Before creating a lock: require prepaid storage for one more lock entry.

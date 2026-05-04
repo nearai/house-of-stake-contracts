@@ -1,7 +1,7 @@
 use crate::internal::{check_near_price_lock, effective_stake_yocto, mint_shares};
 use crate::*;
-use near_sdk::json_types::{U128, U64};
-use near_sdk::{env, near, require, NearToken};
+use near_sdk::json_types::{U64, U128};
+use near_sdk::{NearToken, env, near, require};
 
 const NS_PER_DAY: u64 = 86_400_000_000_000;
 
@@ -29,8 +29,7 @@ impl Contract {
 
         let dur = lock_duration_ns.0;
         require!(
-            dur >= self.config.min_lock_duration_ns.0
-                && dur <= self.config.max_lock_duration_ns.0,
+            dur >= self.config.min_lock_duration_ns.0 && dur <= self.config.max_lock_duration_ns.0,
             "lock_duration_ns out of bounds"
         );
 
@@ -77,7 +76,10 @@ impl Contract {
         require!(price_opt.is_some(), "Unknown price");
         let price = price_opt.unwrap();
         require!(price.status == CatalogStatus::Active, "Price not active");
-        require!(price.price_type == PriceType::Recurring, "Not a subscription price");
+        require!(
+            price.price_type == PriceType::Recurring,
+            "Not a subscription price"
+        );
         require!(
             price.billing_period == Some(BillingPeriod::Monthly),
             "Only monthly billing is supported"
@@ -90,7 +92,10 @@ impl Contract {
         let product_opt = self.products.get(&price.product_id).cloned();
         require!(product_opt.is_some(), "Unknown product");
         let product = product_opt.unwrap();
-        require!(product.status == CatalogStatus::Active, "Product not active");
+        require!(
+            product.status == CatalogStatus::Active,
+            "Product not active"
+        );
 
         let validator_id = product.validator_id.clone();
         self.assert_validator_active_for_lock(&validator_id);
@@ -98,47 +103,48 @@ impl Contract {
         let sub_key = (buyer.clone(), price_id.clone());
         let now = env::block_timestamp();
 
-        let (mut subscription, sub_id, is_new_index) =
-            if let Some(sid_ref) = self.subscription_by_account_price.get(&sub_key) {
-                let sid = sid_ref.clone();
-                let mut sub = self
-                    .subscriptions
-                    .get(sid_ref.as_str())
-                    .cloned()
-                    .unwrap_or_else(|| env::panic_str("Unknown subscription"));
-                require!(sub.account_id == buyer, "Subscription account mismatch");
-                if now < sub.end_ns.0 {
-                    if let Some(prev) = self.locks.get(&sub.last_lock_id) {
-                        require!(
-                            prev.status != LockStatus::Active,
-                            "This subscription period already has an active lock"
-                        );
-                    }
-                } else {
-                    let start = sub.end_ns.0;
-                    let end = crate::subscriptions::add_months_stripe_style(sub.anchor_day, 1, start);
-                    sub.start_ns = U64(start);
-                    sub.end_ns = U64(end);
-                    sub.status = SubscriptionStatus::Active;
+        let (mut subscription, sub_id, is_new_index) = if let Some(sid_ref) =
+            self.subscription_by_account_price.get(&sub_key)
+        {
+            let sid = sid_ref.clone();
+            let mut sub = self
+                .subscriptions
+                .get(sid_ref.as_str())
+                .cloned()
+                .unwrap_or_else(|| env::panic_str("Unknown subscription"));
+            require!(sub.account_id == buyer, "Subscription account mismatch");
+            if now < sub.end_ns.0 {
+                if let Some(prev) = self.locks.get(&sub.last_lock_id) {
+                    require!(
+                        prev.status != LockStatus::Active,
+                        "This subscription period already has an active lock"
+                    );
                 }
-                (sub, sid, false)
             } else {
-                let anchor = anchor_day_from_timestamp(now);
-                let end = crate::subscriptions::add_months_stripe_style(anchor, 1, now);
-                let sid = crate::ids::next_subscription_id(&mut self.id_nonce);
-                let sub = Subscription {
-                    subscription_id: sid.clone(),
-                    account_id: buyer.clone(),
-                    product_id: product.product_id.clone(),
-                    price_id: price_id.clone(),
-                    start_ns: U64(now),
-                    end_ns: U64(end),
-                    anchor_day: anchor,
-                    last_lock_id: String::new(),
-                    status: SubscriptionStatus::Active,
-                };
-                (sub, sid, true)
+                let start = sub.end_ns.0;
+                let end = crate::subscriptions::add_months_stripe_style(sub.anchor_day, 1, start);
+                sub.start_ns = U64(start);
+                sub.end_ns = U64(end);
+                sub.status = SubscriptionStatus::Active;
+            }
+            (sub, sid, false)
+        } else {
+            let anchor = anchor_day_from_timestamp(now);
+            let end = crate::subscriptions::add_months_stripe_style(anchor, 1, now);
+            let sid = crate::ids::next_subscription_id(&mut self.id_nonce);
+            let sub = Subscription {
+                subscription_id: sid.clone(),
+                account_id: buyer.clone(),
+                product_id: product.product_id.clone(),
+                price_id: price_id.clone(),
+                start_ns: U64(now),
+                end_ns: U64(end),
+                anchor_day: anchor,
+                last_lock_id: String::new(),
+                status: SubscriptionStatus::Active,
             };
+            (sub, sid, true)
+        };
 
         require!(subscription.end_ns.0 > now, "Invalid subscription period");
         let duration_ns = u128::from(subscription.end_ns.0.saturating_sub(now));
@@ -154,8 +160,7 @@ impl Contract {
             period_end_ns: subscription.end_ns,
         };
 
-        let lock_id = self
-            .finalize_lock_common(buyer, price, product, locked, duration_ns, order);
+        let lock_id = self.finalize_lock_common(buyer, price, product, locked, duration_ns, order);
 
         subscription.last_lock_id = lock_id.clone();
         self.subscriptions.insert(sub_id.clone(), subscription);
@@ -179,7 +184,9 @@ impl Contract {
         account_id: AccountId,
         price_id: PriceId,
     ) -> Option<Subscription> {
-        let sid = self.subscription_by_account_price.get(&(account_id, price_id))?;
+        let sid = self
+            .subscription_by_account_price
+            .get(&(account_id, price_id))?;
         self.subscriptions.get(sid.as_str()).cloned()
     }
 }
@@ -227,11 +234,7 @@ impl Contract {
             .expect("pending stake");
 
         let key = (buyer.clone(), validator_id.clone());
-        let prev = self
-            .user_validator_shares
-            .get(&key)
-            .copied()
-            .unwrap_or(0);
+        let prev = self.user_validator_shares.get(&key).copied().unwrap_or(0);
         self.user_validator_shares
             .insert(key, prev.saturating_add(new_shares));
 
@@ -243,9 +246,8 @@ impl Contract {
             amount_near: locked,
             shares: U128(new_shares),
             start_ns: U64(env::block_timestamp()),
-            end_ns: U64(env::block_timestamp().saturating_add(
-                u64::try_from(duration_ns).unwrap_or(u64::MAX),
-            )),
+            end_ns: U64(env::block_timestamp()
+                .saturating_add(u64::try_from(duration_ns).unwrap_or(u64::MAX))),
             order,
             status: LockStatus::Active,
         };
@@ -257,11 +259,7 @@ impl Contract {
         self.products.insert(product.product_id.clone(), product);
         self.validators.insert(validator_id, v);
 
-        let cnt = self
-            .user_lock_count
-            .get(&buyer)
-            .copied()
-            .unwrap_or(0);
+        let cnt = self.user_lock_count.get(&buyer).copied().unwrap_or(0);
         self.user_lock_count
             .insert(buyer.clone(), cnt.saturating_add(1));
 

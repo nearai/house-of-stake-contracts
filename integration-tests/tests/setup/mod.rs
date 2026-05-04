@@ -640,10 +640,8 @@ impl VenearTestWorkspace {
             | ProposalStatus::Succeeded
             | ProposalStatus::Defeated
             | ProposalStatus::Executable => {
-                let voting_start: u64 = proposal["voting_start_time_ns"]
-                    .as_str()
-                    .unwrap()
-                    .parse()?;
+                let voting_start: u64 =
+                    proposal["voting_start_time_ns"].as_str().unwrap().parse()?;
                 let voting_duration: u64 =
                     proposal["voting_duration_ns"].as_str().unwrap().parse()?;
                 let timelock_duration: u64 =

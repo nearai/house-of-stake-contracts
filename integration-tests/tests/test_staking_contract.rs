@@ -1,8 +1,8 @@
-//! Smoke test: deploy `staking-contract`, call `new`, read `get_config`.
-//! Requires WASM at `res/local/staking_contract.wasm` or `target/near/...` — run `make staking-contract`
-//! from `house-of-stake-contracts/`.
+//! Sandbox tests for `staking-contract` WASM (Linux CI / Apple Silicon).
+//! Build WASM: `make staking-contract` from `house-of-stake-contracts/`.
 
 use near_sdk::Gas;
+use near_sdk::NearToken;
 use near_workspaces::operations::Function;
 use serde_json::json;
 
@@ -23,14 +23,8 @@ fn staking_wasm_bytes() -> Result<Vec<u8>, std::io::Error> {
     ))
 }
 
-#[tokio::test]
-async fn staking_contract_deploy_and_get_config() -> Result<(), Box<dyn std::error::Error>> {
-    let wasm = staking_wasm_bytes().map_err(|e| format!("{e}"))?;
-    let worker = near_workspaces::sandbox().await?;
-    let contract_account = worker.dev_create_account().await?;
-    let owner = contract_account.id().clone();
-
-    let args = json!({
+fn staking_new_args(owner: &near_workspaces::AccountId) -> serde_json::Value {
+    json!({
         "config": {
             "owner_account_id": owner,
             "proposed_new_owner_account_id": null,
@@ -46,14 +40,22 @@ async fn staking_contract_deploy_and_get_config() -> Result<(), Box<dyn std::err
             "per_lock_storage_stake": "0",
             "min_lock_amount": "1000000000000000000000",
         }
-    });
+    })
+}
+
+#[tokio::test]
+async fn staking_contract_deploy_and_get_config() -> Result<(), Box<dyn std::error::Error>> {
+    let wasm = staking_wasm_bytes().map_err(|e| format!("{e}"))?;
+    let worker = near_workspaces::sandbox().await?;
+    let contract_account = worker.dev_create_account().await?;
+    let owner = contract_account.id().clone();
 
     let outcome = contract_account
         .batch(contract_account.id())
         .deploy(&wasm)
         .call(
             Function::new("new")
-                .args_json(args)
+                .args_json(staking_new_args(&owner))
                 .gas(Gas::from_tgas(50)),
         )
         .transact()
@@ -70,6 +72,46 @@ async fn staking_contract_deploy_and_get_config() -> Result<(), Box<dyn std::err
         .json()?;
     let oid = config["owner_account_id"].as_str().expect("owner");
     assert_eq!(oid, owner.as_str());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn staking_contract_storage_deposit_get_account() -> Result<(), Box<dyn std::error::Error>> {
+    let wasm = staking_wasm_bytes().map_err(|e| format!("{e}"))?;
+    let worker = near_workspaces::sandbox().await?;
+    let contract_account = worker.dev_create_account().await?;
+    let owner = contract_account.id().clone();
+
+    let outcome = contract_account
+        .batch(contract_account.id())
+        .deploy(&wasm)
+        .call(
+            Function::new("new")
+                .args_json(staking_new_args(&owner))
+                .gas(Gas::from_tgas(50)),
+        )
+        .transact()
+        .await?;
+    assert!(outcome.is_success(), "deploy+init failed");
+
+    let user = worker.dev_create_account().await?;
+    user.call(contract_account.id(), "storage_deposit")
+        .deposit(NearToken::from_millinear(500))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await?
+        .into_result()?;
+
+    let acc: serde_json::Value = worker
+        .view(contract_account.id(), "get_account")
+        .args_json(json!({ "account_id": user.id() }))
+        .await?
+        .json()?;
+    let storage = acc["storage_deposit"]
+        .as_str()
+        .expect("storage_deposit string");
+    assert_ne!(storage, "0");
 
     Ok(())
 }

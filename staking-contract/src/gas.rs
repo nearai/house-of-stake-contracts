@@ -18,8 +18,8 @@ pub mod oracle {
 }
 
 pub mod callbacks {
-    use near_sdk::Gas;
     use super::BASE_GAS;
+    use near_sdk::Gas;
     pub const ON_DEPOSIT_AND_STAKE: Gas = BASE_GAS;
     pub const ON_UNSTAKE: Gas = BASE_GAS;
     /// May chain a second promise to `withdraw` on the pool.

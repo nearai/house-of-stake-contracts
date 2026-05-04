@@ -1,5 +1,5 @@
 use crate::*;
-use near_sdk::{env, near, require, NearToken, Promise};
+use near_sdk::{NearToken, Promise, env, near, require};
 
 #[near]
 impl Contract {
@@ -19,7 +19,10 @@ impl Contract {
             .get(&ukey)
             .cloned()
             .unwrap_or(NearToken::from_near(0));
-        require!(o.as_yoctonear() > 0, "No pending unlocked NEAR for this validator");
+        require!(
+            o.as_yoctonear() > 0,
+            "No pending unlocked NEAR for this validator"
+        );
 
         let mut v = self
             .validators
@@ -37,16 +40,15 @@ impl Contract {
         let o_y = o.as_yoctonear();
         let t_y = t.as_yoctonear();
 
-        let mut credit_yocto = w_y
-            .saturating_mul(o_y)
-            .checked_div(t_y)
-            .unwrap_or(0);
+        let mut credit_yocto = w_y.saturating_mul(o_y).checked_div(t_y).unwrap_or(0);
         credit_yocto = credit_yocto.min(o_y).min(w_y);
         require!(credit_yocto > 0, "Nothing to claim (rounding)");
 
         let credit = NearToken::from_yoctonear(credit_yocto);
 
-        v.pending_to_withdraw = w.checked_sub(credit).expect("pending_to_withdraw underflow");
+        v.pending_to_withdraw = w
+            .checked_sub(credit)
+            .expect("pending_to_withdraw underflow");
         v.pending_user_unstake_total = t.checked_sub(credit).expect("total underflow");
 
         let new_o = o.checked_sub(credit).expect("user pending underflow");

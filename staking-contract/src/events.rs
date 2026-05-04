@@ -1,10 +1,13 @@
 //! `EVENT_JSON` logs for indexers (standard: `stakedao`).
 
-use near_sdk::log;
 use near_sdk::AccountId;
+use near_sdk::log;
 
 pub fn log_validator_added(pool: &AccountId) {
-    log!("EVENT_JSON:{{\"standard\":\"stakedao\",\"event\":\"validator_add\",\"pool\":\"{}\"}}", pool);
+    log!(
+        "EVENT_JSON:{{\"standard\":\"stakedao\",\"event\":\"validator_add\",\"pool\":\"{}\"}}",
+        pool
+    );
 }
 
 pub fn log_product_created(product_id: &str, validator_id: &AccountId) {

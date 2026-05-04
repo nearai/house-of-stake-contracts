@@ -17,9 +17,7 @@ use crate::epoch::{ext_self_epoch, ext_staking_pool};
 use crate::gas::{callbacks, staking_pool};
 use crate::*;
 use near_sdk::json_types::U64;
-use near_sdk::{
-    env, is_promise_success, near, require, NearToken, PromiseOrValue,
-};
+use near_sdk::{NearToken, PromiseOrValue, env, is_promise_success, near, require};
 
 #[near]
 impl Contract {
@@ -148,9 +146,7 @@ impl Contract {
         let credited_yocto = if ok {
             if let Some(b) = before {
                 let after = env::account_balance().as_yoctonear();
-                after
-                    .saturating_sub(b)
-                    .min(withdrawn.as_yoctonear())
+                after.saturating_sub(b).min(withdrawn.as_yoctonear())
             } else {
                 withdrawn.as_yoctonear()
             }
@@ -163,10 +159,7 @@ impl Contract {
                 .pending_to_withdraw
                 .checked_add(add)
                 .expect("pending_to_withdraw overflow");
-            crate::events::log_pool_withdraw_in(
-                credited_yocto,
-                &validator_pool,
-            );
+            crate::events::log_pool_withdraw_in(credited_yocto, &validator_pool);
         }
         self.validators.insert(validator_pool, v);
         ok

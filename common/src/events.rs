@@ -4,7 +4,7 @@ pub mod emit {
     use super::*;
     use crate::TimestampNs;
     use near_sdk::json_types::U64;
-    use near_sdk::{log, AccountId, NearToken};
+    use near_sdk::{AccountId, NearToken, log};
 
     #[derive(Serialize)]
     #[serde(crate = "near_sdk::serde")]
@@ -224,10 +224,10 @@ pub mod emit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use near_sdk::NearToken;
     use near_sdk::json_types::U64;
     use near_sdk::serde::Serialize;
-    use near_sdk::NearToken;
-    use near_sdk::{serde_json, AccountId};
+    use near_sdk::{AccountId, serde_json};
 
     #[test]
     fn test_option_u64_serializer() {

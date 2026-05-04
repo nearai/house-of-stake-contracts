@@ -27,7 +27,7 @@ pub use types::*;
 pub use validators::Validator;
 
 use near_sdk::store::{LookupMap, Vector};
-use near_sdk::{near, AccountId, BorshStorageKey, NearToken, PanicOnDefault};
+use near_sdk::{AccountId, BorshStorageKey, NearToken, PanicOnDefault, near};
 
 #[derive(BorshStorageKey)]
 #[near]

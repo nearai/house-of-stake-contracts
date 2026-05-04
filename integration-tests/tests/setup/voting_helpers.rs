@@ -1,7 +1,7 @@
-use super::{VenearTestWorkspace, VOTING_WASM_FILEPATH};
-use voting_contract::proposal::VoteOption;
+use super::{VOTING_WASM_FILEPATH, VenearTestWorkspace};
 use near_sdk::{Gas, NearToken};
 use serde_json::json;
+use voting_contract::proposal::VoteOption;
 
 pub async fn attempt_voting_upgrade(
     user: &near_workspaces::Account,

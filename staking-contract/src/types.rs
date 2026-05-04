@@ -1,7 +1,7 @@
 //! Catalog and lifecycle enums.
 
-use near_sdk::json_types::{U128, U64};
-use near_sdk::{near, AccountId, NearToken};
+use near_sdk::json_types::{U64, U128};
+use near_sdk::{AccountId, NearToken, near};
 
 /// Stripe-style string IDs (generated in [`crate::ids`]).
 pub type ProductId = String;

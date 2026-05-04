@@ -3,7 +3,7 @@
 //! contract with `sender_id` set to the **caller** (Burrow test-oracle pattern).
 
 use near_sdk::serde::{Deserialize, Serialize};
-use near_sdk::{env, ext_contract, near, AccountId, Gas, Promise};
+use near_sdk::{AccountId, Gas, Promise, env, ext_contract, near};
 
 /// Must match `staking-contract` `OraclePriceData` JSON (subset of Burrow `PriceData`).
 #[derive(Clone, Deserialize, Serialize)]
@@ -30,18 +30,19 @@ pub struct OracleBurrowPrice {
 
 #[ext_contract(ext_staking)]
 pub trait StakingOracle {
-    fn oracle_on_call(
-        &mut self,
-        sender_id: AccountId,
-        price_data: OraclePriceData,
-        msg: String,
-    );
+    fn oracle_on_call(&mut self, sender_id: AccountId, price_data: OraclePriceData, msg: String);
 }
 
 const FORWARD_GAS: Gas = Gas::from_tgas(200);
 
 #[near(contract_state)]
 pub struct OracleRelay {}
+
+impl Default for OracleRelay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[near]
 impl OracleRelay {

@@ -1,8 +1,8 @@
+use crate::events;
 use crate::gas::{callbacks, staking_pool};
 use crate::*;
-use crate::events;
 use near_sdk::ext_contract;
-use near_sdk::{env, near, require, AccountId, NearToken, Promise, PromiseOrValue};
+use near_sdk::{AccountId, NearToken, Promise, PromiseOrValue, env, near, require};
 
 #[ext_contract(ext_self_epoch)]
 pub trait ExtSelfEpoch {

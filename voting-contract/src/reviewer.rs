@@ -1,8 +1,8 @@
 use crate::proposal::{ProposalInfo, ProposalStatus, SnapshotAndState};
 use crate::*;
 use common::global_state::{GlobalState, VGlobalState};
-use common::{events, TimestampNs};
-use near_sdk::{assert_one_yocto, ext_contract, Gas, Promise};
+use common::{TimestampNs, events};
+use near_sdk::{Gas, Promise, assert_one_yocto, ext_contract};
 
 pub const GAS_FOR_ON_GET_SNAPSHOT: Gas = Gas::from_tgas(30);
 

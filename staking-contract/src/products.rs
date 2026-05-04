@@ -1,5 +1,5 @@
 use crate::*;
-use near_sdk::json_types::{U128, U64};
+use near_sdk::json_types::{U64, U128};
 use near_sdk::{env, near, require};
 
 #[near]
