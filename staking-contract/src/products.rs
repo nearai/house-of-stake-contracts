@@ -34,7 +34,11 @@ impl Contract {
     pub fn edit_product(&mut self, product_id: ProductId, name: String, description: String) {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
-        let mut p = self.products.get(&product_id).expect("Unknown product");
+        let mut p = self
+            .products
+            .get(&product_id)
+            .cloned()
+            .expect("Unknown product");
         self.assert_validator_owner(&p.validator_id);
         p.name = name;
         p.description = description;
@@ -45,7 +49,11 @@ impl Contract {
     pub fn archive_product(&mut self, product_id: ProductId) {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
-        let mut p = self.products.get(&product_id).expect("Unknown product");
+        let mut p = self
+            .products
+            .get(&product_id)
+            .cloned()
+            .expect("Unknown product");
         self.assert_validator_owner(&p.validator_id);
         p.status = CatalogStatus::Archived;
         self.products.insert(product_id, p);
@@ -55,7 +63,11 @@ impl Contract {
     pub fn delete_product(&mut self, product_id: ProductId) {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
-        let p = self.products.get(&product_id).expect("Unknown product");
+        let p = self
+            .products
+            .get(&product_id)
+            .cloned()
+            .expect("Unknown product");
         self.assert_validator_owner(&p.validator_id);
         require!(p.usage_count == 0, "Product in use");
         self.products.remove(&product_id);
@@ -75,7 +87,11 @@ impl Contract {
     ) -> PriceId {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
-        let mut product = self.products.get(&product_id).expect("Unknown product");
+        let mut product = self
+            .products
+            .get(&product_id)
+            .cloned()
+            .expect("Unknown product");
         self.assert_validator_owner(&product.validator_id);
         require!(product.status == CatalogStatus::Active, "Product archived");
 
@@ -103,10 +119,15 @@ impl Contract {
     pub fn edit_price(&mut self, price_id: PriceId, name: String, description: String) {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
-        let mut pr = self.prices.get(&price_id).expect("Unknown price");
+        let mut pr = self
+            .prices
+            .get(&price_id)
+            .cloned()
+            .expect("Unknown price");
         let product = self
             .products
             .get(&pr.product_id)
+            .cloned()
             .expect("Unknown product");
         self.assert_validator_owner(&product.validator_id);
         pr.name = name;
@@ -118,10 +139,15 @@ impl Contract {
     pub fn archive_price(&mut self, price_id: PriceId) {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
-        let mut pr = self.prices.get(&price_id).expect("Unknown price");
+        let mut pr = self
+            .prices
+            .get(&price_id)
+            .cloned()
+            .expect("Unknown price");
         let product = self
             .products
             .get(&pr.product_id)
+            .cloned()
             .expect("Unknown product");
         self.assert_validator_owner(&product.validator_id);
         pr.status = CatalogStatus::Archived;
@@ -132,10 +158,11 @@ impl Contract {
     pub fn delete_price(&mut self, price_id: PriceId) {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
-        let pr = self.prices.get(&price_id).expect("Unknown price");
+        let pr = self.prices.get(&price_id).cloned().expect("Unknown price");
         let mut product = self
             .products
             .get(&pr.product_id)
+            .cloned()
             .expect("Unknown product");
         self.assert_validator_owner(&product.validator_id);
         require!(pr.usage_count == 0, "Price in use");
@@ -145,10 +172,10 @@ impl Contract {
     }
 
     pub fn get_product(&self, product_id: ProductId) -> Option<Product> {
-        self.products.get(&product_id)
+        self.products.get(&product_id).cloned()
     }
 
     pub fn get_price(&self, price_id: PriceId) -> Option<Price> {
-        self.prices.get(&price_id)
+        self.prices.get(&price_id).cloned()
     }
 }

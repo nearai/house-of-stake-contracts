@@ -1,6 +1,7 @@
 use crate::*;
 use near_sdk::{env, near, require, NearToken};
 
+#[derive(Clone)]
 #[near(serializers = [borsh, json])]
 pub struct Account {
     pub storage_deposit: NearToken,
@@ -25,7 +26,11 @@ impl Contract {
         let dep = env::attached_deposit();
         require!(dep.as_yoctonear() > 0, "Attach NEAR for storage");
         let pred = env::predecessor_account_id();
-        let mut acc = self.accounts.get(&pred).unwrap_or_default();
+        let mut acc = self
+            .accounts
+            .get(&pred)
+            .cloned()
+            .unwrap_or_default();
         acc.storage_deposit = acc
             .storage_deposit
             .checked_add(dep)
@@ -36,7 +41,7 @@ impl Contract {
 
 impl Contract {
     pub fn get_account(&self, account_id: AccountId) -> Option<Account> {
-        self.accounts.get(&account_id)
+        self.accounts.get(&account_id).cloned()
     }
 
     pub fn ensure_min_storage(&self, account_id: &AccountId) {

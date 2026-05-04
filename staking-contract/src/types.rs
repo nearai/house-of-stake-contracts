@@ -83,6 +83,7 @@ pub enum OrderRef {
     },
 }
 
+#[derive(Clone)]
 #[near(serializers = [borsh, json])]
 pub struct Product {
     pub product_id: ProductId,
@@ -95,6 +96,7 @@ pub struct Product {
     pub usage_count: u64,
 }
 
+#[derive(Clone)]
 #[near(serializers = [borsh, json])]
 pub struct Price {
     pub price_id: PriceId,
@@ -111,6 +113,7 @@ pub struct Price {
     pub usage_count: u64,
 }
 
+#[derive(Clone)]
 #[near(serializers = [borsh, json])]
 pub struct Subscription {
     pub subscription_id: SubscriptionId,
@@ -124,6 +127,7 @@ pub struct Subscription {
     pub status: SubscriptionStatus,
 }
 
+#[derive(Clone)]
 #[near(serializers = [borsh, json])]
 pub struct Lock {
     pub lock_id: LockId,

@@ -55,12 +55,12 @@ impl Contract {
     }
 
     pub fn list_validator_ids(&self, from_index: u64, limit: u64) -> Vec<AccountId> {
-        let len = self.validator_ids.len();
+        let len_u64 = self.validator_ids.len() as u64;
         let mut out = Vec::new();
         let mut i = from_index;
-        while i < len && (out.len() as u64) < limit {
-            if let Some(id) = self.validator_ids.get(i) {
-                out.push(id);
+        while i < len_u64 && (out.len() as u64) < limit {
+            if let Some(id) = self.validator_ids.get(i as u32) {
+                out.push(id.clone());
             }
             i += 1;
         }
@@ -71,7 +71,11 @@ impl Contract {
     pub fn set_validator_owner(&mut self, pool_account_id: AccountId, new_owner: AccountId) {
         near_sdk::assert_one_yocto();
         self.assert_owner();
-        let mut v = self.validators.get(&pool_account_id).expect("Unknown validator");
+        let mut v = self
+            .validators
+            .get(&pool_account_id)
+            .cloned()
+            .expect("Unknown validator");
         v.owner_account_id = new_owner;
         self.validators.insert(pool_account_id, v);
     }
@@ -80,7 +84,11 @@ impl Contract {
     pub fn pause_validator(&mut self, pool_account_id: AccountId) {
         near_sdk::assert_one_yocto();
         self.assert_owner();
-        let mut v = self.validators.get(&pool_account_id).expect("Unknown validator");
+        let mut v = self
+            .validators
+            .get(&pool_account_id)
+            .cloned()
+            .expect("Unknown validator");
         v.status = ValidatorStatus::Paused;
         self.validators.insert(pool_account_id, v);
     }
@@ -89,7 +97,11 @@ impl Contract {
     pub fn remove_validator(&mut self, pool_account_id: AccountId) {
         near_sdk::assert_one_yocto();
         self.assert_owner();
-        let v = self.validators.get(&pool_account_id).expect("Unknown validator");
+        let v = self
+            .validators
+            .get(&pool_account_id)
+            .cloned()
+            .expect("Unknown validator");
         require!(
             v.total_shares.0 == 0
                 && v.pending_to_stake.as_yoctonear() == 0

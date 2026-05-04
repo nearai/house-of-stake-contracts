@@ -14,6 +14,7 @@ impl Contract {
         let mut v = self
             .validators
             .get(&validator_pool)
+            .cloned()
             .expect("validator");
 
         v.tx_status = TransactionStatus::Idle;
@@ -41,6 +42,7 @@ impl Contract {
         let mut v = self
             .validators
             .get(&validator_pool)
+            .cloned()
             .expect("validator");
         v.tx_status = TransactionStatus::Idle;
         if ok {
@@ -76,8 +78,8 @@ impl Contract {
     #[private]
     pub fn on_refresh_total_balance(
         &mut self,
-        validator_pool: AccountId,
         #[callback] total_balance: NearToken,
+        validator_pool: AccountId,
     ) {
         require!(
             env::predecessor_account_id() == env::current_account_id(),
@@ -86,6 +88,7 @@ impl Contract {
         let mut v = self
             .validators
             .get(&validator_pool)
+            .cloned()
             .expect("validator");
         v.tx_status = TransactionStatus::Idle;
         if is_promise_success() {

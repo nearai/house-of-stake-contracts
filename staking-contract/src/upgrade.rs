@@ -1,7 +1,12 @@
 use crate::*;
-use near_sdk::{env, sys, Gas};
+use near_sdk::env;
 
+#[cfg(target_arch = "wasm32")]
+use near_sdk::{sys, Gas};
+
+#[cfg(target_arch = "wasm32")]
 const MIGRATE_STATE_GAS: Gas = Gas::from_tgas(50);
+#[cfg(target_arch = "wasm32")]
 const GET_CONFIG_GAS: Gas = Gas::from_tgas(5);
 
 #[near]

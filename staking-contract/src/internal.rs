@@ -1,7 +1,7 @@
 //! Share minting and pricing helpers.
 
 use crate::{Currency, Price};
-use common::types::{Fraction, U256};
+use common::{Fraction, U256};
 use near_sdk::NearToken;
 
 /// Fixed-point denominator for `Price.lock_factor_near_months`.

@@ -10,7 +10,7 @@ impl Contract {
         self.assert_not_paused();
 
         let pred = env::predecessor_account_id();
-        let mut acc = self.accounts.get(&pred).expect("No account");
+        let mut acc = self.accounts.get(&pred).cloned().expect("No account");
         let bal = acc.withdrawable_balance.as_yoctonear();
         let withdraw_yocto = match amount {
             Some(a) => {

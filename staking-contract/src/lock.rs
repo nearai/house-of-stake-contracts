@@ -28,10 +28,11 @@ impl Contract {
             "lock_duration_ns out of bounds"
         );
 
-        let price = self.prices.get(&price_id).expect("Unknown price");
+        let price = self.prices.get(&price_id).cloned().expect("Unknown price");
         let product = self
             .products
             .get(&price.product_id)
+            .cloned()
             .expect("Unknown product");
         require!(price.status == CatalogStatus::Active, "Price not active");
         require!(
@@ -46,13 +47,14 @@ impl Contract {
         let validator_id = product.validator_id.clone();
         self.assert_validator_active_for_lock(&validator_id);
 
-        check_near_price_lock(&price, locked.as_yoctonear(), dur).expect("price check");
+        let dur_u128 = u128::from(dur);
+        check_near_price_lock(&price, locked.as_yoctonear(), dur_u128).expect("price check");
 
-        self.finalize_product_lock(buyer, price_id, price, product, locked, dur)
+        self.finalize_product_lock(buyer, price_id, price, product, locked, dur_u128)
     }
 
     pub fn get_lock(&self, lock_id: LockId) -> Option<Lock> {
-        self.locks.get(&lock_id)
+        self.locks.get(&lock_id).cloned()
     }
 }
 
@@ -70,6 +72,7 @@ impl Contract {
         let mut v = self
             .validators
             .get(&validator_id)
+            .cloned()
             .expect("validator");
 
         let eff = effective_stake_yocto(v.total_staked_balance, v.pending_to_stake);
@@ -83,7 +86,11 @@ impl Contract {
             .expect("pending stake");
 
         let key = (buyer.clone(), validator_id.clone());
-        let prev = self.user_validator_shares.get(&key).unwrap_or(0);
+        let prev = self
+            .user_validator_shares
+            .get(&key)
+            .copied()
+            .unwrap_or(0);
         self.user_validator_shares
             .insert(key, prev.saturating_add(new_shares));
 
@@ -95,7 +102,9 @@ impl Contract {
             amount_near: locked,
             shares: U128(new_shares),
             start_ns: U64(env::block_timestamp()),
-            end_ns: U64(env::block_timestamp().saturating_add(duration_ns)),
+            end_ns: U64(env::block_timestamp().saturating_add(
+                u64::try_from(duration_ns).unwrap_or(u64::MAX),
+            )),
             order: OrderRef::ProductPurchase {
                 product_id: product.product_id.clone(),
                 price_id: price_id.clone(),

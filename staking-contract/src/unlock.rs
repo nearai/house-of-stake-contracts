@@ -11,7 +11,7 @@ impl Contract {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
 
-        let mut lock = self.locks.get(&lock_id).expect("Unknown lock");
+        let mut lock = self.locks.get(&lock_id).cloned().expect("Unknown lock");
         require!(
             env::predecessor_account_id() == lock.account_id,
             "Only lock owner"
@@ -26,6 +26,7 @@ impl Contract {
         let mut v = self
             .validators
             .get(&validator_id)
+            .cloned()
             .expect("validator");
 
         let eff = effective_stake_yocto(v.total_staked_balance, v.pending_to_stake);
@@ -41,7 +42,11 @@ impl Contract {
             .expect("pending unstake overflow");
 
         let ukey = (lock.account_id.clone(), validator_id.clone());
-        let us = self.user_validator_shares.get(&ukey).unwrap_or(0);
+        let us = self
+            .user_validator_shares
+            .get(&ukey)
+            .copied()
+            .unwrap_or(0);
         require!(us >= sh, "user shares");
         if us == sh {
             self.user_validator_shares.remove(&ukey);
@@ -49,7 +54,11 @@ impl Contract {
             self.user_validator_shares.insert(ukey.clone(), us - sh);
         }
 
-        let pending = self.user_pending_unstake.get(&ukey).unwrap_or(NearToken::from_near(0));
+        let pending = self
+            .user_pending_unstake
+            .get(&ukey)
+            .cloned()
+            .unwrap_or(NearToken::from_near(0));
         self.user_pending_unstake.insert(
             ukey,
             pending

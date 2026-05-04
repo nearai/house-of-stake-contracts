@@ -6,7 +6,11 @@ use near_sdk::{env, near, require, AccountId, NearToken, Promise};
 #[ext_contract(ext_self_epoch)]
 pub trait ExtSelfEpoch {
     fn on_deposit_and_stake(&mut self, validator_pool: AccountId, amount: NearToken) -> bool;
-    fn on_refresh_total_balance(&mut self, validator_pool: AccountId, total_balance: NearToken);
+    fn on_refresh_total_balance(
+        &mut self,
+        #[callback] total_balance: NearToken,
+        validator_pool: AccountId,
+    );
 }
 
 #[ext_contract(ext_staking_pool)]
@@ -27,6 +31,7 @@ impl Contract {
         let mut v = self
             .validators
             .get(&validator_pool)
+            .cloned()
             .expect("Unknown validator");
         require!(
             v.tx_status == TransactionStatus::Idle,
@@ -53,6 +58,7 @@ impl Contract {
         let mut v = self
             .validators
             .get(&validator_pool)
+            .cloned()
             .expect("Unknown validator");
         require!(
             v.tx_status == TransactionStatus::Idle,

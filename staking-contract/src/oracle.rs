@@ -1,4 +1,5 @@
-use common::types::Fraction;
+use crate::*;
+use common::Fraction;
 use near_sdk::json_types::U64;
 use near_sdk::{ext_contract, near, AccountId};
 
