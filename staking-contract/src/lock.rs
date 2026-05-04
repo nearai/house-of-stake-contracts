@@ -50,6 +50,14 @@ impl Contract {
             price.currency == Currency::Near,
             "USD-priced locks: use oracle_on_call (see oracle_receiver)"
         );
+        require!(
+            price.price_type == PriceType::OneOff,
+            "Recurring prices: use lock_for_subscription"
+        );
+        require!(
+            price.billing_period.is_none(),
+            "One-off price must not set billing_period"
+        );
 
         let validator_id = product.validator_id.clone();
         self.assert_validator_active_for_lock(&validator_id);

@@ -1,6 +1,5 @@
 use crate::*;
 use near_sdk::Gas;
-use near_sdk::sys;
 
 const MIGRATE_STATE_GAS: Gas = Gas::from_tgas(50);
 const GET_CONFIG_GAS: Gas = Gas::from_tgas(5);

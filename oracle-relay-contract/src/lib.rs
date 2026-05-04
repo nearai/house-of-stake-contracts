@@ -2,9 +2,10 @@
 //! attached deposit and user-supplied `price_data`—**unsafe** if arbitrary users can call it with forged rows.
 //!
 //! **Mitigations:** set [`OracleRelay::forward_caller`] at deploy time to a single bot account that pulls
-//! verified quotes off-chain or via XCC before calling `forward`; use NEAR access keys on the relay account
-//! to restrict callers; or replace `forward` with an implementation that validates signatures / calls Burrow
-//! on-chain before `oracle_on_call`.
+//! verified quotes off-chain or via XCC before calling `forward`; pass **`on_behalf_of`** with the end-user
+//! account so `oracle_on_call` attributes the lock to that user (not the bot). Use NEAR access keys on the
+//! relay account to restrict callers; or replace `forward` with an implementation that validates signatures /
+//! calls Burrow on-chain before `oracle_on_call`.
 
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::{AccountId, Gas, Promise, env, ext_contract, near, require};
@@ -62,12 +63,17 @@ impl OracleRelay {
     }
 
     /// `receiver_id` = house-of-stake staking contract. Forwards full attached deposit and `msg` JSON.
+    ///
+    /// When [`Self::forward_caller`] is set (bot relayer), pass **`on_behalf_of`** with the end-user account
+    /// id passed through to `oracle_on_call` as `sender_id`. When `forward_caller` is unset, `on_behalf_of`
+    /// is ignored and the caller is treated as the sender (localnet / tests).
     #[payable]
     pub fn forward(
         &mut self,
         receiver_id: AccountId,
         price_data: OraclePriceData,
         msg: String,
+        on_behalf_of: Option<AccountId>,
     ) -> Promise {
         if let Some(ref allowed) = self.forward_caller {
             require!(
@@ -75,7 +81,17 @@ impl OracleRelay {
                 "Only configured forward caller"
             );
         }
-        let sender_id = env::predecessor_account_id();
+
+        let sender_id = if self.forward_caller.is_some() {
+            require!(
+                on_behalf_of.is_some(),
+                "on_behalf_of required when forward_caller is configured"
+            );
+            on_behalf_of.unwrap()
+        } else {
+            env::predecessor_account_id()
+        };
+
         ext_staking::ext(receiver_id)
             .with_attached_deposit(env::attached_deposit())
             .with_static_gas(FORWARD_GAS)

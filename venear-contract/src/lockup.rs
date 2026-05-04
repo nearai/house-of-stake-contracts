@@ -319,6 +319,7 @@ impl Contract {
 /// Returns the contract hash.
 /// Requires the caller to attach the deposit to cover the storage cost.
 /// Requires the caller to be one of the lockup code deployers.
+#[cfg(target_arch = "wasm32")]
 #[unsafe(no_mangle)]
 pub extern "C" fn prepare_lockup_code() {
     env::setup_panic_hook();

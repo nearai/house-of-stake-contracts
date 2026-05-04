@@ -1,4 +1,5 @@
 use crate::*;
+use common::U256;
 use near_sdk::{NearToken, Promise, env, near, require};
 
 #[near]
@@ -46,7 +47,9 @@ impl Contract {
 
         // Pro-rata: credit <= o and sum of credits across users equals min(w, t) when w <= t; when w > t,
         // the last claims leave stranded NEAR in `pending_to_withdraw` for `sweep_stranded_withdraw_bucket`.
-        let mut credit_yocto = w_y.saturating_mul(o_y).checked_div(t_y).unwrap_or(0);
+        // Use U256 for (w * o) / t so yocto-scale products do not saturate u128.
+        let credit_raw = (U256::from(w_y) * U256::from(o_y)) / U256::from(t_y);
+        let mut credit_yocto = credit_raw.as_u128();
         credit_yocto = credit_yocto.min(o_y).min(w_y);
         require!(credit_yocto > 0, "Nothing to claim (rounding)");
 
@@ -137,12 +140,14 @@ impl Contract {
 
 #[cfg(test)]
 mod tests {
+    use common::U256;
+
     #[test]
     fn pro_rata_claim_rounding() {
         let w: u128 = 100;
         let o: u128 = 30;
         let t: u128 = 100;
-        let c = w.saturating_mul(o) / t;
+        let c = ((U256::from(w) * U256::from(o)) / U256::from(t)).as_u128();
         assert_eq!(c, 30);
     }
 }

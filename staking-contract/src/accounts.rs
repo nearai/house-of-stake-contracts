@@ -51,11 +51,16 @@ impl Contract {
             .cloned()
             .expect("No account; call storage_deposit");
 
+        let storage_yocto = acc.storage_deposit.as_yoctonear();
+        require!(
+            amount.as_yoctonear() <= storage_yocto,
+            "Withdraw exceeds prepaid storage"
+        );
+
         let required = self.required_storage_deposit_yocto(&pred, 0);
-        let after = acc
-            .storage_deposit
-            .as_yoctonear()
-            .saturating_sub(amount.as_yoctonear());
+        let after = storage_yocto
+            .checked_sub(amount.as_yoctonear())
+            .expect("amount bound above");
         require!(
             after >= required,
             "Must retain required storage (min + per-lock stake)"

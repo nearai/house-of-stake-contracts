@@ -16,7 +16,7 @@ This file tracks open work relative to the intended design ([PLAN.md](PLAN.md), 
 
 ## P1 — Oracle & USD-priced locks (follow Burrow)
 
-**Shipped:** [`oracle_on_call`](src/oracle_receiver.rs) — Burrow-shaped `OraclePriceData`, oracle-account predecessor check, staleness vs `oracle_max_age_ns`, optional **recency cap** via `oracle_max_recency_duration_sec`, JSON [`LockForProductUsdMsg`](src/oracle_receiver.rs) with optional **`schema_version`** (reject `> 1`), [`internal::check_usd_price_lock_burrow_row`](src/internal.rs). Production relay: [`oracle-relay-contract`](../oracle-relay-contract/) (`forward` → attaches deposit + `oracle_on_call`).
+**Shipped:** [`oracle_on_call`](src/oracle_receiver.rs) — Burrow-shaped `OraclePriceData`, oracle-account predecessor check, staleness vs `oracle_max_age_ns`, optional **recency cap** via `oracle_max_recency_duration_sec`, JSON [`LockForProductUsdMsg`](src/oracle_receiver.rs) with optional **`schema_version`** (reject `> 1`), [`internal::check_usd_price_lock_burrow_row`](src/internal.rs). Production relay: [`oracle-relay-contract`](../oracle-relay-contract/) (`forward` with `on_behalf_of` when `forward_caller` is set → attaches deposit + `oracle_on_call`).
 
 ---
 

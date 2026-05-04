@@ -47,7 +47,7 @@ Implemented in code:
 - Share minting helpers (`internal.rs`) and **Near-priced** `lock_for_product`; **USD** via **`oracle_on_call`** ([`oracle_receiver.rs`](src/oracle_receiver.rs)) + relay
 - `unlock` (user-driven); operator **`epoch_stake`**, **`epoch_unstake`**, **`epoch_withdraw`**; user **`claim_unlocked_near`** → **`withdraw`**
 - `refresh_validator_balance` + pool callbacks; **`storage_withdraw`**
-- **EVENT_JSON** for lock/unlock, catalog, validators, epoch ops, claim/withdraw, pool withdraw-in ([`events.rs`](src/events.rs)) — `standard: stakedao`, `version: 1.0.0`, nested `data`
+- **EVENT_JSON** for lock/unlock, catalog, validators, epoch ops, claim/withdraw, pool withdraw-in ([`events.rs`](src/events.rs)) — `standard: "stake.dao"`, `version: "1.0.0"`, nested `data`
 - **`list_product_ids`** (+ [`get_product`](src/products.rs)) for catalog discovery
 
 Still to refine per [docs/PLAN.md](docs/PLAN.md) / [docs/ACTION_ITEMS.md](docs/ACTION_ITEMS.md):
