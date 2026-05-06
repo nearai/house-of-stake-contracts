@@ -3,8 +3,9 @@ use near_sdk::serde::Serialize;
 pub mod emit {
     use super::*;
     use crate::TimestampNs;
+    use crate::account::DelegationEntry;
     use near_sdk::json_types::U64;
-    use near_sdk::{log, AccountId, NearToken};
+    use near_sdk::{AccountId, NearToken, log};
 
     #[derive(Serialize)]
     #[serde(crate = "near_sdk::serde")]
@@ -95,6 +96,14 @@ pub mod emit {
         pub(crate) owner_id: &'a AccountId,
         pub(crate) amount: NearToken,
         pub(crate) memo: &'a Option<String>,
+    }
+
+    #[derive(Serialize)]
+    #[serde(crate = "near_sdk::serde")]
+    pub(crate) struct DelegationChangeData<'a> {
+        pub(crate) account_id: &'a AccountId,
+        pub(crate) old: &'a [DelegationEntry],
+        pub(crate) new: &'a [DelegationEntry],
     }
 
     #[derive(Serialize)]
@@ -273,15 +282,31 @@ pub mod emit {
             },
         );
     }
+
+    pub fn delegation_change(
+        account_id: &AccountId,
+        old: &[DelegationEntry],
+        new: &[DelegationEntry],
+    ) {
+        log_event(
+            "venear",
+            "delegation_change",
+            DelegationChangeData {
+                account_id,
+                old,
+                new,
+            },
+        );
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use near_sdk::NearToken;
     use near_sdk::json_types::U64;
     use near_sdk::serde::Serialize;
-    use near_sdk::NearToken;
-    use near_sdk::{serde_json, AccountId};
+    use near_sdk::{AccountId, serde_json};
 
     #[test]
     fn test_option_u64_serializer() {

@@ -160,16 +160,14 @@ pub fn get_accounts_raw(&self, from_index: Option<u32>, limit: Option<u32>);
 /// Returns the current contract configuration.
 pub fn get_config(&self);
 
-/// Delegate all veNEAR tokens to the given receiver account ID.
-/// The receiver account ID must be registered in the contract.
-/// Requires 1 yocto NEAR.
+/// Atomically replace the caller's entire delegation set.
+/// `entries` must be sorted ascending by account_id (no duplicates), each
+/// `bps` in [1, 10_000], total `bps` ≤ 10_000, no self-delegation, no
+/// delegation to the contract account, and every `account_id` registered
+/// in veNEAR. Pass an empty Vec to undelegate all. Requires attached
+/// deposit ≥ storage growth cost; refunds overpay.
 #[payable]
-pub fn delegate_all(&mut self, receiver_id: AccountId);
-
-/// Undelegate all veNEAR tokens.
-/// Requires 1 yocto NEAR.
-#[payable]
-pub fn undelegate(&mut self);
+pub fn set_delegations(&mut self, entries: Vec<DelegationEntry>);
 
 /// Updates the active lockup contract to the given contract hash and sets the minimum lockup
 /// deposit.

@@ -5,13 +5,18 @@ use near_sdk::require;
 use std::cmp::Ordering;
 use std::ops::{Add, AddAssign, Mul, Sub, SubAssign};
 
-uint::construct_uint!(
-    pub struct U256(4);
-);
+#[allow(clippy::manual_div_ceil)]
+mod uints {
+    uint::construct_uint!(
+        pub struct U256(4);
+    );
 
-uint::construct_uint!(
-    pub struct U384(6);
-);
+    uint::construct_uint!(
+        pub struct U384(6);
+    );
+}
+
+pub use uints::{U256, U384};
 
 /// The timestamp in nanoseconds. It serializes as a string for JSON.
 pub type TimestampNs = U64;
@@ -56,6 +61,25 @@ impl VenearBalance {
         Self {
             near_balance,
             extra_venear_balance: NearToken::from_yoctonear(0),
+        }
+    }
+
+    pub fn scale_by_bps(&self, bps: u16) -> Self {
+        require!(bps <= 10_000, "bps must be <= 10000");
+        if bps == 0 {
+            return Self::default();
+        }
+        if bps == 10_000 {
+            return *self;
+        }
+        let bps_u128 = bps as u128;
+        Self {
+            near_balance: NearToken::from_yoctonear(
+                self.near_balance.as_yoctonear() * bps_u128 / 10_000
+            ),
+            extra_venear_balance: NearToken::from_yoctonear(
+                self.extra_venear_balance.as_yoctonear() * bps_u128 / 10_000
+            ),
         }
     }
 }
@@ -140,6 +164,16 @@ impl PooledVenearBalance {
             ),
         })
     }
+
+    pub fn pooled_add_scaled(&self, other: &VenearBalance, bps: u16) -> Self {
+        let scaled = other.scale_by_bps(bps);
+        self.pooled_add(&scaled)
+    }
+
+    pub fn pooled_sub_scaled(&self, other: &VenearBalance, bps: u16) -> Self {
+        let scaled = other.scale_by_bps(bps);
+        self.pooled_sub(&scaled)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -180,5 +214,91 @@ impl Fraction {
         // Ensure that the multiplication does not introduce rounding errors.
         require!(numerator % denominator == U384::from(0), "Rounding error");
         (numerator / denominator).as_u128()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scale_by_bps_zero_returns_zero() {
+        let balance = VenearBalance {
+            near_balance: NearToken::from_near(100),
+            extra_venear_balance: NearToken::from_near(50),
+        };
+        let scaled = balance.scale_by_bps(0);
+        assert_eq!(scaled.near_balance.as_yoctonear(), 0);
+        assert_eq!(scaled.extra_venear_balance.as_yoctonear(), 0);
+    }
+
+    #[test]
+    fn scale_by_bps_full_returns_full() {
+        let balance = VenearBalance {
+            near_balance: NearToken::from_near(100),
+            extra_venear_balance: NearToken::from_near(50),
+        };
+        let scaled = balance.scale_by_bps(10_000);
+        assert_eq!(scaled.near_balance.as_yoctonear(), balance.near_balance.as_yoctonear());
+        assert_eq!(scaled.extra_venear_balance.as_yoctonear(), balance.extra_venear_balance.as_yoctonear());
+    }
+
+    #[test]
+    fn scale_by_bps_half_returns_half() {
+        let balance = VenearBalance {
+            near_balance: NearToken::from_near(100),
+            extra_venear_balance: NearToken::from_near(50),
+        };
+        let scaled = balance.scale_by_bps(5000);
+        assert_eq!(scaled.near_balance.as_yoctonear(), NearToken::from_near(50).as_yoctonear());
+        assert_eq!(scaled.extra_venear_balance.as_yoctonear(), NearToken::from_near(25).as_yoctonear());
+    }
+
+    #[test]
+    fn scale_by_bps_99_near_3333bps() {
+        let balance = VenearBalance {
+            near_balance: NearToken::from_near(99),
+            extra_venear_balance: NearToken::from_near(0),
+        };
+        let scaled = balance.scale_by_bps(3333);
+        // 99 * 3333 / 10000 = 329967 / 10000 = 32 (floor)
+        let expected_yocto = (99_000_000_000_000_000_000_000_000u128 * 3333) / 10_000;
+        assert_eq!(scaled.near_balance.as_yoctonear(), expected_yocto);
+    }
+
+    #[test]
+    fn pooled_add_scaled_then_sub_scaled_is_identity() {
+        let initial = PooledVenearBalance(VenearBalance {
+            near_balance: NearToken::from_near(1000),
+            extra_venear_balance: NearToken::from_near(500),
+        });
+        let to_add = VenearBalance {
+            near_balance: NearToken::from_near(100),
+            extra_venear_balance: NearToken::from_near(50),
+        };
+        let bps = 5000;
+
+        let after_add = initial.pooled_add_scaled(&to_add, bps);
+        let after_sub = after_add.pooled_sub_scaled(&to_add, bps);
+
+        // Due to pooled truncation, we allow 1 milliNEAR tolerance
+        let tolerance = 1_000_000_000_000_000u128; // 1 milliNEAR in yocto
+        assert!(
+            (after_sub.0.near_balance.as_yoctonear() as i128 - initial.0.near_balance.as_yoctonear() as i128).abs() <= tolerance as i128,
+            "near_balance mismatch: expected ~{}, got {}",
+            initial.0.near_balance.as_yoctonear(),
+            after_sub.0.near_balance.as_yoctonear()
+        );
+    }
+
+    #[test]
+    fn scale_by_bps_extra_venear_scaled() {
+        let balance = VenearBalance {
+            near_balance: NearToken::from_near(0),
+            extra_venear_balance: NearToken::from_near(100),
+        };
+        let scaled = balance.scale_by_bps(2500);
+        assert_eq!(scaled.near_balance.as_yoctonear(), 0);
+        assert_eq!(scaled.extra_venear_balance.as_yoctonear(), NearToken::from_near(25).as_yoctonear());
     }
 }

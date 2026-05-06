@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use super::{VOTING_WASM_FILEPATH, VenearTestWorkspace};
 use common::voting::{MajorityType, ProposalStatus, QueueState};
 use near_sdk::{Gas, NearToken};

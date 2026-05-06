@@ -1,3 +1,4 @@
+pub mod venear_helpers;
 pub mod voting_helpers;
 
 #[allow(dead_code)]
@@ -432,6 +433,16 @@ impl VenearTestWorkspace {
             .args_json(json!({ "account_id": account_id }))
             .await?
             .json()?)
+    }
+
+    pub async fn delegated_near(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<NearToken, Box<dyn std::error::Error>> {
+        let info = self.account_info(account_id).await?;
+        Ok(serde_json::from_value(
+            info["account"]["delegated_balance"]["near_balance"].clone(),
+        )?)
     }
 
     pub async fn create_account_with_lockup(&self) -> Result<Account, Box<dyn std::error::Error>> {

@@ -201,10 +201,10 @@ impl Contract {
 
         let timestamp: TimestampNs = env::block_timestamp().into();
         let mut global_state: GlobalState = snapshot_and_state.1.into();
-        global_state.update(timestamp.into());
+        global_state.update(timestamp);
         proposal.snapshot_and_state = Some(SnapshotAndState {
             snapshot: snapshot_and_state.0,
-            timestamp_ns: timestamp.into(),
+            timestamp_ns: timestamp,
             total_venear: global_state.total_venear_balance.total(),
             venear_growth_config: global_state.venear_growth_config,
         });

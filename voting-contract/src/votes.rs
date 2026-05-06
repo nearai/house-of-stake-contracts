@@ -179,9 +179,10 @@ impl Contract {
         }
 
         if let Some(payload) = vote {
-            let VAccount::V0(account) = &payload.v_account;
+            let caller_account: Account = payload.v_account.clone().into();
+            let caller_account_id = &caller_account.account_id;
             require!(
-                account.account_id == env::predecessor_account_id(),
+                caller_account_id == &env::predecessor_account_id(),
                 "v_account does not match the caller"
             );
             let action = ext_self::ext(env::current_account_id())

@@ -208,6 +208,7 @@ async fn test_voting_upgrade_from_mainnet() -> Result<(), Box<dyn std::error::Er
             "e953bb69d1129e4da87b99739373884a0b57d5e64a65fdc868478f22e6c31eac",
             "fastnear-hos.near",
             "root.near",
+            "norfolks.near",
         ])
     );
     // 14 days and 7 days respectively, seeded by migrate_state().
