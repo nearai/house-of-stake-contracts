@@ -18,13 +18,14 @@ const DEFAULT_BOND_AMOUNT_NEAR: u128 = 100;
 const DEFAULT_TREASURY_ACCOUNT_ID: &str = "norfolks.near";
 const DEFAULT_SIMPLE_MAJORITY_BPS: u16 = 5_000;
 const DEFAULT_STRONG_MAJORITY_BPS: u16 = 6_667;
-const DEFAULT_SANDBOX_DURATION_NS: u64 = 14 * 24 * 60 * 60 * 1_000_000_000; // 14 days
+const DEFAULT_SANDBOX_DURATION_NS: u64 = 7 * 24 * 60 * 60 * 1_000_000_000; // 7 days
 const DEFAULT_SANDBOX_THRESHOLD_BPS: u16 = 3_000;
 const DEFAULT_MAX_ACTIVE_PROPOSALS: u32 = 3;
 const DEFAULT_PROPOSAL_EXPIRATION_NS: u64 = 7 * 24 * 60 * 60 * 1_000_000_000; // 7 days
 const DEFAULT_FAST_TRACK_PROPOSAL_EXPIRATION_NS: u64 = 2 * 24 * 60 * 60 * 1_000_000_000; // 2 days
 const DEFAULT_CLASSIC_VOTING_DURATION_NS: u64 = 14 * 24 * 60 * 60 * 1_000_000_000; // 14 days
 const DEFAULT_FAST_TRACK_VOTING_DURATION_NS: u64 = 5 * 24 * 60 * 60 * 1_000_000_000; // 5 days
+const DEFAULT_TIMELOCK_DURATION_NS: u64 = 14 * 24 * 60 * 60 * 1_000_000_000; // 14 days
 
 /// Config from v1.0.3 (pre-merge). No FastTrack fields.
 #[derive(Clone, BorshDeserialize, near_sdk::borsh::BorshSerialize)]
@@ -218,7 +219,7 @@ impl Contract {
                 owner_account_id: old.config.owner_account_id,
                 classic_voting_duration_ns: U64(DEFAULT_CLASSIC_VOTING_DURATION_NS),
                 fast_track_voting_duration_ns: U64(DEFAULT_FAST_TRACK_VOTING_DURATION_NS),
-                timelock_duration_ns: old.config.timelock_duration_ns,
+                timelock_duration_ns: U64(DEFAULT_TIMELOCK_DURATION_NS),
                 base_proposal_fee: old.config.base_proposal_fee,
                 bond_amount: NearToken::from_near(DEFAULT_BOND_AMOUNT_NEAR),
                 treasury_account_id: DEFAULT_TREASURY_ACCOUNT_ID.parse().unwrap(),

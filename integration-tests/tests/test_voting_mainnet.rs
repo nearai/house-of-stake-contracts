@@ -211,7 +211,7 @@ async fn test_voting_upgrade_from_mainnet() -> Result<(), Box<dyn std::error::Er
             "norfolks.near",
         ])
     );
-    // 14 days and 7 days respectively, seeded by migrate_state().
+    // Durations seeded by migrate_state().
     assert_eq!(
         config["timelock_duration_ns"],
         (14u64 * 24 * 60 * 60 * 1_000_000_000).to_string()
@@ -219,6 +219,10 @@ async fn test_voting_upgrade_from_mainnet() -> Result<(), Box<dyn std::error::Er
     assert_eq!(
         config["proposal_expiration_ns"],
         (7u64 * 24 * 60 * 60 * 1_000_000_000).to_string()
+    );
+    assert_eq!(
+        config["fast_track_proposal_expiration_ns"],
+        (2u64 * 24 * 60 * 60 * 1_000_000_000).to_string()
     );
     // Per-flow voting durations are seeded by migrate_state(): 14 days classic, 5 days FastTrack.
     assert_eq!(
@@ -229,12 +233,28 @@ async fn test_voting_upgrade_from_mainnet() -> Result<(), Box<dyn std::error::Er
         config["fast_track_voting_duration_ns"],
         (5u64 * 24 * 60 * 60 * 1_000_000_000).to_string()
     );
+    // FastTrack majority + sandbox defaults.
+    assert_eq!(config["simple_majority_threshold_bps"], 5000);
+    assert_eq!(config["strong_majority_threshold_bps"], 6667);
+    assert_eq!(
+        config["sandbox_duration_ns"],
+        (7u64 * 24 * 60 * 60 * 1_000_000_000).to_string()
+    );
+    assert_eq!(config["sandbox_threshold_bps"], 3000);
+    // Bond, treasury, and queue cap.
+    assert_eq!(config["bond_amount"], json!(NearToken::from_near(100)));
+    assert_eq!(config["treasury_account_id"], "norfolks.near");
+    assert_eq!(config["max_active_proposals"], 3);
 
     assert_eq!(config["venear_account_id"], old_config["venear_account_id"]);
     assert_eq!(config["reviewer_ids"], old_config["reviewer_ids"]);
     assert_eq!(config["base_proposal_fee"], old_config["base_proposal_fee"]);
     assert_eq!(config["vote_storage_fee"], old_config["vote_storage_fee"]);
     assert_eq!(config["guardians"], old_config["guardians"]);
+    assert_eq!(
+        config["proposed_new_owner_account_id"],
+        old_config["proposed_new_owner_account_id"]
+    );
     assert_eq!(
         config["owner_account_id"].as_str().unwrap(),
         owner.id().as_str()
