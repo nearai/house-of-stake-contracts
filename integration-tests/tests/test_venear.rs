@@ -570,6 +570,61 @@ async fn test_venear_governance() -> Result<(), Box<dyn std::error::Error>> {
     let guardians: Vec<AccountId> = serde_json::from_value(config["guardians"].clone())?;
     assert_eq!(guardians, new_guardians);
 
+    // max_delegations
+    let original_max_delegations: u32 =
+        serde_json::from_value(original_config["max_delegations"].clone())?;
+    let new_max_delegations: u32 = 2;
+    assert_ne!(original_max_delegations, new_max_delegations);
+
+    // Non-owner cannot change the cap.
+    let outcome = user
+        .call(v.venear.id(), "set_max_delegations")
+        .args_json(json!({ "max_delegations": new_max_delegations }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_failure(),
+        "User should not be able to set max_delegations",
+    );
+    let config: serde_json::Value = v.sandbox.view(v.venear.id(), "get_config").await?.json()?;
+    let max_delegations: u32 = serde_json::from_value(config["max_delegations"].clone())?;
+    assert_eq!(max_delegations, original_max_delegations);
+
+    // Owner lowers the cap.
+    let outcome = venear_owner
+        .call(v.venear.id(), "set_max_delegations")
+        .args_json(json!({ "max_delegations": new_max_delegations }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_success(),
+        "Owner should be able to set max_delegations",
+    );
+    let config: serde_json::Value = v.sandbox.view(v.venear.id(), "get_config").await?.json()?;
+    let max_delegations: u32 = serde_json::from_value(config["max_delegations"].clone())?;
+    assert_eq!(max_delegations, new_max_delegations);
+
+    // With cap=2, a 3-entry delegation set is rejected.
+    let outcome = user
+        .call(v.venear.id(), "set_delegations")
+        .args_json(json!({ "entries": [
+            {"account_id": "delegate01.near", "bps": 1000u32},
+            {"account_id": "delegate02.near", "bps": 1000u32},
+            {"account_id": "delegate03.near", "bps": 1000u32},
+        ] }))
+        .deposit(NearToken::from_millinear(10))
+        .gas(Gas::from_tgas(200))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_failure(),
+        "set_delegations with 3 entries must fail when max_delegations is 2",
+    );
+
     // propose_new_owner_account_id
     let new_owner_account = v.sandbox.dev_create_account().await?;
     let original_owner_account_id: AccountId =

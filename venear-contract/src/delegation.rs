@@ -2,15 +2,13 @@ use crate::*;
 use common::events;
 use near_sdk::Promise;
 
-/// Maximum number of partial delegation entries per account.
-const MAX_DELEGATIONS: usize = 8;
-
 /// Validates a slice of DelegationEntry for use in set_delegations..
 fn validate_delegations(
     entries: &[DelegationEntry],
     owner: &AccountId,
+    max_delegations: u32,
 ) -> Result<u16, &'static str> {
-    if entries.len() > MAX_DELEGATIONS {
+    if entries.len() as u64 > max_delegations as u64 {
         return Err("Too many delegations");
     }
     let mut sum_bps: u32 = 0;
@@ -38,9 +36,10 @@ impl Contract {
     /// Atomically replaces the caller's entire delegation set.
     /// The `entries` Vec must be:
     ///   - Sorted ascending by account_id (no duplicates)
-    ///   - Each entry bps in [1, MAX_DELEGATIONS]
+    ///   - Each entry bps in [1, 10_000]
     ///   - Sum of all bps ≤ 10,000
     ///   - No self-delegation
+    ///   - At most `config.max_delegations` entries
     ///   - All delegate account_ids must be registered in veNEAR
     /// Requires attached deposit ≥ storage growth cost. Refunds overpay.
     #[payable]
@@ -50,7 +49,8 @@ impl Contract {
         require!(attached.as_yoctonear() > 0, "Requires attached deposit");
         let predecessor_id = env::predecessor_account_id();
 
-        validate_delegations(&entries, &predecessor_id).unwrap_or_else(|err| env::panic_str(err));
+        validate_delegations(&entries, &predecessor_id, self.config.max_delegations)
+            .unwrap_or_else(|err| env::panic_str(err));
 
         let storage_before = env::storage_usage();
 

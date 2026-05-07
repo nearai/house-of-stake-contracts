@@ -75,6 +75,7 @@ pub struct VenearTestWorkspaceBuilder {
     pub sandbox_duration_ns: u64,
     pub sandbox_threshold_bps: u16,
     pub max_active_proposals: u32,
+    pub max_delegations: u32,
 }
 
 impl Default for VenearTestWorkspaceBuilder {
@@ -108,6 +109,7 @@ impl Default for VenearTestWorkspaceBuilder {
             sandbox_duration_ns: SANDBOX_DURATION_SECONDS * NS_IN_SECOND,
             sandbox_threshold_bps: 3000,
             max_active_proposals: 3,
+            max_delegations: 8,
         }
     }
 }
@@ -198,6 +200,7 @@ impl VenearTestWorkspaceBuilder {
                 "min_lockup_deposit": self.min_lockup_deposit,
                 "owner_account_id": venear_owner.id(),
                 "guardians": &[guardian.id()],
+                "max_delegations": self.max_delegations,
             },
             "venear_growth_config": {
                 "annual_growth_rate_ns": self.annual_growth_rate_ns,

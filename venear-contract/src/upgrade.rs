@@ -1,4 +1,7 @@
+use crate::config::LockupContractConfig;
 use crate::*;
+use near_sdk::borsh::{self, BorshDeserialize};
+use near_sdk::json_types::U64;
 #[cfg(target_arch = "wasm32")]
 use near_sdk::Gas;
 
@@ -7,14 +10,66 @@ const MIGRATE_STATE_GAS: Gas = Gas::from_tgas(50);
 #[cfg(target_arch = "wasm32")]
 const GET_CONFIG_GAS: Gas = Gas::from_tgas(5);
 
+/// Default applied during migration of contracts deployed before `max_delegations`
+/// was made configurable. Matches the previous hardcoded constant.
+const DEFAULT_MAX_DELEGATIONS: u32 = 8;
+
+/// Pre-migration `Config` layout (no `max_delegations` field).
+#[derive(BorshDeserialize)]
+#[borsh(crate = "borsh")]
+struct OldConfig {
+    lockup_contract_config: Option<LockupContractConfig>,
+    unlock_duration_ns: U64,
+    staking_pool_whitelist_account_id: AccountId,
+    lockup_code_deployers: Vec<AccountId>,
+    local_deposit: NearToken,
+    min_lockup_deposit: NearToken,
+    owner_account_id: AccountId,
+    guardians: Vec<AccountId>,
+    proposed_new_owner_account_id: Option<AccountId>,
+}
+
+/// Pre-migration top-level contract layout. Mirrors `Contract` but with `OldConfig`.
+#[derive(BorshDeserialize)]
+#[borsh(crate = "borsh")]
+struct OldContract {
+    tree: MerkleTree<VAccount, VGlobalState>,
+    accounts: LookupMap<AccountId, VAccountInternal>,
+    config: OldConfig,
+    paused: bool,
+}
+
 #[near]
 impl Contract {
     /// Private method to migrate the contract state during the contract upgrade.
+    /// Backfills the new `max_delegations` config field with the legacy default
+    /// when the stored state still uses the pre-`max_delegations` layout.
     #[private]
     #[init(ignore_state)]
     pub fn migrate_state() -> Self {
-        let contract: Self = env::state_read().unwrap();
-        contract
+        let raw = env::storage_read(b"STATE").expect("Missing contract state");
+        if let Ok(current) = Self::try_from_slice(&raw) {
+            return current;
+        }
+        let old = OldContract::try_from_slice(&raw)
+            .unwrap_or_else(|_| env::panic_str("Cannot deserialize the contract state."));
+        Self {
+            tree: old.tree,
+            accounts: old.accounts,
+            config: Config {
+                lockup_contract_config: old.config.lockup_contract_config,
+                unlock_duration_ns: old.config.unlock_duration_ns,
+                staking_pool_whitelist_account_id: old.config.staking_pool_whitelist_account_id,
+                lockup_code_deployers: old.config.lockup_code_deployers,
+                local_deposit: old.config.local_deposit,
+                min_lockup_deposit: old.config.min_lockup_deposit,
+                owner_account_id: old.config.owner_account_id,
+                guardians: old.config.guardians,
+                proposed_new_owner_account_id: old.config.proposed_new_owner_account_id,
+                max_delegations: DEFAULT_MAX_DELEGATIONS,
+            },
+            paused: old.paused,
+        }
     }
 
     /// Returns the version of the contract from the Cargo.toml.

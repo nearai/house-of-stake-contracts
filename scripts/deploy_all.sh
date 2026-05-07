@@ -74,6 +74,8 @@ FST_PROPOSAL_EXPIRATION_NS="${FST_PROPOSAL_EXPIRATION_SEC}000000000"
 SANDBOX_DURATION_NS="${SANDBOX_DURATION_SEC}000000000"
 # 30% sandbox threshold
 : "${SANDBOX_THRESHOLD_BPS:=3000}"
+# Maximum number of partial delegation entries per account
+: "${MAX_DELEGATIONS:=8}"
 
 # Shorter name, so we can fit more
 export ROOT_ACCOUNT_ID="$ROOT_ACCOUNT_ID"
@@ -111,7 +113,8 @@ near --quiet contract deploy $VENEAR_ACCOUNT_ID use-file res/$CONTRACTS_SOURCE/v
     "local_deposit": "'$LOCAL_DEPOSIT'",
     "min_lockup_deposit": "'$MIN_LOCKUP_DEPOSIT'",
     "owner_account_id": "'$OWNER_ACCOUNT_ID'",
-    "guardians": ["'$GUARDIAN_ACCOUNT_ID'"]
+    "guardians": ["'$GUARDIAN_ACCOUNT_ID'"],
+    "max_delegations": '$MAX_DELEGATIONS'
   },
   "venear_growth_config": {
     "annual_growth_rate_ns": {
