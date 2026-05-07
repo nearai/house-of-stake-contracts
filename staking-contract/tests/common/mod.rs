@@ -21,7 +21,8 @@ pub fn acct(s: &str) -> AccountId {
 pub const STAKING: &str = "staking.test.near";
 pub const OWNER: &str = "owner.near";
 pub const POOL: &str = "pool.near";
-pub const VOWNER: &str = "vowner.near";
+/// Account that owns the staking pool (`get_owner_id`), used when simulating catalog callbacks.
+pub const VALIDATOR_OWNER_ACCOUNT: &str = "vowner.near";
 pub const BUYER: &str = "buyer.near";
 
 /// Baseline config; override fields in tests as needed.
@@ -89,20 +90,20 @@ pub fn deploy() -> Contract {
 /// Owner registers pool; validator owner creates active catalog entries for NEAR one-off purchase.
 pub fn setup_catalog_near_oneoff(contract: &mut Contract) -> (String, String) {
     testing_env!(ctx(acct(OWNER), NearToken::from_yoctonear(1)));
-    contract.add_validator(acct(POOL), acct(VOWNER));
+    contract.add_validator(acct(POOL), acct(VALIDATOR_OWNER_ACCOUNT));
 
-    testing_env_catalog_callback(acct(VOWNER));
+    testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
     let product_id = contract.create_product_after_get_owner(
-        acct(VOWNER),
+        acct(VALIDATOR_OWNER_ACCOUNT),
         acct(POOL),
         "Plan".into(),
         "Desc".into(),
-        acct(VOWNER),
+        acct(VALIDATOR_OWNER_ACCOUNT),
     );
 
-    testing_env_catalog_callback(acct(VOWNER));
+    testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
     let price_id = contract.create_price_after_get_owner(
-        acct(VOWNER),
+        acct(VALIDATOR_OWNER_ACCOUNT),
         product_id.clone(),
         "Price".into(),
         "".into(),
@@ -110,7 +111,7 @@ pub fn setup_catalog_near_oneoff(contract: &mut Contract) -> (String, String) {
         PriceType::OneOff,
         None,
         U128(LOCK_FACTOR_DENOM),
-        acct(VOWNER),
+        acct(VALIDATOR_OWNER_ACCOUNT),
     );
     (product_id, price_id)
 }
@@ -118,20 +119,20 @@ pub fn setup_catalog_near_oneoff(contract: &mut Contract) -> (String, String) {
 /// Recurring monthly NEAR price for subscription tests.
 pub fn setup_catalog_near_subscription(contract: &mut Contract) -> (String, String) {
     testing_env!(ctx(acct(OWNER), NearToken::from_yoctonear(1)));
-    contract.add_validator(acct(POOL), acct(VOWNER));
+    contract.add_validator(acct(POOL), acct(VALIDATOR_OWNER_ACCOUNT));
 
-    testing_env_catalog_callback(acct(VOWNER));
+    testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
     let product_id = contract.create_product_after_get_owner(
-        acct(VOWNER),
+        acct(VALIDATOR_OWNER_ACCOUNT),
         acct(POOL),
         "Sub product".into(),
         "Desc".into(),
-        acct(VOWNER),
+        acct(VALIDATOR_OWNER_ACCOUNT),
     );
 
-    testing_env_catalog_callback(acct(VOWNER));
+    testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
     let price_id = contract.create_price_after_get_owner(
-        acct(VOWNER),
+        acct(VALIDATOR_OWNER_ACCOUNT),
         product_id.clone(),
         "Monthly".into(),
         "".into(),
@@ -139,7 +140,7 @@ pub fn setup_catalog_near_subscription(contract: &mut Contract) -> (String, Stri
         PriceType::Recurring,
         Some(BillingPeriod::Monthly),
         U128(LOCK_FACTOR_DENOM),
-        acct(VOWNER),
+        acct(VALIDATOR_OWNER_ACCOUNT),
     );
     (product_id, price_id)
 }

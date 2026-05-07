@@ -41,7 +41,8 @@ pub trait ExtStakingPool {
 
 #[near]
 impl Contract {
-    /// Operator: stake `pending_to_stake` on the pool.
+    /// Operator: stake `pending_to_stake` on the pool. At most **one successful** stake batch per epoch per
+    /// validator (retry the same epoch only if the pool call failed and `tx_status` returned to idle).
     pub fn epoch_stake(&mut self, validator_pool: AccountId) -> Promise {
         self.assert_not_paused();
         self.assert_operator();
@@ -55,6 +56,10 @@ impl Contract {
         require!(
             v.tx_status == TransactionStatus::Idle,
             "validator pool busy"
+        );
+        require!(
+            v.last_stake_epoch < env::epoch_height(),
+            "already completed a stake batch this epoch"
         );
         let amt = v.pending_to_stake;
         require!(amt.as_yoctonear() > 0, "nothing to stake");
@@ -74,6 +79,8 @@ impl Contract {
     }
 
     /// Operator: request unstake for `pending_to_unstake` (after users called [`crate::unlock::Contract::unlock`]).
+    /// A new unstake is rejected until `epoch_unstake_settle_epochs` have passed since the last successful
+    /// unstake callback for this pool (serialize unstake rounds before the next batch).
     pub fn epoch_unstake(&mut self, validator_pool: AccountId) -> Promise {
         self.assert_not_paused();
         self.assert_operator();
@@ -88,6 +95,15 @@ impl Contract {
             v.tx_status == TransactionStatus::Idle,
             "validator pool busy"
         );
+        if v.last_unstake_epoch > 0 {
+            let ready_epoch = v
+                .last_unstake_epoch
+                .saturating_add(self.config.epoch_unstake_settle_epochs);
+            require!(
+                env::epoch_height() >= ready_epoch,
+                "wait until previous unstake has settled before unstaking again"
+            );
+        }
         let amt = v.pending_to_unstake;
         require!(amt.as_yoctonear() > 0, "nothing to unstake");
 

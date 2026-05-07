@@ -45,6 +45,7 @@ impl Contract {
                 .total_staked_balance
                 .checked_add(NearToken::from_yoctonear(consume))
                 .expect("staked balance");
+            v.last_stake_epoch = env::epoch_height();
         }
         self.validators.insert(validator_pool, v);
         ok

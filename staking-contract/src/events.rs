@@ -73,10 +73,11 @@ pub fn log_withdraw(account: &AccountId, amount_yocto: u128) {
     );
 }
 
-pub fn log_epoch_operation(event: &str, validator_pool: &AccountId) {
+pub fn log_epoch_operation(epoch_action: &str, validator_pool: &AccountId) {
     emit(
-        event,
+        epoch_action,
         serde_json::json!({
+            "epoch_action": epoch_action,
             "validator_id": validator_pool.to_string(),
         }),
     );

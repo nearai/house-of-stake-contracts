@@ -1,11 +1,28 @@
+use crate::epoch::ext_staking_pool;
+use crate::gas::{callbacks, staking_pool};
 use crate::*;
+use near_sdk::ext_contract;
 use near_sdk::json_types::{U64, U128};
-use near_sdk::{AccountId, NearToken, env, near, require};
+use near_sdk::{
+    AccountId, NearToken, Promise, assert_one_yocto, env, is_promise_success, near, require,
+};
+
+#[ext_contract(ext_self_validators)]
+#[allow(dead_code)] // Used by `ext_self_validators::ext` generated code; rustc does not count it as a read.
+trait ExtSelfValidators {
+    fn sync_validator_owner_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        pool_account_id: AccountId,
+    );
+}
 
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
 pub struct Validator {
     pub pool_account_id: AccountId,
+    /// Snapshot of the staking pool's `get_owner_id()` at enrollment (`add_validator`) or after
+    /// `sync_validator_owner_from_pool`. Catalog ops re-verify the pool on each call.
     pub owner_account_id: AccountId,
     pub status: ValidatorStatus,
 
@@ -15,7 +32,10 @@ pub struct Validator {
 
     pub pending_to_stake: NearToken,
     pub pending_to_unstake: NearToken,
+    /// Epoch height recorded after the last successful `epoch_unstake` callback; gates further unstakes.
     pub last_unstake_epoch: u64,
+    /// Epoch height of the last successful `on_deposit_and_stake`; enforces at most one successful `epoch_stake` per epoch per pool.
+    pub last_stake_epoch: u64,
     /// NEAR returned from the pool (`epoch_withdraw`) not yet claimed into user accounts.
     pub pending_to_withdraw: NearToken,
     /// Sum of `user_pending_unstake` for this pool; used with `pending_to_withdraw` for pro-rata claims.
@@ -50,6 +70,7 @@ impl Contract {
             pending_to_stake: NearToken::from_near(0),
             pending_to_unstake: NearToken::from_near(0),
             last_unstake_epoch: 0,
+            last_stake_epoch: 0,
             pending_to_withdraw: NearToken::from_near(0),
             pending_user_unstake_total: NearToken::from_near(0),
             tx_status: TransactionStatus::Idle,
@@ -76,16 +97,49 @@ impl Contract {
         out
     }
 
+    /// Paginated validator records (same ordering as [`Contract::list_validator_ids`]).
+    pub fn get_validators(&self, from_index: u64, limit: u64) -> Vec<Validator> {
+        self.list_validator_ids(from_index, limit)
+            .into_iter()
+            .filter_map(|id| self.validators.get(&id).cloned())
+            .collect()
+    }
+
+    /// Refresh [`Validator::owner_account_id`] from the pool's `get_owner_id()` (on-chain source of truth).
     #[payable]
-    pub fn set_validator_owner(&mut self, pool_account_id: AccountId, new_owner: AccountId) {
-        near_sdk::assert_one_yocto();
-        self.assert_owner();
+    pub fn sync_validator_owner_from_pool(&mut self, pool_account_id: AccountId) -> Promise {
+        assert_one_yocto();
+        require!(
+            self.validators.get(&pool_account_id).is_some(),
+            "Unknown validator"
+        );
+        ext_staking_pool::ext(pool_account_id.clone())
+            .with_static_gas(staking_pool::GET_OWNER_ID)
+            .get_owner_id()
+            .then(
+                ext_self_validators::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
+                    .sync_validator_owner_after_get_owner(pool_account_id),
+            )
+    }
+
+    #[private]
+    pub fn sync_validator_owner_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        pool_account_id: AccountId,
+    ) {
+        require!(
+            env::predecessor_account_id() == env::current_account_id(),
+            "private"
+        );
+        require!(is_promise_success(), "get_owner_id failed");
         let mut v = self
             .validators
             .get(&pool_account_id)
             .cloned()
             .expect("Unknown validator");
-        v.owner_account_id = new_owner;
+        v.owner_account_id = pool_owner;
         self.validators.insert(pool_account_id, v);
     }
 

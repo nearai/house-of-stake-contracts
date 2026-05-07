@@ -25,6 +25,8 @@ pub fn next_lock_id(nonce: &mut u64) -> String {
     next_id("lock", SUB_LOCK_SUFFIX_LEN, nonce)
 }
 
+/// Collision probability with existing IDs is negligible (SHA-256 → base62). Product/price creation retries
+/// if a generated id already exists in storage (see `products` callbacks).
 fn next_id(prefix: &str, suffix_len: usize, nonce: &mut u64) -> String {
     let n = *nonce;
     *nonce = nonce.saturating_add(1);

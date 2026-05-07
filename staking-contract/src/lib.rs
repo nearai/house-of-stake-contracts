@@ -64,7 +64,9 @@ pub struct Contract {
     pub user_pending_unstake: LookupMap<(AccountId, AccountId), NearToken>,
     /// Locks ever created per account (increments on each new lock; used for per-lock storage prepaid).
     pub user_lock_count: LookupMap<AccountId, u32>,
-    /// At most one subscription per (user, recurring price id).
+    /// One subscription row per `(user, recurring price_id)` — matches a single active subscription to that
+    /// catalog price (Stripe-style). Multiple concurrent subscriptions to the same price would need distinct
+    /// price IDs or a future “quantity / seats” model.
     pub subscription_by_account_price: LookupMap<(AccountId, PriceId), SubscriptionId>,
     pub id_nonce: u64,
 }

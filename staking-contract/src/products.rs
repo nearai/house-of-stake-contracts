@@ -5,6 +5,26 @@ use near_sdk::ext_contract;
 use near_sdk::json_types::{U64, U128};
 use near_sdk::{AccountId, Promise, env, is_promise_success, near, require};
 
+fn next_unique_product_id(contract: &mut Contract) -> ProductId {
+    for _ in 0..64 {
+        let id = crate::ids::next_product_id(&mut contract.id_nonce);
+        if !contract.products.contains_key(&id) {
+            return id;
+        }
+    }
+    env::panic_str("could not allocate unique product id")
+}
+
+fn next_unique_price_id(contract: &mut Contract) -> PriceId {
+    for _ in 0..64 {
+        let id = crate::ids::next_price_id(&mut contract.id_nonce);
+        if !contract.prices.contains_key(&id) {
+            return id;
+        }
+    }
+    env::panic_str("could not allocate unique price id")
+}
+
 /// Self callbacks after `get_owner_id` on the staking pool.
 #[ext_contract(ext_self_products)]
 pub trait ExtSelfProducts {
@@ -286,7 +306,7 @@ impl Contract {
             "Only the validator owner can call this method"
         );
 
-        let id = crate::ids::next_product_id(&mut self.id_nonce);
+        let id = next_unique_product_id(self);
         let product = Product {
             product_id: id.clone(),
             validator_id: validator_id.clone(),
@@ -403,7 +423,7 @@ impl Contract {
             .expect("Unknown product");
         require!(product.status == CatalogStatus::Active, "Product archived");
 
-        let price_id = crate::ids::next_price_id(&mut self.id_nonce);
+        let price_id = next_unique_price_id(self);
         let price = Price {
             price_id: price_id.clone(),
             product_id: product_id.clone(),
