@@ -9,7 +9,7 @@ use near_sdk::{
     testing_env,
 };
 use staking_contract::internal::LOCK_FACTOR_DENOM;
-use staking_contract::types::{BillingPeriod, Currency, PriceType};
+use staking_contract::types::{BillingPeriod, PriceType};
 use staking_contract::{Config, Contract};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -23,7 +23,6 @@ pub const OWNER: &str = "owner.near";
 pub const POOL: &str = "pool.near";
 pub const VOWNER: &str = "vowner.near";
 pub const BUYER: &str = "buyer.near";
-pub const ORACLE: &str = "oracle.near";
 
 /// Baseline config; override fields in tests as needed.
 pub fn base_config() -> Config {
@@ -32,10 +31,6 @@ pub fn base_config() -> Config {
         proposed_new_owner_account_id: None,
         guardians: vec![],
         operators: vec![],
-        oracle_account_id: acct(ORACLE),
-        oracle_usd_price_asset_id: String::new(),
-        oracle_max_age_ns: U64(86_400_000_000_000_000),
-        oracle_max_recency_duration_sec: 0,
         min_lock_duration_ns: U64(1),
         max_lock_duration_ns: U64(u64::MAX / 8),
         epoch_unstake_settle_epochs: 4,
@@ -111,7 +106,6 @@ pub fn setup_catalog_near_oneoff(contract: &mut Contract) -> (String, String) {
         product_id.clone(),
         "Price".into(),
         "".into(),
-        Currency::Near,
         U128(1),
         PriceType::OneOff,
         None,
@@ -141,7 +135,6 @@ pub fn setup_catalog_near_subscription(contract: &mut Contract) -> (String, Stri
         product_id.clone(),
         "Monthly".into(),
         "".into(),
-        Currency::Near,
         U128(1),
         PriceType::Recurring,
         Some(BillingPeriod::Monthly),

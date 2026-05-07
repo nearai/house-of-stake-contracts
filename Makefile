@@ -3,11 +3,11 @@
 .DEFAULT_GOAL := help
 
 .PHONY: help all-contracts \
-	sandbox-staking-whitelist-contract venear-contract lockup-contract voting-contract staking-contract oracle-relay-contract \
-	whitelist venear lockup voting staking oracle-relay \
+	sandbox-staking-whitelist-contract venear-contract lockup-contract voting-contract staking-contract \
+	whitelist venear lockup voting staking \
 	check-sandbox-staking-whitelist-contract check-venear-contract check-lockup-contract \
-	check-voting-contract check-staking-contract check-oracle-relay-contract \
-	check-whitelist check-venear check-lockup check-voting check-staking check-oracle-relay
+	check-voting-contract check-staking-contract \
+	check-whitelist check-venear check-lockup check-voting check-staking
 
 ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 RES_LOCAL := $(ROOT)res/local
@@ -19,7 +19,6 @@ help:
 	@echo "  make lockup-contract                        (alias: make lockup)"
 	@echo "  make voting-contract                        (alias: make voting)"
 	@echo "  make staking-contract                       (alias: make staking)"
-	@echo "  make oracle-relay-contract                  (alias: make oracle-relay)"
 	@echo "  make all-contracts                          all of the above, in order"
 	@echo ""
 	@echo "Fast compile checks (cargo check -p … from workspace root):"
@@ -52,12 +51,7 @@ staking-contract:
 	mkdir -p "$(RES_LOCAL)"
 	cp "$(ROOT)target/near/staking_contract/staking_contract.wasm" "$(RES_LOCAL)/"
 
-oracle-relay-contract:
-	cd "$(ROOT)oracle-relay-contract" && cargo near build non-reproducible-wasm
-	mkdir -p "$(RES_LOCAL)"
-	cp "$(ROOT)target/near/oracle_relay_contract/oracle_relay_contract.wasm" "$(RES_LOCAL)/"
-
-all-contracts: sandbox-staking-whitelist-contract venear-contract lockup-contract voting-contract staking-contract oracle-relay-contract
+all-contracts: sandbox-staking-whitelist-contract venear-contract lockup-contract voting-contract staking-contract
 
 # --- Short aliases ---
 
@@ -66,7 +60,6 @@ venear: venear-contract
 lockup: lockup-contract
 voting: voting-contract
 staking: staking-contract
-oracle-relay: oracle-relay-contract
 
 # --- cargo check (host, no WASM) ---
 
@@ -84,6 +77,3 @@ check-voting-contract check-voting:
 
 check-staking-contract check-staking:
 	cd "$(ROOT)" && cargo check -p staking-contract
-
-check-oracle-relay-contract check-oracle-relay:
-	cd "$(ROOT)" && cargo check -p oracle-relay-contract

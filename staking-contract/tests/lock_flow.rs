@@ -94,7 +94,7 @@ fn get_config_round_trips() {
     let c = deploy();
     assert!(!c.is_paused());
     assert_eq!(c.get_config().owner_account_id, acct(OWNER));
-    assert_eq!(c.get_config().oracle_max_recency_duration_sec, 0);
+    assert_eq!(c.get_config().epoch_unstake_settle_epochs, 4);
 }
 
 #[test]

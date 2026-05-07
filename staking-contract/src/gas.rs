@@ -14,11 +14,6 @@ pub mod staking_pool {
     pub const GET_OWNER_ID: Gas = super::BASE_GAS;
 }
 
-pub mod oracle {
-    use near_sdk::Gas;
-    pub const GET_PRICE: Gas = super::BASE_GAS;
-}
-
 pub mod callbacks {
     use super::BASE_GAS;
     use near_sdk::Gas;

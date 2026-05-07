@@ -11,13 +11,6 @@ pub type LockId = String;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[near(serializers = [borsh, json])]
-pub enum Currency {
-    Near,
-    Usd,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[near(serializers = [borsh, json])]
 pub enum PriceType {
     OneOff,
     Recurring,
@@ -103,11 +96,11 @@ pub struct Price {
     pub product_id: ProductId,
     pub name: String,
     pub description: String,
-    pub currency: Currency,
+    /// NEAR amount in yoctoNEAR (catalog denomination).
     pub amount: U128,
     pub price_type: PriceType,
     pub billing_period: Option<BillingPeriod>,
-    /// Scaling TBD; used with [`crate::internal::required_near_months`].
+    /// Fixed-point lock-weight; see [`crate::internal::LOCK_FACTOR_DENOM`] and [`crate::internal::check_near_price_lock`].
     pub lock_factor_near_months: U128,
     pub status: CatalogStatus,
     pub usage_count: u64,

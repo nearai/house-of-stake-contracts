@@ -14,9 +14,9 @@ This file tracks open work relative to the intended design ([PLAN.md](PLAN.md), 
 
 ---
 
-## P1 — Oracle & USD-priced locks (follow Burrow)
+## P1 — ~~Oracle & USD-priced locks~~ (removed)
 
-**Shipped:** [`oracle_on_call`](src/oracle_receiver.rs) — Burrow-shaped `OraclePriceData`, oracle-account predecessor check, staleness vs `oracle_max_age_ns`, optional **recency cap** via `oracle_max_recency_duration_sec`, JSON [`LockForProductUsdMsg`](src/oracle_receiver.rs) with optional **`schema_version`** (reject `> 1`), [`internal::check_usd_price_lock_burrow_row`](src/internal.rs). Production relay: [`oracle-relay-contract`](../oracle-relay-contract/) (`forward` with `on_behalf_of` when `forward_caller` is set → attaches deposit + `oracle_on_call`).
+The contract is **NEAR-only**: no oracle, no USD catalog path, no `oracle-relay-contract`. See [README.md](../README.md). Older design notes in [PLAN.md](PLAN.md) / [DESIGN.md](DESIGN.md) may still mention USD; treat them as historical.
 
 ---
 
@@ -51,7 +51,7 @@ This file tracks open work relative to the intended design ([PLAN.md](PLAN.md), 
 
 ## P3 — Testing & docs
 
-- [x] **Unit tests** — Pro-rata claim, share mint, USD Burrow-row sanity (`internal.rs`, `withdraw.rs`, `subscriptions.rs`).
+- [x] **Unit tests** — Pro-rata claim, share mint (`internal.rs`, `withdraw.rs`, `subscriptions.rs`).
 - [x] **README** — Operator cadence + status (see [README.md](README.md)).
 - [x] **Integration / sandbox tests** — [`integration-tests/tests/test_staking_contract.rs`](../integration-tests/tests/test_staking_contract.rs) deploy + `get_config` (requires built WASM: `make staking-contract`).
 
@@ -62,8 +62,8 @@ This file tracks open work relative to the intended design ([PLAN.md](PLAN.md), 
 | Location | Note |
 |----------|------|
 | [`src/subscriptions.rs`](src/subscriptions.rs) | Calendar **day** / end-of-month not fully modeled. |
-| [`src/lock.rs`](src/lock.rs) | NEAR-only `lock_for_product`; USD via `oracle_on_call`. |
+| [`src/lock.rs`](src/lock.rs) | NEAR-only `lock_for_product` / `lock_for_subscription`. |
 
 ---
 
-*Last updated: withdraw reconciliation, oracle relay crate, subscription locks, storage metering, integration smoke test.*
+*Last updated: NEAR-only catalog (oracle removed), subscription locks, storage metering, integration smoke test.*

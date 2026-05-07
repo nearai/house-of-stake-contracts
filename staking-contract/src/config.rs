@@ -9,12 +9,6 @@ pub struct Config {
     pub proposed_new_owner_account_id: Option<AccountId>,
     pub guardians: Vec<AccountId>,
     pub operators: Vec<AccountId>,
-    pub oracle_account_id: AccountId,
-    /// Burrow payload: match [`crate::oracle_receiver::OracleAssetOptionalPrice::asset_id`]. Empty = first row that carries a price.
-    pub oracle_usd_price_asset_id: String,
-    pub oracle_max_age_ns: U64,
-    /// If non-zero, [`crate::oracle_receiver::OraclePriceData::recency_duration_sec`] must not exceed this (Burrow-style).
-    pub oracle_max_recency_duration_sec: u32,
     pub min_lock_duration_ns: U64,
     pub max_lock_duration_ns: U64,
     pub epoch_unstake_settle_epochs: u64,

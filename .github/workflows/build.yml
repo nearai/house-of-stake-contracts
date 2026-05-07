@@ -29,8 +29,7 @@ jobs:
             venear-contract \
             voting-contract \
             staking-contract \
-            sandbox-staking-whitelist-contract \
-            oracle-relay-contract; do
+            sandbox-staking-whitelist-contract; do
             echo "== wasm32 $pkg =="
             cargo build -p "$pkg" --target wasm32-unknown-unknown --release
           done

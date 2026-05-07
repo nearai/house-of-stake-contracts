@@ -1,6 +1,6 @@
 # staking-contract (`stake.dao`)
 
-NEAR smart contract for pooled staking tied to NEAR AI **products** and **prices** (validator-owned catalog), with Stripe-style IDs and hybrid pricing hooks.
+NEAR smart contract for pooled staking tied to NEAR AI **products** and **prices** (validator-owned catalog), with Stripe-style IDs. Catalog amounts are **NEAR (yocto)** only; there is no oracle or USD conversion path.
 
 ## Documentation
 
@@ -34,8 +34,6 @@ Typical sequence after locks exist:
 6. User **`claim_unlocked_near`** — Pro-rata claim into `withdrawable_balance`.
 7. User **`withdraw`** — Transfer `withdrawable_balance` out.
 
-USD-priced catalog entries use **`oracle_on_call`** (see [`src/oracle_receiver.rs`](src/oracle_receiver.rs)) with a Burrow-style oracle relay, not `lock_for_product`.
-
 ## Implementation status (snapshot)
 
 Implemented in code:
@@ -44,7 +42,7 @@ Implemented in code:
 - On-contract validator **allowlist** (`add_validator`, `set_validator_owner`, `pause_validator`, `remove_validator`)
 - Validator-owner **catalog** (`create_product`, `create_price`, …)
 - Stripe-like deterministic IDs (`prod_*`, `price_*`, `lock_*`, `sub_*`)
-- Share minting helpers (`internal.rs`) and **Near-priced** `lock_for_product`; **USD** via **`oracle_on_call`** ([`oracle_receiver.rs`](src/oracle_receiver.rs)) + relay
+- Share minting helpers (`internal.rs`) and NEAR-denominated `lock_for_product` / `lock_for_subscription`
 - `unlock` (user-driven); operator **`epoch_stake`**, **`epoch_unstake`**, **`epoch_withdraw`**; user **`claim_unlocked_near`** → **`withdraw`**
 - `refresh_validator_balance` + pool callbacks; **`storage_withdraw`**
 - **EVENT_JSON** for lock/unlock, catalog, validators, epoch ops, claim/withdraw, pool withdraw-in ([`events.rs`](src/events.rs)) — `standard: "stake.dao"`, `version: "1.0.0"`, nested `data`

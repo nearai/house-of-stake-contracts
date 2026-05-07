@@ -9,8 +9,6 @@ pub mod governance;
 pub mod ids;
 pub mod internal;
 pub mod lock;
-pub mod oracle;
-pub mod oracle_receiver;
 pub mod pause;
 pub mod pool_callbacks;
 pub mod products;

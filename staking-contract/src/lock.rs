@@ -15,7 +15,6 @@ fn anchor_day_from_timestamp(ts: u64) -> u8 {
 #[near]
 impl Contract {
     /// Lock NEAR for a one-off product purchase. Attach the NEAR to lock.
-    /// For [`Currency::Usd`] catalog prices, use [`crate::oracle_receiver::Contract::oracle_on_call`] with a Burrow-style relay instead.
     #[payable]
     pub fn lock_for_product(&mut self, price_id: PriceId, lock_duration_ns: U64) -> LockId {
         self.assert_not_paused();
@@ -45,10 +44,6 @@ impl Contract {
         require!(
             product.status == CatalogStatus::Active,
             "Product not active"
-        );
-        require!(
-            price.currency == Currency::Near,
-            "USD-priced locks: use oracle_on_call (see oracle_receiver)"
         );
         require!(
             price.price_type == PriceType::OneOff,
@@ -93,10 +88,6 @@ impl Contract {
         require!(
             price.billing_period == Some(BillingPeriod::Monthly),
             "Only monthly billing is supported"
-        );
-        require!(
-            price.currency == Currency::Near,
-            "USD subscription locks: use an oracle relay (see oracle_receiver)"
         );
 
         let product_opt = self.products.get(&price.product_id).cloned();

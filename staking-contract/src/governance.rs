@@ -39,28 +39,6 @@ impl Contract {
     }
 
     #[payable]
-    pub fn set_oracle(&mut self, oracle_account_id: AccountId, oracle_max_age_ns: U64) {
-        assert_one_yocto();
-        self.assert_owner();
-        self.config.oracle_account_id = oracle_account_id;
-        self.config.oracle_max_age_ns = oracle_max_age_ns;
-    }
-
-    #[payable]
-    pub fn set_oracle_usd_price_asset_id(&mut self, asset_id: String) {
-        assert_one_yocto();
-        self.assert_owner();
-        self.config.oracle_usd_price_asset_id = asset_id;
-    }
-
-    #[payable]
-    pub fn set_oracle_recency_cap(&mut self, oracle_max_recency_duration_sec: u32) {
-        assert_one_yocto();
-        self.assert_owner();
-        self.config.oracle_max_recency_duration_sec = oracle_max_recency_duration_sec;
-    }
-
-    #[payable]
     pub fn set_per_lock_storage_stake(&mut self, per_lock_storage_stake: NearToken) {
         assert_one_yocto();
         self.assert_owner();
