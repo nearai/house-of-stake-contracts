@@ -65,7 +65,10 @@ All contracts are designed to be deployed without access keys, to make sure the 
   - A proposal has to be approved by one of the reviewers. When the proposal is approved, the latest snapshot of the
     veNEAR holders is requested from the veNEAR contract. The voting process starts after the proposal is approved or
     at the specified timestamp during the approval.
-  - Council members can veto (reject) a proposal during the timelock period.
+  - A reviewer can reject an unapproved proposal while it is in `Created`, moving it to the
+    `Rejected` status.
+  - Council members can veto a proposal during the timelock period (Classic) or while it is
+    Scheduled/Voting (FastTrack), moving it to the `Vetoed` status.
   - On-chain quorum: proposals require a minimum participation threshold (`quorum_threshold_bps` or `quorum_floor`,
     whichever is higher) and an approval threshold (`approval_threshold_bps`) to pass.
   - Proposals that have not been approved by a reviewer expire after a configurable deadline.
@@ -98,16 +101,15 @@ A FastTrack proposal moves through a series of statuses. Each transition is trig
    - If "For" votes reach the sandbox threshold (e.g. 30% of total veNEAR), the proposal graduates to `Scheduled`.
    - If the sandbox duration expires without reaching the threshold, the proposal becomes `Defeated`.
 
-3. **Scheduled** — The proposal is queued to start full voting on the next Monday (00:00 UTC).
-   - Only one proposal can be in active voting at a time. If another proposal is already voting, this one waits
-     for the next available Monday after that voting period ends.
+3. **Scheduled** — The proposal is queued to start full voting on the next Monday (00:00 CET).
+   - Up to `max_active_proposals` proposals can occupy active slots (Sandbox / Scheduled /
+     Voting / Timelock) simultaneously. If all slots are full, additional approved proposals
+     park in the FIFO pending queue with status `Queued` and are promoted as slots free up.
    - No new votes are cast during this waiting period.
-   - Council members can veto the proposal during this stage, moving it to `Rejected`.
 
 4. **Voting** — Full voting begins on Monday. All vote types are allowed: "For", "Against", "Abstain".
    - Users vote using their veNEAR balance from the snapshot taken at approval time.
    - Voters can change their vote during this period.
-   - Council members can still veto the proposal, moving it to `Rejected`.
    - When the voting duration expires, the result is evaluated:
      - **Quorum check**: total votes must meet the quorum threshold (% of supply) or the quorum floor (absolute minimum).
      - **Approval check**: "For" / ("For" + "Against") must meet the majority threshold. "Abstain" votes count toward quorum but not toward approval.
@@ -138,9 +140,10 @@ A FastTrack proposal moves through a series of statuses. Each transition is trig
   merkle proof for the given account. Since RPC nodes return execution at the end of the block, the snapshot has
   be taken at the end of the block.
 - The merkle tree is used to store the current state of the veNEAR holders. Each account stores the timestamp when
-  the account was last updated, the amount of locked NEAR, the amount of extra veNEAR that is accumulated during the
-  lockup period up the updated timestamp, the delegated NEAR, the delegated veNEAR, and whether this account delegates
-  to someone. This information is enough to calculate the current amount of veNEAR for the account.
+  the account was last updated, the amount of locked NEAR, the amount of extra veNEAR accumulated during the lockup
+  period up to the updated timestamp, the pooled NEAR and veNEAR delegated to this account by others, and the
+  account's outgoing partial delegations (a list of `(delegate, bps)` entries; the undelegated remainder implicitly
+  stays with the owner). This information is enough to calculate the current amount of veNEAR for the account.
 - The merkle tree also stores the global state, which includes the total amount of NEAR and veNEAR. During the snapshot,
   the global state is stored as well.
 - When user locks NEAR in the lockup, they immediately start to receive extra veNEAR for the new total locked NEAR
@@ -188,7 +191,7 @@ scripts/test_all.sh
 
 ```bash
 export ROOT_ACCOUNT_ID=hos01.testnet
-env CONTRACTS_SOURCE=release CHAIN_ID=testnet VOTING_DURATION_SEC=604800 scripts/deploy_all.sh $ROOT_ACCOUNT_ID
+env CONTRACTS_SOURCE=release CHAIN_ID=testnet CLASSIC_VOTING_DURATION_SEC=604800 scripts/deploy_all.sh $ROOT_ACCOUNT_ID
 ```
 
 ### Building release candidate
