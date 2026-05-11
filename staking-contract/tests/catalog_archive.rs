@@ -25,5 +25,5 @@ fn lock_for_product_rejects_archived_price() {
 
     let dur = c.config.min_lock_duration_ns.0.saturating_add(10_000);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    c.lock_for_product(price_id, U64(dur));
+    c.lock_for_product(Some(price_id), U64(dur), None);
 }

@@ -88,6 +88,25 @@ pub trait ExtSelfProducts {
         price_id: PriceId,
         expected_caller: AccountId,
     );
+    fn unarchive_product_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        product_id: ProductId,
+        expected_caller: AccountId,
+    );
+    fn unarchive_price_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        price_id: PriceId,
+        expected_caller: AccountId,
+    );
+    fn set_product_default_price_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        product_id: ProductId,
+        price_id: Option<PriceId>,
+        expected_caller: AccountId,
+    );
 }
 
 #[near]
@@ -268,6 +287,77 @@ impl Contract {
     }
 
     #[payable]
+    pub fn unarchive_product(&mut self, product_id: ProductId) -> Promise {
+        near_sdk::assert_one_yocto();
+        self.assert_not_paused();
+        let p = self.products.get(&product_id).cloned();
+        require!(p.is_some(), "Unknown product");
+        let p = p.unwrap();
+        self.assert_validator_allowlisted(&p.validator_id);
+        let expected_caller = env::predecessor_account_id();
+        let validator_id = p.validator_id.clone();
+        ext_staking_pool::ext(validator_id)
+            .with_static_gas(staking_pool::GET_OWNER_ID)
+            .get_owner_id()
+            .then(
+                ext_self_products::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
+                    .unarchive_product_after_get_owner(product_id, expected_caller),
+            )
+    }
+
+    #[payable]
+    pub fn unarchive_price(&mut self, price_id: PriceId) -> Promise {
+        near_sdk::assert_one_yocto();
+        self.assert_not_paused();
+        let pr = self.prices.get(&price_id).cloned();
+        require!(pr.is_some(), "Unknown price");
+        let pr = pr.unwrap();
+        let product = self.products.get(&pr.product_id).cloned();
+        require!(product.is_some(), "Unknown product");
+        let product = product.unwrap();
+        self.assert_validator_allowlisted(&product.validator_id);
+        let expected_caller = env::predecessor_account_id();
+        let validator_id = product.validator_id.clone();
+        ext_staking_pool::ext(validator_id)
+            .with_static_gas(staking_pool::GET_OWNER_ID)
+            .get_owner_id()
+            .then(
+                ext_self_products::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
+                    .unarchive_price_after_get_owner(price_id, expected_caller),
+            )
+    }
+
+    #[payable]
+    pub fn set_product_default_price(
+        &mut self,
+        product_id: ProductId,
+        price_id: Option<PriceId>,
+    ) -> Promise {
+        near_sdk::assert_one_yocto();
+        self.assert_not_paused();
+        let p = self.products.get(&product_id).cloned();
+        require!(p.is_some(), "Unknown product");
+        let p = p.unwrap();
+        self.assert_validator_allowlisted(&p.validator_id);
+        let expected_caller = env::predecessor_account_id();
+        let validator_id = p.validator_id.clone();
+        ext_staking_pool::ext(validator_id)
+            .with_static_gas(staking_pool::GET_OWNER_ID)
+            .get_owner_id()
+            .then(
+                ext_self_products::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
+                    .set_product_default_price_after_get_owner(
+                        product_id,
+                        price_id,
+                        expected_caller,
+                    ),
+            )
+    }
+
+    #[payable]
     pub fn delete_price(&mut self, price_id: PriceId) -> Promise {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
@@ -315,6 +405,7 @@ impl Contract {
             status: CatalogStatus::Active,
             created_ns: U64(env::block_timestamp()),
             price_ids: Vec::new(),
+            default_price_id: None,
             usage_count: 0,
         };
         self.products.insert(id.clone(), product);
@@ -366,6 +457,7 @@ impl Contract {
             .get(&product_id)
             .cloned()
             .expect("Unknown product");
+        p.default_price_id = None;
         p.status = CatalogStatus::Archived;
         self.products.insert(product_id, p);
     }
@@ -477,8 +569,10 @@ impl Contract {
             "Only the validator owner can call this method"
         );
         let mut pr = self.prices.get(&price_id).cloned().expect("Unknown price");
+        let product_id = pr.product_id.clone();
         pr.status = CatalogStatus::Archived;
-        self.prices.insert(price_id, pr);
+        self.prices.insert(price_id.clone(), pr);
+        self.clear_product_default_price_field_if_matches(&product_id, &price_id);
     }
 
     #[private]
@@ -496,6 +590,7 @@ impl Contract {
         );
         let pr = self.prices.get(&price_id).cloned().expect("Unknown price");
         require!(pr.usage_count == 0, "Price in use");
+        let pid = pr.product_id.clone();
         let mut product = self
             .products
             .get(&pr.product_id)
@@ -504,6 +599,99 @@ impl Contract {
         product.price_ids.retain(|x| x != &price_id);
         self.products.insert(pr.product_id.clone(), product);
         self.prices.remove(&price_id);
+        self.clear_product_default_price_field_if_matches(&pid, &price_id);
+    }
+
+    #[private]
+    pub fn unarchive_product_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        product_id: ProductId,
+        expected_caller: AccountId,
+    ) {
+        require!(is_promise_success(), "get_owner_id failed");
+        self.assert_not_paused();
+        require!(
+            pool_owner == expected_caller,
+            "Only the validator owner can call this method"
+        );
+        let mut p = self
+            .products
+            .get(&product_id)
+            .cloned()
+            .expect("Unknown product");
+        require!(
+            p.status == CatalogStatus::Archived,
+            "Product is not archived"
+        );
+        p.status = CatalogStatus::Active;
+        self.products.insert(product_id, p);
+    }
+
+    #[private]
+    pub fn unarchive_price_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        price_id: PriceId,
+        expected_caller: AccountId,
+    ) {
+        require!(is_promise_success(), "get_owner_id failed");
+        self.assert_not_paused();
+        require!(
+            pool_owner == expected_caller,
+            "Only the validator owner can call this method"
+        );
+        let mut pr = self.prices.get(&price_id).cloned().expect("Unknown price");
+        require!(
+            pr.status == CatalogStatus::Archived,
+            "Price is not archived"
+        );
+        pr.status = CatalogStatus::Active;
+        self.prices.insert(price_id, pr);
+    }
+
+    #[private]
+    pub fn set_product_default_price_after_get_owner(
+        &mut self,
+        #[callback] pool_owner: AccountId,
+        product_id: ProductId,
+        price_id: Option<PriceId>,
+        expected_caller: AccountId,
+    ) {
+        require!(is_promise_success(), "get_owner_id failed");
+        self.assert_not_paused();
+        require!(
+            pool_owner == expected_caller,
+            "Only the validator owner can call this method"
+        );
+        let mut product = self
+            .products
+            .get(&product_id)
+            .cloned()
+            .expect("Unknown product");
+        require!(product.status == CatalogStatus::Active, "Product archived");
+        match price_id {
+            None => {
+                product.default_price_id = None;
+            }
+            Some(pid) => {
+                let pr = self.prices.get(&pid).cloned().expect("Unknown price");
+                require!(
+                    pr.product_id == product_id,
+                    "Price does not belong to this product"
+                );
+                require!(
+                    pr.status == CatalogStatus::Active,
+                    "Only an active (unarchived) price can be the default"
+                );
+                require!(
+                    product.price_ids.iter().any(|x| x == &pid),
+                    "Price not listed on product"
+                );
+                product.default_price_id = Some(pid);
+            }
+        }
+        self.products.insert(product_id, product);
     }
 
     pub fn get_product(&self, product_id: ProductId) -> Option<Product> {
@@ -514,14 +702,22 @@ impl Contract {
         self.prices.get(&price_id).cloned()
     }
 
-    /// Paginated catalog index (creation order). Pair with [`Contract::get_product`].
-    pub fn list_product_ids(&self, from_index: u64, limit: u64) -> Vec<ProductId> {
+    pub fn get_product_default_price(&self, product_id: ProductId) -> Option<PriceId> {
+        self.products
+            .get(&product_id)
+            .and_then(|p| p.default_price_id.clone())
+    }
+
+    /// Paginated catalog rows (stable creation order in [`Contract::product_ids`]).
+    pub fn get_products(&self, from_index: u64, limit: u64) -> Vec<Product> {
         let len_u64 = self.product_ids.len() as u64;
         let mut out = Vec::new();
         let mut i = from_index;
         while i < len_u64 && (out.len() as u64) < limit {
             if let Some(id) = self.product_ids.get(i as u32) {
-                out.push(id.clone());
+                if let Some(p) = self.products.get(id).cloned() {
+                    out.push(p);
+                }
             }
             i += 1;
         }
@@ -530,6 +726,22 @@ impl Contract {
 }
 
 impl Contract {
+    /// Clears [`Product::default_price_id`] when it references **`price_id`** (e.g. price archived/deleted).
+    fn clear_product_default_price_field_if_matches(
+        &mut self,
+        product_id: &ProductId,
+        price_id: &PriceId,
+    ) {
+        let mut p = match self.products.get(product_id).cloned() {
+            Some(x) => x,
+            None => return,
+        };
+        if p.default_price_id.as_ref() == Some(price_id) {
+            p.default_price_id = None;
+            self.products.insert(product_id.clone(), p);
+        }
+    }
+
     fn remove_product_id_from_list(&mut self, product_id: &ProductId) {
         let len = self.product_ids.len();
         for i in 0..len {

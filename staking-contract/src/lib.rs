@@ -51,7 +51,7 @@ pub struct Contract {
     pub paused: bool,
     pub validators: LookupMap<AccountId, Validator>,
     pub validator_ids: Vector<AccountId>,
-    /// Stable ordering for [`crate::products::Contract::list_product_ids`].
+    /// Stable ordering for [`crate::products::Contract::get_products`].
     pub product_ids: Vector<ProductId>,
     pub products: LookupMap<ProductId, Product>,
     pub prices: LookupMap<PriceId, Price>,

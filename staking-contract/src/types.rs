@@ -86,6 +86,9 @@ pub struct Product {
     pub status: CatalogStatus,
     pub created_ns: U64,
     pub price_ids: Vec<PriceId>,
+    /// Default catalog price (`price_*`) for **`lock_for_product`** / **`lock_for_subscription`** when called with **`product_id`** and **`price_id: null`** (see **`set_product_default_price`**).
+    /// Only an **active** (unarchived) price id may be stored; archiving the product/price clears this when it matches.
+    pub default_price_id: Option<PriceId>,
     pub usage_count: u64,
 }
 

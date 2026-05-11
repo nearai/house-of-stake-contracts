@@ -18,8 +18,26 @@ fn anchor_day_from_timestamp(ts: u64) -> u8 {
 #[near]
 impl Contract {
     /// Lock NEAR for a one-off product purchase. Attach the NEAR to lock.
+    ///
+    /// Provide **exactly one** of **`price_id`** or **`product_id`**:
+    /// - **`price_id: Some`**, **`product_id: null`** — lock using that catalog price (same as always).
+    /// - **`price_id: null`**, **`product_id: Some`** — lock using [`Product::default_price_id`](crate::types::Product::default_price_id) for that product (`set_product_default_price`).
     #[payable]
-    pub fn lock_for_product(&mut self, price_id: PriceId, lock_duration_ns: U64) -> LockId {
+    pub fn lock_for_product(
+        &mut self,
+        price_id: Option<PriceId>,
+        lock_duration_ns: U64,
+        product_id: Option<ProductId>,
+    ) -> LockId {
+        let resolved = self.resolve_price_id_for_catalog_lock(price_id, product_id);
+        self.lock_for_product_with_price_id(resolved, lock_duration_ns)
+    }
+
+    fn lock_for_product_with_price_id(
+        &mut self,
+        price_id: PriceId,
+        lock_duration_ns: U64,
+    ) -> LockId {
         self.assert_not_paused();
 
         let buyer = env::predecessor_account_id();
@@ -50,7 +68,7 @@ impl Contract {
         );
         require!(
             price.price_type == PriceType::OneOff,
-            "Recurring prices: use lock_for_subscription"
+            "Recurring prices: use lock_for_subscription with price_id or product_id"
         );
         require!(
             price.billing_period.is_none(),
@@ -68,8 +86,19 @@ impl Contract {
 
     /// Lock NEAR for a **monthly recurring** catalog price (NEAR-denominated). One subscription row per
     /// `(account, product_id)`; [`Subscription::price_id`] is the active tier.
+    ///
+    /// Provide **exactly one** of **`price_id`** or **`product_id`** (same rules as [`Contract::lock_for_product`]).
     #[payable]
-    pub fn lock_for_subscription(&mut self, price_id: PriceId) -> LockId {
+    pub fn lock_for_subscription(
+        &mut self,
+        price_id: Option<PriceId>,
+        product_id: Option<ProductId>,
+    ) -> LockId {
+        let resolved = self.resolve_price_id_for_catalog_lock(price_id, product_id);
+        self.lock_for_subscription_with_price_id(resolved)
+    }
+
+    fn lock_for_subscription_with_price_id(&mut self, price_id: PriceId) -> LockId {
         self.assert_not_paused();
         let buyer = env::predecessor_account_id();
         self.ensure_min_storage_for_new_lock(&buyer);
@@ -460,6 +489,35 @@ impl Contract {
 }
 
 impl Contract {
+    fn resolve_price_id_for_catalog_lock(
+        &self,
+        price_id: Option<PriceId>,
+        product_id: Option<ProductId>,
+    ) -> PriceId {
+        match (price_id, product_id) {
+            (Some(pid), None) => pid,
+            (None, Some(prod_id)) => {
+                let pr_id = self
+                    .products
+                    .get(&prod_id)
+                    .and_then(|p| p.default_price_id.clone())
+                    .unwrap_or_else(|| env::panic_str("No default price for this product"));
+                let pr = self
+                    .prices
+                    .get(&pr_id)
+                    .cloned()
+                    .unwrap_or_else(|| env::panic_str("Unknown price"));
+                require!(
+                    pr.product_id == prod_id,
+                    "Default price does not belong to this product"
+                );
+                pr_id
+            }
+            (Some(_), Some(_)) => env::panic_str("Provide only one of price_id or product_id"),
+            (None, None) => env::panic_str("Provide price_id or product_id"),
+        }
+    }
+
     /// Phase B: at scheduled downgrade renewal, release catalog **tier-gap** stake (min high − min low for
     /// the completed period) as shares → same unstake queue as [`crate::unlock::Contract::unlock`].
     fn apply_downgrade_prorate_at_renewal(

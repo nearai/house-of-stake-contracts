@@ -86,6 +86,7 @@ async fn staking_epoch_stake_fails_when_nothing_pending_after_successful_stake()
         .args_json(json!({
             "price_id": price_id,
             "lock_duration_ns": "1000000000000000",
+            "product_id": null,
         }))
         .deposit(NearToken::from_near(50))
         .gas(WsGas::from_tgas(200))
@@ -157,6 +158,7 @@ async fn staking_two_locks_aggregate_then_single_epoch_stake_clears_pending()
             .args_json(json!({
                 "price_id": price_id,
                 "lock_duration_ns": lock_dur,
+                "product_id": null,
             }))
             .deposit(NearToken::from_near(50))
             .gas(WsGas::from_tgas(200))
@@ -255,6 +257,7 @@ async fn staking_pause_validator_blocks_new_lock_for_product()
         .args_json(json!({
             "price_id": price_id,
             "lock_duration_ns": "1000000000000000",
+            "product_id": null,
         }))
         .deposit(NearToken::from_near(50))
         .gas(WsGas::from_tgas(200))
@@ -306,6 +309,7 @@ async fn staking_contract_pause_blocks_epoch_stake() -> Result<(), Box<dyn std::
         .args_json(json!({
             "price_id": price_id,
             "lock_duration_ns": "1000000000000000",
+            "product_id": null,
         }))
         .deposit(NearToken::from_near(50))
         .gas(WsGas::from_tgas(200))
@@ -376,6 +380,7 @@ async fn staking_withdraw_clears_withdrawable_after_claim_unlocked_near()
         .args_json(json!({
             "price_id": price_id,
             "lock_duration_ns": lock_duration_ns,
+            "product_id": null,
         }))
         .deposit(NearToken::from_near(50))
         .gas(WsGas::from_tgas(200))
@@ -551,6 +556,7 @@ async fn staking_refresh_validator_balance_matches_pool_total_balance()
         .args_json(json!({
             "price_id": price_id,
             "lock_duration_ns": "1000000000000000",
+            "product_id": null,
         }))
         .deposit(NearToken::from_near(50))
         .gas(WsGas::from_tgas(200))

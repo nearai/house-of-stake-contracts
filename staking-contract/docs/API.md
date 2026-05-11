@@ -32,7 +32,8 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 | `get_validators` | `from_index: u64`, `limit: u64` | `Validator[]` | Paginated allowlist (stable ordering); each row’s **`validator_id`** is that pool’s account id. |
 | `get_product` | `product_id: string` | `Product \| null` | Catalog product (`prod_*`). |
 | `get_price` | `price_id: string` | `Price \| null` | Catalog price (`price_*`). |
-| `list_product_ids` | `from_index: u64`, `limit: u64` | `string[]` | Paginated product ids. |
+| `get_products` | `from_index: u64`, `limit: u64` | `Product[]` | Paginated catalog (stable creation order in contract index). |
+| `get_product_default_price` | `product_id: string` | `string \| null` | Same as **`Product.default_price_id`** from **`get_product`** / **`get_products`** — default catalog **`price_id`** (see **`set_product_default_price`**); **`null`** if unset. |
 | `get_lock` | `lock_id: string` | `Lock \| null` | Lock record (`lock_*`). |
 | `get_subscription` | `subscription_id: string` | `Subscription \| null` | Subscription (`sub_*`). |
 | `get_subscription_for_product` | `account_id`, `product_id` | `Subscription \| null` | Lookup by `(account, product)`. |
@@ -72,11 +73,14 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 | `create_product` | `validator_id`, `name`, `description` → creates `prod_*`. |
 | `edit_product` | `product_id`, `name`, `description`. |
 | `archive_product` | `product_id`. |
+| `unarchive_product` | `product_id` — restore **`CatalogStatus::Active`** (must currently be archived). |
 | `delete_product` | `product_id` (invariants: no attached prices in use — see contract). |
 | `create_price` | `product_id`, `name`, `description`, `amount` (`U128` yocto), `price_type`, `billing_period`, `lock_factor_near_months`. |
 | `edit_price` | `price_id`, `name`, `description`. |
 | `archive_price` | `price_id`. |
+| `unarchive_price` | `price_id` — restore **`CatalogStatus::Active`** (must currently be archived). |
 | `delete_price` | `price_id`. |
+| `set_product_default_price` | `product_id`, **`price_id`: optional** — set or clear **`Product.default_price_id`**. **`price_id`** must refer to an **active** (unarchived) catalog price on that product; archived prices are rejected (**unarchive** first). Cleared when **`archive_product`**, **`archive_price`** (if that price was the default), or **`delete_price`**. |
 
 ---
 
@@ -84,8 +88,8 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 
 | Method | Access | Deposit | Description |
 |--------|--------|---------|-------------|
-| `lock_for_product` | Buyer | **Attach NEAR** | One-off purchase: `price_id`, `lock_duration_ns` (`U64`). Returns new **`lock_id`**. Enforces min/max duration, min lock amount, NEAR price formula (`check_near_price_lock`). |
-| `lock_for_subscription` | Subscriber | **Attach NEAR** | Recurring tier lock / renewal path for **`price_id`** (monthly). |
+| `lock_for_product` | Buyer | **Attach NEAR** | One-off purchase: JSON **`price_id`**, **`lock_duration_ns`** (`U64`), **`product_id`**. Provide **exactly one** of **`price_id`** or **`product_id`** (the other **`null`**). If **`product_id`** is set, uses **`Product.default_price_id`** (must be a **one-off** price). Returns **`lock_id`**. |
+| `lock_for_subscription` | Subscriber | **Attach NEAR** | Recurring (monthly): **`price_id`**, **`product_id`** — same XOR rule as **`lock_for_product`**; default price must be **recurring** monthly. |
 | `cancel_subscription` | Subscriber | **1 yocto** | `product_id` — stop renewing after current period (`cancel_at_period_end`). |
 | `upgrade_subscription` | Subscriber | **Attach NEAR** (≥ `min_lock_amount`; tier differential) | `new_price_id` — upgrade recurring tier mid-period; returns **`LockId`**. |
 | `schedule_downgrade_subscription` | Subscriber | **1 yocto** | `target_price_id` — schedule lower tier for next billing period. |
@@ -177,7 +181,7 @@ Requires **`assert_not_paused`** and **`assert_operator`**. Each returns **`Prom
 
 **`#[private]`** — invoked only as promise callbacks after **`get_owner_id`** on the pool.
 
-`create_product_after_get_owner`, `edit_product_after_get_owner`, `archive_product_after_get_owner`, `delete_product_after_get_owner`, `create_price_after_get_owner`, `edit_price_after_get_owner`, `archive_price_after_get_owner`, `delete_price_after_get_owner`.
+`create_product_after_get_owner`, `edit_product_after_get_owner`, `archive_product_after_get_owner`, `delete_product_after_get_owner`, `create_price_after_get_owner`, `edit_price_after_get_owner`, `archive_price_after_get_owner`, `delete_price_after_get_owner`, `unarchive_product_after_get_owner`, `unarchive_price_after_get_owner`, `set_product_default_price_after_get_owner`.
 
 ---
 

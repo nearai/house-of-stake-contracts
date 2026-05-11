@@ -17,7 +17,7 @@ fn unlock_after_end_ns_requests_unlock() {
     let dur = c.config.min_lock_duration_ns.0.saturating_add(50_000);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), start_ts));
-    let lock_id = c.lock_for_product(price_id, U64(dur));
+    let lock_id = c.lock_for_product(Some(price_id), U64(dur), None);
 
     let lock = c.get_lock(lock_id.clone()).expect("lock");
     let end_ns = lock.end_ns.0;

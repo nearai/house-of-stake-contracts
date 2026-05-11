@@ -53,7 +53,7 @@ fn delete_price_fails_when_in_use() {
 
     let dur = c.config.min_lock_duration_ns.0.saturating_add(1);
     testing_env!(ctx(common::acct(common::BUYER), NearToken::from_near(50)));
-    let _ = c.lock_for_product(price_id.clone(), near_sdk::json_types::U64(dur));
+    let _ = c.lock_for_product(Some(price_id.clone()), near_sdk::json_types::U64(dur), None);
 
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
     c.delete_price_after_get_owner(

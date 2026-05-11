@@ -20,7 +20,7 @@ fn lock_for_product_rejects_duration_below_min() {
 
     let dur = c.config.min_lock_duration_ns.0.saturating_sub(1);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    c.lock_for_product(price_id, U64(dur));
+    c.lock_for_product(Some(price_id), U64(dur), None);
 }
 
 #[test]
@@ -32,7 +32,7 @@ fn lock_for_product_rejects_duration_above_max() {
 
     let dur = c.config.max_lock_duration_ns.0.saturating_add(1);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    c.lock_for_product(price_id, U64(dur));
+    c.lock_for_product(Some(price_id), U64(dur), None);
 }
 
 #[test]
@@ -44,7 +44,7 @@ fn lock_for_product_rejects_deposit_below_min_lock_amount() {
 
     let dur = c.config.min_lock_duration_ns.0.saturating_add(10_000);
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
-    c.lock_for_product(price_id, U64(dur));
+    c.lock_for_product(Some(price_id), U64(dur), None);
 }
 
 #[test]
@@ -55,10 +55,10 @@ fn lock_for_subscription_rejects_second_lock_same_period() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let _ = c.lock_for_subscription(price_id.clone());
+    let _ = c.lock_for_subscription(Some(price_id.clone()), None);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    c.lock_for_subscription(price_id);
+    c.lock_for_subscription(Some(price_id), None);
 }
 
 #[test]
@@ -70,7 +70,7 @@ fn lock_for_subscription_rejects_wrong_tier_at_renewal_without_upgrade() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let _ = c.lock_for_subscription(price_low.clone());
+    let _ = c.lock_for_subscription(Some(price_low.clone()), None);
 
     let sub = c
         .get_subscription_for_product(acct(BUYER), product_id)
@@ -78,7 +78,7 @@ fn lock_for_subscription_rejects_wrong_tier_at_renewal_without_upgrade() {
     let renew_ts = sub.end_ns.0;
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), renew_ts));
-    c.lock_for_subscription(price_high);
+    c.lock_for_subscription(Some(price_high), None);
 }
 
 #[test]
@@ -93,5 +93,5 @@ fn lock_for_product_fails_when_validator_paused() {
 
     let dur = c.config.min_lock_duration_ns.0.saturating_add(10_000);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    c.lock_for_product(price_id, U64(dur));
+    c.lock_for_product(Some(price_id), U64(dur), None);
 }

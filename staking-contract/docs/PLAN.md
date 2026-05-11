@@ -212,6 +212,7 @@ pub struct Product {
     pub status: CatalogStatus, // Active | Archived
     pub created_ns: U64,
     pub price_ids: Vec<PriceId>,
+    pub default_price_id: Option<PriceId>, // active price only; cleared on archive/delete paths
     pub usage_count: u64,
 }
 
@@ -307,7 +308,7 @@ sequenceDiagram
     participant User
     participant StakeDao as stake.dao
 
-    User->>StakeDao: lock_for_product(price_id, duration_ns) attached_deposit=N NEAR
+    User->>StakeDao: lock_for_product(price_id XOR product_id, duration_ns) attached_deposit=N NEAR
     StakeDao->>StakeDao: assert_not_paused, load Price and Product, assert validator Active
     StakeDao->>StakeDao: check_near_price_lock(price, N, duration_ns)
     StakeDao->>StakeDao: mint shares for N at validator (last balance + pending_to_stake)

@@ -50,7 +50,7 @@ Implemented in code:
 - `unlock` (user-driven); operator **`epoch_stake`**, **`epoch_unstake`**, **`epoch_withdraw`**; user **`claim_unlocked_near`** → **`withdraw`**
 - `refresh_validator_balance` + pool callbacks; **`storage_withdraw`**
 - **EVENT_JSON** for lock/unlock, catalog, validators, epoch ops, claim/withdraw, pool withdraw-in ([`events.rs`](src/events.rs)) — `standard: "stake.dao"`, `version: "1.0.0"`, nested `data`
-- **`list_product_ids`** (+ [`get_product`](src/products.rs)) for catalog discovery
+- **`get_products`**, **`get_product_default_price`**, catalog **`unarchive_*`**, **`set_product_default_price`**; **`lock_for_product`** / **`lock_for_subscription`** accept explicit **`price_id`** or **`product_id`** (uses **`Product.default_price_id`**) ([`products.rs`](src/products.rs), [`lock.rs`](src/lock.rs))
 
 Still to refine per [docs/PLAN.md](docs/PLAN.md) / [docs/ACTION_ITEMS.md](docs/ACTION_ITEMS.md):
 
