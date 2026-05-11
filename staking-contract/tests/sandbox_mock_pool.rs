@@ -28,6 +28,7 @@ async fn staking_get_validators_includes_allowlisted_pool() -> Result<(), Box<dy
         validator_owner.id(),
         &staking_wasm,
         &pool_wasm,
+        &[],
     )
     .await?;
     add_validator_pair(&staking, &pool).await?;
@@ -66,6 +67,7 @@ async fn staking_epoch_stake_fails_when_nothing_pending_after_successful_stake()
         validator_owner.id(),
         &staking_wasm,
         &pool_wasm,
+        &[],
     )
     .await?;
     add_validator_pair(&staking, &pool).await?;
@@ -136,6 +138,7 @@ async fn staking_two_locks_aggregate_then_single_epoch_stake_clears_pending()
         validator_owner.id(),
         &staking_wasm,
         &pool_wasm,
+        &[],
     )
     .await?;
     add_validator_pair(&staking, &pool).await?;
@@ -228,6 +231,7 @@ async fn staking_pause_validator_blocks_new_lock_for_product()
         validator_owner.id(),
         &staking_wasm,
         &pool_wasm,
+        &[],
     )
     .await?;
     add_validator_pair(&staking, &pool).await?;
@@ -289,6 +293,7 @@ async fn staking_contract_pause_blocks_epoch_stake() -> Result<(), Box<dyn std::
         validator_owner.id(),
         &staking_wasm,
         &pool_wasm,
+        &[],
     )
     .await?;
     add_validator_pair(&staking, &pool).await?;
@@ -358,6 +363,7 @@ async fn staking_withdraw_clears_withdrawable_after_claim_unlocked_near()
         validator_owner.id(),
         &staking_wasm,
         &pool_wasm,
+        &[],
     )
     .await?;
     add_validator_pair(&staking, &pool).await?;
@@ -477,6 +483,178 @@ async fn staking_withdraw_clears_withdrawable_after_claim_unlocked_near()
 }
 
 #[tokio::test]
+async fn staking_epoch_stake_rejects_non_operator_when_operators_configured()
+-> Result<(), Box<dyn std::error::Error>> {
+    let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
+    let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
+
+    let worker = near_workspaces::sandbox().await?;
+    let staking = worker.dev_create_account().await?;
+    let pool = worker.dev_create_account().await?;
+    let validator_owner = worker.dev_create_account().await?;
+    let operator = worker.dev_create_account().await?;
+    let buyer = worker.dev_create_account().await?;
+
+    let operator_id = operator.id().clone();
+    deploy_staking_and_mock_pool(
+        &staking,
+        &pool,
+        validator_owner.id(),
+        &staking_wasm,
+        &pool_wasm,
+        &[operator_id],
+    )
+    .await?;
+    add_validator_pair(&staking, &pool).await?;
+
+    let (_product_id, price_id) =
+        create_one_off_product_and_price(&staking, &pool, &validator_owner).await?;
+
+    buyer
+        .call(staking.id(), "storage_deposit")
+        .deposit(NearToken::from_millinear(500))
+        .gas(WsGas::from_tgas(50))
+        .transact()
+        .await?
+        .into_result()?;
+
+    buyer
+        .call(staking.id(), "lock_for_product")
+        .args_json(json!({
+            "price_id": price_id,
+            "lock_duration_ns": "1000000000000000",
+            "product_id": null,
+        }))
+        .deposit(NearToken::from_near(50))
+        .gas(WsGas::from_tgas(200))
+        .transact()
+        .await?
+        .into_result()?;
+
+    let denied = buyer
+        .call(staking.id(), "epoch_stake")
+        .args_json(json!({ "validator_id": pool.id() }))
+        .gas(WsGas::from_tgas(200))
+        .transact()
+        .await?;
+
+    assert!(
+        denied.is_failure(),
+        "buyer must not call epoch_stake when operators list is non-empty"
+    );
+
+    operator
+        .call(staking.id(), "epoch_stake")
+        .args_json(json!({ "validator_id": pool.id() }))
+        .gas(WsGas::from_tgas(200))
+        .transact()
+        .await?
+        .into_result()?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn staking_claim_unlocked_near_fails_before_epoch_withdraw()
+-> Result<(), Box<dyn std::error::Error>> {
+    let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
+    let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
+
+    let worker = near_workspaces::sandbox().await?;
+    let staking = worker.dev_create_account().await?;
+    let pool = worker.dev_create_account().await?;
+    let validator_owner = worker.dev_create_account().await?;
+    let buyer = worker.dev_create_account().await?;
+
+    deploy_staking_and_mock_pool(
+        &staking,
+        &pool,
+        validator_owner.id(),
+        &staking_wasm,
+        &pool_wasm,
+        &[],
+    )
+    .await?;
+    add_validator_pair(&staking, &pool).await?;
+
+    let (_product_id, price_id) =
+        create_one_off_product_and_price(&staking, &pool, &validator_owner).await?;
+
+    buyer
+        .call(staking.id(), "storage_deposit")
+        .deposit(NearToken::from_millinear(500))
+        .gas(WsGas::from_tgas(50))
+        .transact()
+        .await?
+        .into_result()?;
+
+    let lock_duration_ns = "1000000000";
+    let lock_id: String = buyer
+        .call(staking.id(), "lock_for_product")
+        .args_json(json!({
+            "price_id": price_id,
+            "lock_duration_ns": lock_duration_ns,
+            "product_id": null,
+        }))
+        .deposit(NearToken::from_near(50))
+        .gas(WsGas::from_tgas(200))
+        .transact()
+        .await?
+        .into_result()?
+        .json()?;
+
+    buyer
+        .call(staking.id(), "epoch_stake")
+        .args_json(json!({ "validator_id": pool.id() }))
+        .gas(WsGas::from_tgas(200))
+        .transact()
+        .await?
+        .into_result()?;
+
+    let lock: serde_json::Value = worker
+        .view(staking.id(), "get_lock")
+        .args_json(json!({ "lock_id": lock_id }))
+        .await?
+        .json()?;
+    let end_ns = json_u64_field(&lock["end_ns"]).expect("lock.end_ns");
+    fast_forward_until_timestamp(&worker, end_ns.saturating_add(1)).await?;
+
+    buyer
+        .call(staking.id(), "unlock")
+        .args_json(json!({ "lock_id": lock_id }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(WsGas::from_tgas(200))
+        .transact()
+        .await?
+        .into_result()?;
+
+    buyer
+        .call(staking.id(), "epoch_unstake")
+        .args_json(json!({ "validator_id": pool.id() }))
+        .gas(WsGas::from_tgas(200))
+        .transact()
+        .await?
+        .into_result()?;
+
+    worker.fast_forward(8000).await?;
+
+    let early_claim = buyer
+        .call(staking.id(), "claim_unlocked_near")
+        .args_json(json!({ "validator_id": pool.id() }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(WsGas::from_tgas(200))
+        .transact()
+        .await?;
+
+    assert!(
+        early_claim.is_failure(),
+        "claim_unlocked_near should fail before epoch_withdraw fills the pool withdraw bucket"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn staking_create_product_fails_if_signer_is_not_pool_owner()
 -> Result<(), Box<dyn std::error::Error>> {
     let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
@@ -494,6 +672,7 @@ async fn staking_create_product_fails_if_signer_is_not_pool_owner()
         validator_owner.id(),
         &staking_wasm,
         &pool_wasm,
+        &[],
     )
     .await?;
     add_validator_pair(&staking, &pool).await?;
@@ -536,6 +715,7 @@ async fn staking_refresh_validator_balance_matches_pool_total_balance()
         validator_owner.id(),
         &staking_wasm,
         &pool_wasm,
+        &[],
     )
     .await?;
     add_validator_pair(&staking, &pool).await?;

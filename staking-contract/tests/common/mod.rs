@@ -9,7 +9,7 @@ use near_sdk::{
     testing_env,
 };
 use staking_contract::internal::LOCK_FACTOR_DENOM;
-use staking_contract::types::{BillingPeriod, PriceType};
+use staking_contract::types::{BillingPeriod, PriceType, ProductId};
 use staking_contract::{Config, Contract};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -26,6 +26,8 @@ pub const VALIDATOR_OWNER_ACCOUNT: &str = "vowner.near";
 pub const BUYER: &str = "buyer.near";
 pub const NEW_OWNER: &str = "newowner.near";
 pub const GUARDIAN: &str = "guardian.near";
+/// Operator account used when `Config::operators` is non-empty (epoch ACL tests).
+pub const OPERATOR: &str = "operator.near";
 
 #[inline]
 pub fn one_yocto() -> NearToken {
@@ -56,6 +58,7 @@ pub fn ctx(pred: AccountId, attached: NearToken) -> VMContext {
         .attached_deposit(attached)
         .account_balance(NearToken::from_near(500))
         .block_height(42)
+        .epoch_height(100)
         .block_timestamp(1_700_000_000_000_000_000)
         .build()
 }
@@ -68,6 +71,7 @@ pub fn ctx_ts(pred: AccountId, attached: NearToken, block_timestamp_ns: u64) -> 
         .attached_deposit(attached)
         .account_balance(NearToken::from_near(500))
         .block_height(42)
+        .epoch_height(100)
         .block_timestamp(block_timestamp_ns)
         .build()
 }
@@ -82,6 +86,7 @@ fn ctx_catalog_callback() -> VMContext {
         .attached_deposit(NearToken::from_near(0))
         .account_balance(NearToken::from_near(500))
         .block_height(42)
+        .epoch_height(100)
         .block_timestamp(1_700_000_000_000_000_000)
         .build()
 }
@@ -187,6 +192,21 @@ pub fn setup_catalog_near_subscription(contract: &mut Contract) -> (String, Stri
         acct(VALIDATOR_OWNER_ACCOUNT),
     );
     (product_id, price_id)
+}
+
+/// After creating a price, set it as the product default so `lock_*` can resolve `product_id` only.
+pub fn set_default_price_for_product(
+    contract: &mut Contract,
+    product_id: ProductId,
+    price_id: PriceId,
+) {
+    testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
+    contract.set_product_default_price_after_get_owner(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        product_id,
+        Some(price_id),
+        acct(VALIDATOR_OWNER_ACCOUNT),
+    );
 }
 
 pub fn register_buyer(contract: &mut Contract) {

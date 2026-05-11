@@ -41,3 +41,27 @@ fn first_lock_succeeds_with_sufficient_combined_storage() {
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
     let _ = c.lock_for_product(Some(price_id), U64(dur), None);
 }
+
+#[test]
+#[should_panic(expected = "Top up storage for another lock")]
+fn third_lock_fails_when_prepaid_storage_insufficient_for_three_locks() {
+    let mut cfg = base_config();
+    cfg.per_lock_storage_stake = NearToken::from_millinear(50);
+    cfg.min_storage_deposit = NearToken::from_millinear(100);
+
+    let mut c = deploy_with_config(cfg);
+    let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_millinear(200)));
+    c.storage_deposit();
+
+    let dur = c.config.min_lock_duration_ns.0.saturating_add(1);
+    testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
+    let _ = c.lock_for_product(Some(price_id.clone()), U64(dur), None);
+    testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
+    let _ = c.lock_for_product(Some(price_id.clone()), U64(dur), None);
+
+    // Required for a third lock: 100m + 50m × 3 = 250m; only 200m prepaid.
+    testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
+    c.lock_for_product(Some(price_id), U64(dur), None);
+}
