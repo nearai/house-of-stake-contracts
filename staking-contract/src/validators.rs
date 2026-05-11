@@ -1,28 +1,13 @@
-use crate::epoch::ext_staking_pool;
-use crate::gas::{callbacks, staking_pool};
 use crate::*;
-use near_sdk::ext_contract;
 use near_sdk::json_types::{U64, U128};
-use near_sdk::{
-    AccountId, NearToken, Promise, assert_one_yocto, env, is_promise_success, near, require,
-};
-
-#[ext_contract(ext_self_validators)]
-#[allow(dead_code)] // Used by `ext_self_validators::ext` generated code; rustc does not count it as a read.
-trait ExtSelfValidators {
-    fn sync_validator_owner_after_get_owner(
-        &mut self,
-        #[callback] pool_owner: AccountId,
-        pool_account_id: AccountId,
-    );
-}
+use near_sdk::{AccountId, NearToken, env, near, require};
 
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
 pub struct Validator {
     pub pool_account_id: AccountId,
-    /// Snapshot of the staking pool's `get_owner_id()` at enrollment (`add_validator`) or after
-    /// `sync_validator_owner_from_pool`. Catalog ops re-verify the pool on each call.
+    /// Snapshot of the validator owner supplied at [`Contract::add_validator`] (informational; catalog
+    /// mutations always re-check the pool's `get_owner_id()` — see `products.rs`).
     pub owner_account_id: AccountId,
     pub status: ValidatorStatus,
 
@@ -103,44 +88,6 @@ impl Contract {
             .into_iter()
             .filter_map(|id| self.validators.get(&id).cloned())
             .collect()
-    }
-
-    /// Refresh [`Validator::owner_account_id`] from the pool's `get_owner_id()` (on-chain source of truth).
-    #[payable]
-    pub fn sync_validator_owner_from_pool(&mut self, pool_account_id: AccountId) -> Promise {
-        assert_one_yocto();
-        require!(
-            self.validators.get(&pool_account_id).is_some(),
-            "Unknown validator"
-        );
-        ext_staking_pool::ext(pool_account_id.clone())
-            .with_static_gas(staking_pool::GET_OWNER_ID)
-            .get_owner_id()
-            .then(
-                ext_self_validators::ext(env::current_account_id())
-                    .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
-                    .sync_validator_owner_after_get_owner(pool_account_id),
-            )
-    }
-
-    #[private]
-    pub fn sync_validator_owner_after_get_owner(
-        &mut self,
-        #[callback] pool_owner: AccountId,
-        pool_account_id: AccountId,
-    ) {
-        require!(
-            env::predecessor_account_id() == env::current_account_id(),
-            "private"
-        );
-        require!(is_promise_success(), "get_owner_id failed");
-        let mut v = self
-            .validators
-            .get(&pool_account_id)
-            .cloned()
-            .expect("Unknown validator");
-        v.owner_account_id = pool_owner;
-        self.validators.insert(pool_account_id, v);
     }
 
     #[payable]

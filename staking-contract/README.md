@@ -39,7 +39,7 @@ Typical sequence after locks exist:
 Implemented in code:
 
 - Config, owner / guardians / operators governance, pause, upgrade (`upgrade()` + `migrate_state`)
-- On-contract validator **allowlist** (`add_validator`, `sync_validator_owner_from_pool`, `pause_validator`, `remove_validator`)
+- On-contract validator **allowlist** (`add_validator`, `pause_validator`, `remove_validator`)
 - Validator-owner **catalog** (`create_product`, `create_price`, …)
 - Stripe-like deterministic IDs (`prod_*`, `price_*`, `lock_*`, `sub_*`)
 - Share minting helpers (`internal.rs`) and NEAR-denominated `lock_for_product` / `lock_for_subscription`
