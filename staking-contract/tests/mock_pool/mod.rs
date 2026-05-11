@@ -154,7 +154,7 @@ pub async fn add_validator_pair(
     staking
         .call(staking.id(), "add_validator")
         .args_json(json!({
-            "pool_account_id": pool.id(),
+            "validator_id": pool.id(),
         }))
         .deposit(NearToken::from_yoctonear(1))
         .gas(WsGas::from_tgas(50))

@@ -7,17 +7,14 @@ use near_sdk::testing_env;
 use staking_contract::types::ValidatorStatus;
 
 #[test]
-fn list_validator_ids_includes_registered_pool() {
+fn get_validators_includes_registered_pool() {
     let mut c = deploy();
 
     add_validator_allowlisted(&mut c);
 
-    let ids = c.list_validator_ids(0, 10);
-    assert_eq!(ids, vec![acct(POOL)]);
-
     let vs = c.get_validators(0, 10);
     assert_eq!(vs.len(), 1);
-    assert_eq!(vs[0].pool_account_id, acct(POOL));
+    assert_eq!(vs[0].validator_id, acct(POOL));
     assert_eq!(vs[0].status, ValidatorStatus::Active);
 }
 

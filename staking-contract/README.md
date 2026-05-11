@@ -6,6 +6,7 @@ NEAR smart contract for pooled staking tied to NEAR AI **products** and **prices
 
 | File | Purpose |
 |------|---------|
+| [docs/API.md](docs/API.md) | Public contract methods (RPC-facing API) |
 | [docs/DESIGN.md](docs/DESIGN.md) | Readable architecture summary + pointers |
 | [docs/PLAN.md](docs/PLAN.md) | Full detailed design (exported from planning session) |
 | [docs/ACTION_ITEMS.md](docs/ACTION_ITEMS.md) | Open work / backlog vs design |

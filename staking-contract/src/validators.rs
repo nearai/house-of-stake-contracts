@@ -5,7 +5,8 @@ use near_sdk::{AccountId, NearToken, env, near, require};
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
 pub struct Validator {
-    pub pool_account_id: AccountId,
+    /// Staking pool contract account for this validator row (= catalog `validator_id` / lock `validator_id`).
+    pub validator_id: AccountId,
     pub status: ValidatorStatus,
 
     pub total_shares: U128,
@@ -31,16 +32,16 @@ impl Contract {
     /// Contract owner: add a validator pool to the allowlist. Pool ownership for catalog operations is
     /// always verified via `get_owner_id()` on the pool ([`crate::products`]).
     #[payable]
-    pub fn add_validator(&mut self, pool_account_id: AccountId) {
+    pub fn add_validator(&mut self, validator_id: AccountId) {
         near_sdk::assert_one_yocto();
         self.assert_owner();
         require!(
-            self.validators.get(&pool_account_id).is_none(),
+            self.validators.get(&validator_id).is_none(),
             "Validator already exists"
         );
 
         let v = Validator {
-            pool_account_id: pool_account_id.clone(),
+            validator_id: validator_id.clone(),
             status: ValidatorStatus::Active,
             total_shares: U128(0),
             total_staked_balance: NearToken::from_near(0),
@@ -53,56 +54,51 @@ impl Contract {
             pending_user_unstake_total: NearToken::from_near(0),
             tx_status: TransactionStatus::Idle,
         };
-        self.validators.insert(pool_account_id.clone(), v);
-        self.validator_ids.push(pool_account_id.clone());
-        crate::events::log_validator_added(&pool_account_id);
+        self.validators.insert(validator_id.clone(), v);
+        self.validator_ids.push(validator_id.clone());
+        crate::events::log_validator_added(&validator_id);
     }
 
-    pub fn get_validator(&self, pool_account_id: AccountId) -> Option<Validator> {
-        self.validators.get(&pool_account_id).cloned()
+    pub fn get_validator(&self, validator_id: AccountId) -> Option<Validator> {
+        self.validators.get(&validator_id).cloned()
     }
 
-    pub fn list_validator_ids(&self, from_index: u64, limit: u64) -> Vec<AccountId> {
+    /// Paginated validator records (stable allowlist order in [`Contract::validator_ids`]).
+    pub fn get_validators(&self, from_index: u64, limit: u64) -> Vec<Validator> {
         let len_u64 = self.validator_ids.len() as u64;
         let mut out = Vec::new();
         let mut i = from_index;
         while i < len_u64 && (out.len() as u64) < limit {
             if let Some(id) = self.validator_ids.get(i as u32) {
-                out.push(id.clone());
+                if let Some(v) = self.validators.get(id).cloned() {
+                    out.push(v);
+                }
             }
             i += 1;
         }
         out
     }
 
-    /// Paginated validator records (same ordering as [`Contract::list_validator_ids`]).
-    pub fn get_validators(&self, from_index: u64, limit: u64) -> Vec<Validator> {
-        self.list_validator_ids(from_index, limit)
-            .into_iter()
-            .filter_map(|id| self.validators.get(&id).cloned())
-            .collect()
-    }
-
     #[payable]
-    pub fn pause_validator(&mut self, pool_account_id: AccountId) {
+    pub fn pause_validator(&mut self, validator_id: AccountId) {
         near_sdk::assert_one_yocto();
         self.assert_owner();
         let mut v = self
             .validators
-            .get(&pool_account_id)
+            .get(&validator_id)
             .cloned()
             .expect("Unknown validator");
         v.status = ValidatorStatus::Paused;
-        self.validators.insert(pool_account_id, v);
+        self.validators.insert(validator_id, v);
     }
 
     #[payable]
-    pub fn remove_validator(&mut self, pool_account_id: AccountId) {
+    pub fn remove_validator(&mut self, validator_id: AccountId) {
         near_sdk::assert_one_yocto();
         self.assert_owner();
         let v = self
             .validators
-            .get(&pool_account_id)
+            .get(&validator_id)
             .cloned()
             .expect("Unknown validator");
         require!(
@@ -115,24 +111,24 @@ impl Contract {
         );
         let mut v = v;
         v.status = ValidatorStatus::Removed;
-        self.validators.insert(pool_account_id, v);
+        self.validators.insert(validator_id, v);
     }
 }
 
 impl Contract {
     /// Pool must be on the allowlist. Catalog methods confirm the caller against the pool's
     /// `get_owner_id()` via a cross-contract call (see `products.rs`).
-    pub fn assert_validator_allowlisted(&self, pool_account_id: &AccountId) {
+    pub fn assert_validator_allowlisted(&self, validator_id: &AccountId) {
         require!(
-            self.validators.get(pool_account_id).is_some(),
+            self.validators.get(validator_id).is_some(),
             "Unknown validator"
         );
     }
 
-    pub fn assert_validator_active_for_lock(&self, pool_account_id: &AccountId) {
+    pub fn assert_validator_active_for_lock(&self, validator_id: &AccountId) {
         let v = self
             .validators
-            .get(pool_account_id)
+            .get(validator_id)
             .expect("Unknown validator");
         require!(
             v.status == ValidatorStatus::Active,

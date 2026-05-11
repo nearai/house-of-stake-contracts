@@ -12,8 +12,8 @@ use near_workspaces::types::{Gas as WsGas, NearToken};
 use serde_json::json;
 
 #[tokio::test]
-async fn staking_list_validator_ids_and_get_validators_match_add_validator()
--> Result<(), Box<dyn std::error::Error>> {
+async fn staking_get_validators_includes_allowlisted_pool() -> Result<(), Box<dyn std::error::Error>>
+{
     let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
     let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
 
@@ -32,16 +32,6 @@ async fn staking_list_validator_ids_and_get_validators_match_add_validator()
     .await?;
     add_validator_pair(&staking, &pool).await?;
 
-    let ids: Vec<String> = worker
-        .view(staking.id(), "list_validator_ids")
-        .args_json(json!({ "from_index": 0_u64, "limit": 10_u64 }))
-        .await?
-        .json()?;
-    assert!(
-        ids.iter().any(|id| id == pool.id().as_str()),
-        "list_validator_ids should include the allowlisted pool"
-    );
-
     let validators: Vec<serde_json::Value> = worker
         .view(staking.id(), "get_validators")
         .args_json(json!({ "from_index": 0_u64, "limit": 10_u64 }))
@@ -49,7 +39,7 @@ async fn staking_list_validator_ids_and_get_validators_match_add_validator()
         .json()?;
     let found = validators
         .iter()
-        .any(|v| v["pool_account_id"].as_str() == Some(pool.id().as_str()));
+        .any(|v| v["validator_id"].as_str() == Some(pool.id().as_str()));
     assert!(
         found,
         "get_validators should return the validator row for the pool"
@@ -177,7 +167,7 @@ async fn staking_two_locks_aggregate_then_single_epoch_stake_clears_pending()
 
     let v_mid: serde_json::Value = worker
         .view(staking.id(), "get_validator")
-        .args_json(json!({ "pool_account_id": pool.id() }))
+        .args_json(json!({ "validator_id": pool.id() }))
         .await?
         .json()?;
     let pending_mid = json_near_token_yocto(&v_mid["pending_to_stake"]).unwrap_or(0);
@@ -196,7 +186,7 @@ async fn staking_two_locks_aggregate_then_single_epoch_stake_clears_pending()
 
     let v_after: serde_json::Value = worker
         .view(staking.id(), "get_validator")
-        .args_json(json!({ "pool_account_id": pool.id() }))
+        .args_json(json!({ "validator_id": pool.id() }))
         .await?
         .json()?;
     assert_eq!(
@@ -245,7 +235,7 @@ async fn staking_pause_validator_blocks_new_lock_for_product()
 
     staking
         .call(staking.id(), "pause_validator")
-        .args_json(json!({ "pool_account_id": pool.id() }))
+        .args_json(json!({ "validator_id": pool.id() }))
         .deposit(NearToken::from_yoctonear(1))
         .gas(WsGas::from_tgas(50))
         .transact()
@@ -593,7 +583,7 @@ async fn staking_refresh_validator_balance_matches_pool_total_balance()
 
     let v: serde_json::Value = worker
         .view(staking.id(), "get_validator")
-        .args_json(json!({ "pool_account_id": pool.id() }))
+        .args_json(json!({ "validator_id": pool.id() }))
         .await?
         .json()?;
     let recorded = json_near_token_yocto(&v["total_staked_balance"]).unwrap_or(0);

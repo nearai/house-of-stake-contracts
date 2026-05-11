@@ -106,7 +106,7 @@ Add a new crate inside the workspace mirroring sibling crates. Suggested files (
 - `governance.rs` — contract-owner setters (`set_*`, `propose_new_owner_account_id`, `accept_ownership`), `assert_owner`, `assert_guardian`, `assert_validator_owner(validator_id)`.
 - `pause.rs` — `pause`/`unpause`/`is_paused` (port [venear-contract/src/pause.rs](house-of-stake-contracts/venear-contract/src/pause.rs)).
 - `upgrade.rs` — `upgrade()` extern + `migrate_state` (port [venear-contract/src/upgrade.rs](house-of-stake-contracts/venear-contract/src/upgrade.rs)).
-- `validators.rs` — `Validator` model and the on-contract validator allowlist (the `validators` map itself); `add_validator`/`pause_validator`/`remove_validator`/`set_validator_owner`/`list_validators`; share-pool math per validator.
+- `validators.rs` — `Validator` model and the on-contract validator allowlist (the `validators` map itself); `add_validator`/`pause_validator`/`remove_validator`/`set_validator_owner`/`get_validators`; share-pool math per validator.
 - `products.rs` — `Product`, `Price`, lifecycle (`create_product`, `edit_product`, `archive_product`, `delete_product`, plus parallel `*_price` methods). All gated by `assert_validator_owner` for the product's validator.
 - `subscriptions.rs` — `Subscription` model and lookup helpers.
 - `internal.rs` — share pool math, `check_near_price_lock` (NEAR-only duration-weighted sufficiency vs catalog line item).
@@ -156,7 +156,7 @@ The validator allowlist is the contract-internal `validators: UnorderedMap<Accou
 
 ```rust
 pub struct Validator {
-    pub pool_account_id: AccountId,
+    pub validator_id: AccountId,
     pub status: ValidatorStatus,             // Active | Paused | Removed
 
     pub total_shares: U128,                  // contract-level total shares for this validator
@@ -184,7 +184,7 @@ Share math (per-validator):
 sum over accounts a of  a.shares_by_validator[v]  ==  validators[v].total_shares
 ```
 
-A view method `get_validator(validator_id) -> Validator` (and a paginated `list_validators`) exposes it for off-chain consumers and for unit tests that assert the invariant after each mutation.
+A view method `get_validator(validator_id) -> Validator` (and a paginated `get_validators`) exposes it for off-chain consumers and for unit tests that assert the invariant after each mutation.
 
 ### 4.4 Product / Price / Subscription
 
@@ -390,10 +390,10 @@ Two distinct roles. The contract owner administers the protocol; each validator 
 - `set_lock_bounds`, `set_min_lock_amount`, `set_min_storage_deposit`, `set_per_lock_storage_stake`, `set_epoch_unstake_settle_epochs` (see [governance.rs](../src/governance.rs)).
 
 Validator allowlist (contract owner only):
-- `add_validator(pool_account_id)` — synchronous; inserts into the on-contract `validators` map with `total_shares = 0`, `status = Active` (the on-contract `validators` map is itself the allowlist; see §4.2). Pool ownership for catalog changes is always verified via on-chain `get_owner_id` (§6).
-- `set_validator_owner(pool_account_id, new_owner)` — contract owner can rotate a validator's owner (e.g., after a SputnikDAO migration).
-- `pause_validator(pool_account_id)` — flips `status = Paused`; no new locks; existing locks unchanged.
-- `remove_validator(pool_account_id)` — flips `status = Removed`; permitted only when `total_shares == 0 && pending_to_stake == 0 && pending_to_unstake == 0 && pending_to_withdraw == 0`. (Resolves the README "TODO: handle the validators removed from whitelist".)
+- `add_validator(validator_id)` — synchronous; inserts into the on-contract `validators` map with `total_shares = 0`, `status = Active` (the on-contract `validators` map is itself the allowlist; see §4.2). Pool ownership for catalog changes is always verified via on-chain `get_owner_id` (§6).
+- `set_validator_owner(validator_id, new_owner)` — contract owner can rotate a validator's owner (e.g., after a SputnikDAO migration).
+- `pause_validator(validator_id)` — flips `status = Paused`; no new locks; existing locks unchanged.
+- `remove_validator(validator_id)` — flips `status = Removed`; permitted only when `total_shares == 0 && pending_to_stake == 0 && pending_to_unstake == 0 && pending_to_withdraw == 0`. (Resolves the README "TODO: handle the validators removed from whitelist".)
 
 ### 6.2 Validator-owner methods (`assert_validator_owner(validator_id)`)
 
@@ -460,7 +460,7 @@ Extend [common/src/events.rs](house-of-stake-contracts/common/src/events.rs) (ne
 2. **Subscription month length** — **decided: calendar months, Stripe-anchored** (see §5.2). Open sub-question: confirm `avg_month_ns = 30.4375 days` as the divisor for the price-formula `duration_months_equivalent` on top-ups, or use the exact `(new_end_ns - old_end_ns)` in nanoseconds with the price factor expressed in NEAR-nanoseconds.
 3. **Operator allowlist** — empty (permissionless) by default vs initial NEAR AI ops accounts. Default proposed: permissionless with rate-limit on `epoch_*` (one call per validator per epoch).
 4. **veNEAR integration** — deferred to v2; designed-in seam: emit a `lock_create`/`unlock_settled` event the veNEAR side can consume, plus reserve a `register_with_venear: bool` field on `Lock`.
-5. **Validator allowlist source** — **decided: stake.dao maintains its own internal allowlist** (the `validators` map). It is unrelated to the HoS staking pool whitelist consumed by the lockup contract. The contract owner adds entries via `add_validator(pool_account_id)`; catalog/auth uses each pool’s `get_owner_id()` (see §6).
+5. **Validator allowlist source** — **decided: stake.dao maintains its own internal allowlist** (the `validators` map). It is unrelated to the HoS staking pool whitelist consumed by the lockup contract. The contract owner adds entries via `add_validator(validator_id)`; catalog/auth uses each pool’s `get_owner_id()` (see §6).
 6. **Stripe ID suffix lengths** — proposed: 14 chars for `prod_`, 24 chars for `price_`, 17 chars for `sub_`/`lock_` (matches Stripe's observed lengths). Confirm before launch since they are externally observable and parsers may rely on length.
 
 ## 12. Testing strategy
