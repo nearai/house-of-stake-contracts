@@ -79,7 +79,8 @@ impl Contract {
         self.assert_validator_active_for_lock(&validator_id);
 
         let dur_u128 = u128::from(dur);
-        check_near_price_lock(&price, locked.as_yoctonear(), dur_u128).expect("price check");
+        check_near_price_lock(&price, locked.as_yoctonear(), dur_u128)
+            .unwrap_or_else(|e| env::panic_str(e));
 
         self.finalize_product_lock(buyer, price, product, locked, dur_u128)
     }
@@ -154,13 +155,31 @@ impl Contract {
                         "This subscription period already has an active lock"
                     );
                 }
+                (sub, sid, false)
+            } else if sub.cancel_at_period_end {
+                // Period has ended with cancel-at-end: remove stale index + row so this call creates a
+                // fresh subscription row (same path as first-time subscribe).
+                self.subscription_by_account_product.remove(&sub_key);
+                self.subscriptions.remove(sid.as_str());
+                let anchor = anchor_day_from_timestamp(now);
+                let end = crate::subscriptions::add_months_stripe_style(anchor, 1, now);
+                let sid_new = crate::ids::next_subscription_id(&mut self.id_nonce);
+                let sub_new = Subscription {
+                    subscription_id: sid_new.clone(),
+                    account_id: buyer.clone(),
+                    product_id: product.product_id.clone(),
+                    price_id: price_id.clone(),
+                    start_ns: U64(now),
+                    end_ns: U64(end),
+                    anchor_day: anchor,
+                    last_lock_id: String::new(),
+                    status: SubscriptionStatus::Active,
+                    cancel_at_period_end: false,
+                    pending_downgrade_price_id: None,
+                };
+                (sub_new, sid_new, true)
             } else {
-                // Renewal window: honour cancel / scheduled downgrade before extending period.
-                if sub.cancel_at_period_end {
-                    sub.status = SubscriptionStatus::Cancelled;
-                    self.subscriptions.insert(sid.clone(), sub);
-                    env::panic_str("Subscription cancelled; renewal not allowed");
-                }
+                // Renewal window: scheduled downgrade / extend billing period.
                 if let Some(low_id) = sub.pending_downgrade_price_id.take() {
                     let high_price = self
                         .prices
@@ -187,8 +206,8 @@ impl Contract {
                 sub.start_ns = U64(start);
                 sub.end_ns = U64(end);
                 sub.status = SubscriptionStatus::Active;
+                (sub, sid, false)
             }
-            (sub, sid, false)
         } else {
             let anchor = anchor_day_from_timestamp(now);
             let end = crate::subscriptions::add_months_stripe_style(anchor, 1, now);

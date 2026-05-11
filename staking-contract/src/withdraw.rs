@@ -49,8 +49,13 @@ impl Contract {
         // the last claims leave stranded NEAR in `pending_to_withdraw` for `sweep_stranded_withdraw_bucket`.
         // Use U256 for (w * o) / t so yocto-scale products do not saturate u128.
         let credit_raw = (U256::from(w_y) * U256::from(o_y)) / U256::from(t_y);
-        let mut credit_yocto = credit_raw.as_u128();
-        credit_yocto = credit_yocto.min(o_y).min(w_y);
+        let mut credit_yocto = credit_raw.as_u128().min(o_y).min(w_y);
+        // Integer division can round down to zero while `w`, `o`, and `t` are positive (e.g. `w=1`, `o=1`,
+        // `t=2`). Without a dust rule, `claim_unlocked_near` would panic and the bucket stays stuck.
+        // Grant one yocto (capped by `min(o,w)`) so at least one claimant can drain tiny buckets.
+        if credit_yocto == 0 && w_y > 0 && o_y > 0 {
+            credit_yocto = 1.min(o_y).min(w_y);
+        }
         require!(credit_yocto > 0, "Nothing to claim (rounding)");
 
         let credit = NearToken::from_yoctonear(credit_yocto);
@@ -149,6 +154,21 @@ mod tests {
         let t: u128 = 100;
         let c = ((U256::from(w) * U256::from(o)) / U256::from(t)).as_u128();
         assert_eq!(c, 30);
+    }
+
+    /// `floor(w*o/t)` is zero but bucket and liability are positive — claim uses 1 yocto dust rule.
+    #[test]
+    fn pro_rata_tiny_bucket_dust_minimum() {
+        let w_y: u128 = 1;
+        let o_y: u128 = 1;
+        let t_y: u128 = 2;
+        let floor = ((U256::from(w_y) * U256::from(o_y)) / U256::from(t_y)).as_u128();
+        assert_eq!(floor, 0);
+        let mut credit = floor.min(o_y).min(w_y);
+        if credit == 0 && w_y > 0 && o_y > 0 {
+            credit = 1.min(o_y).min(w_y);
+        }
+        assert_eq!(credit, 1);
     }
 
     /// `w * o` can exceed `u128::MAX` at yocto scale; pro-rata must use `U256` for the product.

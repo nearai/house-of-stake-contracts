@@ -18,6 +18,23 @@ pub fn effective_stake_yocto(total_staked_balance: NearToken, pending_to_stake: 
         .saturating_add(pending_to_stake.as_yoctonear())
 }
 
+/// NEAR backing **remaining** circulating shares: gross effective stake minus NEAR already earmarked in
+/// [`crate::validators::Validator::pending_to_unstake`] (queued exits not yet executed on the pool).
+///
+/// **Solvency:** [`crate::internal::near_from_shares`] must not use gross `effective_stake_yocto` alone after
+/// shares burn down: otherwise the first exit would price against the full pool while `pending_to_unstake`
+/// is unchanged, and the second exit could again price remaining shares against the same gross — inflating
+/// total queued unstake above what remaining shares represent. Subtracting `pending_to_unstake` before pricing
+/// each exit keeps sequential unlocks from double-counting the same backing NEAR.
+pub fn effective_stake_for_share_exit(
+    total_staked_balance: NearToken,
+    pending_to_stake: NearToken,
+    pending_to_unstake: NearToken,
+) -> u128 {
+    effective_stake_yocto(total_staked_balance, pending_to_stake)
+        .saturating_sub(pending_to_unstake.as_yoctonear())
+}
+
 /// Mint shares for a new deposit. First deposit: 1:1 shares to yocto.
 pub fn mint_shares(total_shares: u128, effective_total: u128, deposit_yocto: u128) -> u128 {
     if total_shares == 0 || effective_total == 0 {
@@ -98,6 +115,22 @@ mod tests {
     fn mint_pro_rata() {
         let s = mint_shares(2_000, 4_000, 1_000);
         assert_eq!(s, 500);
+    }
+
+    /// Two half-share exits in one epoch must not exceed one full exit (no double-count gross pool).
+    #[test]
+    fn sequential_share_exit_net_effective_totals_to_gross() {
+        let gross = 100u128;
+        let ts0 = 100u128;
+        let sh = 50u128;
+        let pu0 = 0u128;
+        let eff1 = gross.saturating_sub(pu0);
+        let n1 = near_from_shares(sh, eff1, ts0);
+        let pu1 = pu0.saturating_add(n1);
+        let ts1 = ts0.saturating_sub(sh);
+        let eff2 = gross.saturating_sub(pu1);
+        let n2 = near_from_shares(sh, eff2, ts1);
+        assert_eq!(n1.saturating_add(n2), gross);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use crate::internal::{effective_stake_yocto, near_from_shares};
+use crate::internal::{effective_stake_for_share_exit, near_from_shares};
 use crate::*;
 use near_sdk::json_types::U128;
 use near_sdk::{NearToken, env, near, require};
@@ -37,7 +37,12 @@ impl Contract {
 
 impl Contract {
     /// Release staking shares into the same unstake queue as [`Contract::unlock`] (epoch settlement → claim).
-    /// Returns NEAR yocto amount moved to `user_pending_unstake` for this user/validator.
+    ///
+    /// Pricing uses [`crate::internal::effective_stake_for_share_exit`], not raw
+    /// `effective_stake_yocto(total_staked_balance, pending_to_stake)` alone: **gross** backing minus NEAR
+    /// already queued in [`Validator::pending_to_unstake`]. That way two users exiting back-to-back split the
+    /// same notional pool (the second exit does not re-value remaining shares against gross balance while
+    /// ignoring NEAR already allocated to the first exit). Returns NEAR yocto moved into `user_pending_unstake`.
     pub(crate) fn queue_shares_unstake(
         &mut self,
         account_id: AccountId,
@@ -51,9 +56,18 @@ impl Contract {
             .cloned()
             .unwrap_or_else(|| env::panic_str("Unknown validator"));
 
-        let eff = effective_stake_yocto(v.total_staked_balance, v.pending_to_stake);
         let ts = v.total_shares.0;
         require!(ts > 0 && ts >= shares_remove, "share underflow");
+
+        let eff = effective_stake_for_share_exit(
+            v.total_staked_balance,
+            v.pending_to_stake,
+            v.pending_to_unstake,
+        );
+        require!(
+            eff > 0,
+            "No effective stake remaining for exit pricing (accounting invariant)"
+        );
 
         let near_amt = near_from_shares(shares_remove, eff, ts);
         let near_token = NearToken::from_yoctonear(near_amt);

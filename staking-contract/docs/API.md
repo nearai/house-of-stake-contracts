@@ -90,7 +90,7 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 |--------|--------|---------|-------------|
 | `lock_for_product` | Buyer | **Attach NEAR** | One-off purchase: JSON **`price_id`**, **`lock_duration_ns`** (`U64`), **`product_id`**. Provide **exactly one** of **`price_id`** or **`product_id`** (the other **`null`**). If **`product_id`** is set, uses **`Product.default_price_id`** (must be a **one-off** price). Returns **`lock_id`**. |
 | `lock_for_subscription` | Subscriber | **Attach NEAR** | Recurring (monthly): **`price_id`**, **`product_id`** — same XOR rule as **`lock_for_product`**; default price must be **recurring** monthly. |
-| `cancel_subscription` | Subscriber | **1 yocto** | `product_id` — stop renewing after current period (`cancel_at_period_end`). |
+| `cancel_subscription` | Subscriber | **1 yocto** | `product_id` — stop renewing after current period (`cancel_at_period_end`). After **`end_ns`**, the next **`lock_for_subscription`** replaces the row so the user may subscribe again (index is not left stale). |
 | `upgrade_subscription` | Subscriber | **Attach NEAR** (≥ `min_lock_amount`; tier differential) | `new_price_id` — upgrade recurring tier mid-period; returns **`LockId`**. |
 | `schedule_downgrade_subscription` | Subscriber | **1 yocto** | `target_price_id` — schedule lower tier for next billing period. |
 
@@ -106,14 +106,14 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 
 ## Epoch operations — operators (`epoch.rs`)
 
-Requires **`assert_not_paused`** and **`assert_operator`**. Each returns **`Promise`** to the staking pool / callbacks.
+**`epoch_stake`**, **`epoch_unstake`**, **`epoch_withdraw`**, **`refresh_validator_balance`:** require **`assert_not_paused`** and **`assert_operator`** (if **`config.operators`** is non-empty, calls must come from a listed operator; if empty, any account may call — same rules for all four). Each **`epoch_*`** and **`refresh_validator_balance`** returns a **`Promise`** to the staking pool / callbacks.
 
 | Method | Description |
 |--------|-------------|
 | `epoch_stake` | `validator_pool` — stake **`pending_to_stake`** via pool **`deposit_and_stake`**. Serialized per pool (`tx_status`, one stake batch per epoch). |
 | `epoch_unstake` | `validator_pool` — unstake **`pending_to_unstake`**. Gated by **`epoch_unstake_settle_epochs`** vs last unstake epoch. |
 | `epoch_withdraw` | `validator_pool` — after settle epochs, pull unstaked NEAR from pool into **`pending_to_withdraw`**. |
-| `refresh_validator_balance` | `validator_pool` — **`get_account_total_balance`** callback updates **`Validator.total_staked_balance`**. |
+| `refresh_validator_balance` | `validator_pool` — **`get_account_total_balance`** callback updates **`Validator.total_staked_balance`**. Shares **`tx_status`** serialization with **`epoch_*`**. |
 
 ---
 

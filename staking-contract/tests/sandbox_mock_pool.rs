@@ -572,7 +572,8 @@ async fn staking_refresh_validator_balance_matches_pool_total_balance()
         .await?
         .into_result()?;
 
-    buyer
+    // `refresh_validator_balance` uses `assert_operator`; e2e config has empty operators so any account may call.
+    staking
         .call(staking.id(), "refresh_validator_balance")
         .args_json(json!({ "validator_pool": pool.id() }))
         .gas(WsGas::from_tgas(200))

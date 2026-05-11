@@ -157,7 +157,11 @@ impl Contract {
             )
     }
 
+    /// Refresh pool-reported balance into [`Validator::total_staked_balance`]. Same access as
+    /// [`Contract::epoch_stake`] — [`Contract::assert_operator`].
     pub fn refresh_validator_balance(&mut self, validator_pool: AccountId) -> Promise {
+        self.assert_not_paused();
+        self.assert_operator();
         let mut v = self
             .validators
             .get(&validator_pool)

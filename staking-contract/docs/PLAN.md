@@ -12,7 +12,7 @@ todos:
     content: "Implement ids.rs: Stripe-style ProductId/PriceId/SubscriptionId/LockId wrappers + deterministic on-chain ID generator (sha256 over nonce + block_height + block_timestamp + predecessor)"
     status: pending
   - id: validators_module
-    content: "Implement validators.rs: Validator struct (incl. owner_account_id), internal allowlist via the validators map, contract-owner-only add/pause/remove/set_validator_owner; assert_validator_owner helper"
+    content: "Implement validators.rs: Validator struct, internal allowlist via the validators map, contract-owner-only add/pause/remove; catalog uses pool get_owner_id (no cached owner on Validator)"
     status: pending
   - id: catalog_products_prices
     content: "Implement products.rs + prices.rs: validator-owner-only create/edit/archive/delete with usage_count guards and CatalogStatus"
@@ -106,7 +106,7 @@ Add a new crate inside the workspace mirroring sibling crates. Suggested files (
 - `governance.rs` — contract-owner setters (`set_*`, `propose_new_owner_account_id`, `accept_ownership`), `assert_owner`, `assert_guardian`, `assert_validator_owner(validator_id)`.
 - `pause.rs` — `pause`/`unpause`/`is_paused` (port [venear-contract/src/pause.rs](house-of-stake-contracts/venear-contract/src/pause.rs)).
 - `upgrade.rs` — `upgrade()` extern + `migrate_state` (port [venear-contract/src/upgrade.rs](house-of-stake-contracts/venear-contract/src/upgrade.rs)).
-- `validators.rs` — `Validator` model and the on-contract validator allowlist (the `validators` map itself); `add_validator`/`pause_validator`/`remove_validator`/`set_validator_owner`/`get_validators`; share-pool math per validator.
+- `validators.rs` — `Validator` model and the on-contract validator allowlist (the `validators` map itself); `add_validator`/`pause_validator`/`remove_validator`/`get_validators`; share-pool math per validator. Validator **ownership for catalog operations** is always the staking pool’s `get_owner_id()` (see `products.rs`), not a field on `Validator`.
 - `products.rs` — `Product`, `Price`, lifecycle (`create_product`, `edit_product`, `archive_product`, `delete_product`, plus parallel `*_price` methods). All gated by `assert_validator_owner` for the product's validator.
 - `subscriptions.rs` — `Subscription` model and lookup helpers.
 - `internal.rs` — share pool math, `check_near_price_lock` (NEAR-only duration-weighted sufficiency vs catalog line item).
@@ -378,7 +378,7 @@ sequenceDiagram
 
 `epoch_withdraw(validator_id)` checks `env::epoch_height() >= last_unstake_epoch + epoch_unstake_settle_epochs`, calls `withdraw_all`, and on success moves NEAR from "in-pool unstaked" into per-user `withdrawable_balance` proportional to each user's `pending_unstake_near` snapshot taken at unlock time.
 
-`refresh_validator_balance(validator_id)` calls `get_account_total_balance` on the pool and updates `total_staked_balance` in the callback (rewards accrual). Safe to call by anyone; rate-limited by `last_balance_refresh_ns`.
+`refresh_validator_balance(validator_id)` calls `get_account_total_balance` on the pool and updates `total_staked_balance` in the callback (rewards accrual). Uses the same **`assert_operator`** gate as `epoch_stake` / `epoch_unstake` / `epoch_withdraw` (when `operators` is empty, any account may call); rate-limited by `last_balance_refresh_ns`. Sets `tx_status = Busy` during the callback like other epoch pool calls.
 
 ## 6. Owner / governance methods
 
@@ -392,7 +392,7 @@ Two distinct roles. The contract owner administers the protocol; each validator 
 
 Validator allowlist (contract owner only):
 - `add_validator(validator_id)` — synchronous; inserts into the on-contract `validators` map with `total_shares = 0`, `status = Active` (the on-contract `validators` map is itself the allowlist; see §4.2). Pool ownership for catalog changes is always verified via on-chain `get_owner_id` (§6).
-- `set_validator_owner(validator_id, new_owner)` — contract owner can rotate a validator's owner (e.g., after a SputnikDAO migration).
+- Rotating who may edit the catalog for a pool (e.g. after a SputnikDAO migration) is done by changing the **staking pool contract’s** owner / access control so `get_owner_id()` returns the new admin — there is no `set_validator_owner` on `stake.dao` because it does not cache pool owners on-chain.
 - `pause_validator(validator_id)` — flips `status = Paused`; no new locks; existing locks unchanged.
 - `remove_validator(validator_id)` — flips `status = Removed`; permitted only when `total_shares == 0 && pending_to_stake == 0 && pending_to_unstake == 0 && pending_to_withdraw == 0`. (Resolves the README "TODO: handle the validators removed from whitelist".)
 

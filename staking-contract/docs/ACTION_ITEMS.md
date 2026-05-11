@@ -10,7 +10,7 @@ This file tracks open work relative to the intended design ([PLAN.md](PLAN.md), 
 
 **Follow-ups:**
 
-- [x] **Actual vs requested withdraw** — `on_epoch_withdraw_transfer_done` credits `min(balance_after − balance_before, requested)` using a pre-withdraw balance snapshot on [`Validator::balance_before_epoch_withdraw_yocto`](src/validators.rs).
+- [x] **Actual vs requested withdraw** — Current implementation: on success, [`on_epoch_withdraw_transfer_done`](src/pool_callbacks.rs) credits the requested `withdrawn` amount into [`Validator::pending_to_withdraw`](src/validators.rs). The snapshot-based reconciliation `min(balance_after − balance_before, requested)` and a `balance_before_epoch_withdraw` field are **not** implemented in this version.
 
 ---
 

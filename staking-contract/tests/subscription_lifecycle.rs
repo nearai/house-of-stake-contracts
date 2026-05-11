@@ -13,14 +13,13 @@ use staking_contract::types::{LockStatus, SubscriptionStatus};
 const BASE_TS: u64 = 1_700_000_000_000_000_000;
 
 #[test]
-#[should_panic(expected = "Subscription cancelled")]
-fn cancel_then_renew_after_period_fails() {
+fn cancel_then_renew_after_period_opens_fresh_subscription() {
     let mut c = deploy();
     let (product_id, price_id) = setup_catalog_near_subscription(&mut c);
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let _ = c.lock_for_subscription(Some(price_id.clone()), None);
+    let lock_first = c.lock_for_subscription(Some(price_id.clone()), None);
 
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
     c.cancel_subscription(product_id.clone());
@@ -32,7 +31,20 @@ fn cancel_then_renew_after_period_fails() {
 
     let renew_ts = sub.end_ns.0.saturating_add(1);
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), renew_ts));
-    c.lock_for_subscription(Some(price_id), None);
+    let lock_second = c.lock_for_subscription(Some(price_id.clone()), None);
+    assert_ne!(
+        lock_first, lock_second,
+        "renewal after cancelled period should mint a new lock"
+    );
+
+    let sub_after = c
+        .get_subscription_for_product(acct(BUYER), product_id)
+        .expect("subscription");
+    assert!(
+        !sub_after.cancel_at_period_end,
+        "new billing period should clear cancel-at-end"
+    );
+    assert_eq!(sub_after.status, SubscriptionStatus::Active);
 }
 
 #[test]

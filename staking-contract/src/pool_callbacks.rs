@@ -4,10 +4,11 @@
 //! That figure can diverge from internal share accounting (`total_shares`, `pending_to_stake`, `pending_to_unstake`)
 //! when staking rewards accrue or rounding differs—use as an operator diagnostics aid unless reconciled later.
 //!
-//! **Share vs balance reconciliation:** pro-rata exits still use `near_from_shares` against `effective_stake`
-//! (staked + pending stake). If `total_staked_balance` is refreshed upward by rewards but shares are not
-//! re-minted, user NEAR-on-exit can slightly trail the pool’s notional balance; a future version could
-//! periodically mint “donation” shares to the protocol or run a share/NEAR true-up. Not implemented here.
+//! **Share vs balance reconciliation:** pro-rata exits use [`crate::internal::near_from_shares`] against
+//! [`crate::internal::effective_stake_for_share_exit`] (gross staked + pending stake **minus** NEAR already
+//! queued in `pending_to_unstake`) so sequential unlocks cannot re-price against the full gross pool. If
+//! `total_staked_balance` is refreshed upward by rewards but shares are not re-minted, user NEAR-on-exit
+//! can still trail the pool’s notional balance; a future version could mint “donation” shares or true-up.
 //!
 //! `on_epoch_withdraw_transfer_done` credits the **requested** `withdrawn` amount on a successful
 //! pool `withdraw` return. (A balance-delta approach is unsafe if multiple pool withdrawals overlap in
