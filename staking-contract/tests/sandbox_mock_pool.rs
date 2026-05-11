@@ -379,11 +379,13 @@ async fn staking_withdraw_clears_withdrawable_after_claim_unlocked_near()
         .await?
         .into_result()?;
 
+    // Short lock so `fast_forward_until_timestamp` reaches `end_ns` quickly (config allows `min_lock_duration_ns` = 1).
+    let lock_duration_ns = "1000000000";
     let lock_id: String = buyer
         .call(staking.id(), "lock_for_product")
         .args_json(json!({
             "price_id": price_id,
-            "lock_duration_ns": "1000000000000000",
+            "lock_duration_ns": lock_duration_ns,
         }))
         .deposit(NearToken::from_near(50))
         .gas(WsGas::from_tgas(200))

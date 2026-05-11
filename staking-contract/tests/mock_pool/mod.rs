@@ -61,22 +61,36 @@ pub fn staking_new_args_e2e(owner: &near_workspaces::AccountId) -> serde_json::V
 }
 
 /// Advance sandbox blocks until the chain timestamp reaches `target_ns` (used for `unlock` after `lock.end_ns`).
+///
+/// Uses larger `fast_forward` steps when far behind so multi-day lock windows remain reachable in CI.
 pub async fn fast_forward_until_timestamp(
     worker: &Worker<Sandbox>,
     target_ns: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    for _ in 0..60 {
+    const MAX_ROUNDS: u32 = 250;
+    for _ in 0..MAX_ROUNDS {
         let ts = worker.view_block().await?.timestamp();
         if ts >= target_ns {
             return Ok(());
         }
-        worker.fast_forward(50).await?;
+        let gap = target_ns.saturating_sub(ts);
+        let blocks = if gap > 500_000_000_000_000 {
+            80_000u64
+        } else if gap > 50_000_000_000_000 {
+            25_000
+        } else if gap > 5_000_000_000_000 {
+            5_000
+        } else if gap > 500_000_000_000 {
+            500
+        } else if gap > 50_000_000_000 {
+            100
+        } else {
+            25
+        };
+        worker.fast_forward(blocks).await?;
     }
-    Err(format!(
-        "timestamp {target_ns} not reached after fast_forward (last {:?})",
-        worker.view_block().await?.timestamp()
-    )
-    .into())
+    let last = worker.view_block().await?.timestamp();
+    Err(format!("timestamp {target_ns} not reached after fast_forward (last {last:?})",).into())
 }
 
 pub fn near_token_yocto_from_view(
