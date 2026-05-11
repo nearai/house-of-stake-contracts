@@ -132,7 +132,7 @@ Requires **`assert_not_paused`** and **`assert_operator`**. Each returns **`Prom
 | Method | Access | Deposit | Description |
 |--------|--------|---------|-------------|
 | `claim_unlocked_near` | User | **1 yocto** | `validator_pool` — pro-rata claim from **`pending_to_withdraw`** into **`withdrawable_balance`** (requires prior **`epoch_withdraw`** and liability bookkeeping). |
-| `withdraw` | User | **1 yocto** | `amount: NearToken \| null` — transfer out **`withdrawable_balance`** ( **`null` = full balance**). |
+| `withdraw` | User | **1 yocto** | JSON args are **`{ "amount": <NearToken> }`**; use **`"amount": null`** to withdraw the full **`withdrawable_balance`**. A bare JSON **`null`** body does not deserialize (near-sdk wraps args in a struct keyed by parameter names). |
 | `sweep_stranded_withdraw_bucket` | **Owner** | **1 yocto** | `validator_pool` — if user liability total is zero but **`pending_to_withdraw`** remains, send remainder to **`owner_account_id`**. |
 
 ---

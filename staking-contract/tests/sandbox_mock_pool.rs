@@ -450,7 +450,7 @@ async fn staking_withdraw_clears_withdrawable_after_claim_unlocked_near()
 
     buyer
         .call(staking.id(), "withdraw")
-        .args_json(json!(null))
+        .args_json(json!({ "amount": null }))
         .deposit(NearToken::from_yoctonear(1))
         .gas(WsGas::from_tgas(100))
         .transact()
