@@ -2,11 +2,11 @@ mod setup;
 
 use crate::setup::voting_helpers::*;
 use crate::setup::{NS_IN_SECOND, VOTING_DURATION_SECONDS, VenearTestWorkspaceBuilder};
+use common::voting::{ProposalStatus, VoteOption};
 use near_sdk::json_types::U64;
 use near_sdk::{Gas, NearToken};
 use near_workspaces::AccountId;
 use serde_json::json;
-use voting_contract::proposal::{ProposalStatus, VoteOption};
 
 #[tokio::test]
 async fn test_voting_upgrade() -> Result<(), Box<dyn std::error::Error>> {
@@ -117,6 +117,7 @@ async fn test_voting_upgrade() -> Result<(), Box<dyn std::error::Error>> {
             "e953bb69d1129e4da87b99739373884a0b57d5e64a65fdc868478f22e6c31eac",
             "fastnear-hos.near",
             "root.near",
+            "norfolks.near",
         ],
         "council_ids should be set to DAO council members"
     );
@@ -483,27 +484,16 @@ async fn test_voting_reject_proposal() -> Result<(), Box<dyn std::error::Error>>
         .await?;
     let user_a = v.create_account_with_lockup().await?;
 
-    // Lock NEAR so user has veNEAR — needed to make proposal pass and enter Timelock
-    v.transfer_and_lock(&user_a, NearToken::from_near(1000))
-        .await?;
-
     let proposal_id = create_proposal(&v, &user_a, None).await?;
-    approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
-
-    // Vote For so the proposal would succeed and enter Timelock instead of Defeated
-    vote_for_option(&v, &user_a, proposal_id, VoteOption::For).await?;
-
-    v.fast_forward_to_proposal_status(proposal_id, ProposalStatus::Timelock)
-        .await?;
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
         serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
-        ProposalStatus::Timelock,
-        "Proposal should be in Timelock status"
+        ProposalStatus::Created,
+        "Proposal should be in Created status"
     );
 
-    // Regular user cannot reject during timelock
+    // Regular user cannot reject a Created proposal
     let outcome = user_a
         .call(v.voting_id(), "reject_proposal")
         .args_json(json!({
@@ -519,7 +509,58 @@ async fn test_voting_reject_proposal() -> Result<(), Box<dyn std::error::Error>>
         outcome
     );
 
-    // Reviewer cannot reject proposals
+    // Council cannot reject a Created proposal
+    let outcome = v
+        .voting
+        .as_ref()
+        .unwrap()
+        .council
+        .call(v.voting_id(), "reject_proposal")
+        .args_json(json!({
+            "proposal_id": proposal_id,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(250))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_failure(),
+        "Council should not be able to reject proposal: {:#?}",
+        outcome
+    );
+
+    // Reviewer can reject a Created proposal
+    let outcome = v
+        .voting
+        .as_ref()
+        .unwrap()
+        .reviewer
+        .call(v.voting_id(), "reject_proposal")
+        .args_json(json!({
+            "proposal_id": proposal_id,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(250))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_success(),
+        "Reviewer should be able to reject a Created proposal: {:#?}",
+        outcome
+    );
+
+    let proposal = v.get_proposal(proposal_id).await?;
+    assert_eq!(
+        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        ProposalStatus::Rejected
+    );
+    assert_eq!(
+        proposal["reviewer_id"].as_str().unwrap(),
+        v.voting.as_ref().unwrap().reviewer.id().as_str(),
+        "reviewer_id should be set to the reviewer who rejected"
+    );
+
+    // Cannot reject an already-rejected proposal
     let outcome = v
         .voting
         .as_ref()
@@ -535,17 +576,127 @@ async fn test_voting_reject_proposal() -> Result<(), Box<dyn std::error::Error>>
         .await?;
     assert!(
         outcome.is_failure(),
-        "Reviewer should not be able to reject proposal: {:#?}",
+        "Reviewer should not be able to reject a non-Created proposal: {:#?}",
         outcome
     );
 
-    // Council can reject (veto) during timelock
+    // Cannot reject an expired proposal
+    let proposal_id_expired = create_proposal(&v, &user_a, None).await?;
+    v.fast_forward_to_proposal_status(proposal_id_expired, ProposalStatus::Expired)
+        .await?;
+    let outcome = v
+        .voting
+        .as_ref()
+        .unwrap()
+        .reviewer
+        .call(v.voting_id(), "reject_proposal")
+        .args_json(json!({
+            "proposal_id": proposal_id_expired,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(250))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_failure(),
+        "Reviewer should not be able to reject an expired proposal: {:#?}",
+        outcome
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_voting_veto_proposal() -> Result<(), Box<dyn std::error::Error>> {
+    let v = VenearTestWorkspaceBuilder::default()
+        .with_voting()
+        .build()
+        .await?;
+    let user_a = v.create_account_with_lockup().await?;
+
+    // Lock NEAR so user has veNEAR — needed to make proposal pass and enter Timelock
+    v.transfer_and_lock(&user_a, NearToken::from_near(1000))
+        .await?;
+
+    let proposal_id = create_proposal(&v, &user_a, None).await?;
+    approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
+
+    // Council cannot veto while proposal is still in Voting
     let outcome = v
         .voting
         .as_ref()
         .unwrap()
         .council
-        .call(v.voting_id(), "reject_proposal")
+        .call(v.voting_id(), "veto_proposal")
+        .args_json(json!({
+            "proposal_id": proposal_id,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(250))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_failure(),
+        "Council should not be able to veto a Voting proposal: {:#?}",
+        outcome
+    );
+
+    // Vote For so the proposal would succeed and enter Timelock instead of Defeated
+    vote_for_option(&v, &user_a, proposal_id, VoteOption::For).await?;
+
+    v.fast_forward_to_proposal_status(proposal_id, ProposalStatus::Timelock)
+        .await?;
+
+    let proposal = v.get_proposal(proposal_id).await?;
+    assert_eq!(
+        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        ProposalStatus::Timelock,
+        "Proposal should be in Timelock status"
+    );
+
+    // Regular user cannot veto during timelock
+    let outcome = user_a
+        .call(v.voting_id(), "veto_proposal")
+        .args_json(json!({
+            "proposal_id": proposal_id,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(250))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_failure(),
+        "User should not be able to veto proposal: {:#?}",
+        outcome
+    );
+
+    // Reviewer cannot veto proposals
+    let outcome = v
+        .voting
+        .as_ref()
+        .unwrap()
+        .reviewer
+        .call(v.voting_id(), "veto_proposal")
+        .args_json(json!({
+            "proposal_id": proposal_id,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(250))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_failure(),
+        "Reviewer should not be able to veto proposal: {:#?}",
+        outcome
+    );
+
+    // Council can veto during timelock
+    let outcome = v
+        .voting
+        .as_ref()
+        .unwrap()
+        .council
+        .call(v.voting_id(), "veto_proposal")
         .args_json(json!({
             "proposal_id": proposal_id,
         }))
@@ -555,21 +706,177 @@ async fn test_voting_reject_proposal() -> Result<(), Box<dyn std::error::Error>>
         .await?;
     assert!(
         outcome.is_success(),
-        "Council should be able to reject proposal during timelock: {:#?}",
+        "Council should be able to veto proposal during timelock: {:#?}",
         outcome
     );
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
         serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
-        ProposalStatus::Rejected
+        ProposalStatus::Vetoed
     );
-    // rejecter_id should be the council member who vetoed
-    let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
         proposal["rejecter_id"].as_str().unwrap(),
         v.voting.as_ref().unwrap().council.id().as_str(),
         "rejecter_id should be set to the council member"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_voting_noveto_proposal() -> Result<(), Box<dyn std::error::Error>> {
+    let v = VenearTestWorkspaceBuilder::default()
+        .with_voting()
+        .build()
+        .await?;
+    let user_a = v.create_account_with_lockup().await?;
+
+    v.transfer_and_lock(&user_a, NearToken::from_near(1000))
+        .await?;
+
+    // Fund the voting contract so it can execute the second proposal's transfer
+    let voting_id: AccountId = v.voting_id().clone();
+    v.sandbox
+        .root_account()?
+        .transfer_near(&voting_id, NearToken::from_near(5))
+        .await?
+        .into_result()?;
+
+    let recipient = v.sandbox.dev_create_account().await?;
+    let recipient_balance_before = recipient.view_account().await?.balance;
+
+    let proposal_id = create_proposal(&v, &user_a, None).await?;
+    let proposal_id_2 = create_proposal(
+        &v,
+        &user_a,
+        Some(json!([{
+            "Transfer": {
+                "receiver_id": recipient.id().to_string(),
+                "amount": NearToken::from_near(1).as_yoctonear().to_string(),
+            }
+        }])),
+    )
+    .await?;
+
+    approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id).await?;
+    approve_proposal(&v, &v.voting.as_ref().unwrap().reviewer, proposal_id_2).await?;
+
+    // Council cannot noveto while proposal is still in Voting
+    let outcome = v
+        .voting
+        .as_ref()
+        .unwrap()
+        .council
+        .call(v.voting_id(), "noveto_proposal")
+        .args_json(json!({
+            "proposal_id": proposal_id,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(250))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_failure(),
+        "Council should not be able to noveto a Voting proposal: {:#?}",
+        outcome
+    );
+
+    vote_for_option(&v, &user_a, proposal_id, VoteOption::For).await?;
+    vote_for_option(&v, &user_a, proposal_id_2, VoteOption::For).await?;
+
+    v.fast_forward_to_proposal_status(proposal_id_2, ProposalStatus::Timelock)
+        .await?;
+
+    // Regular user cannot noveto during timelock
+    let outcome = user_a
+        .call(v.voting_id(), "noveto_proposal")
+        .args_json(json!({
+            "proposal_id": proposal_id,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(250))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_failure(),
+        "User should not be able to noveto proposal: {:#?}",
+        outcome
+    );
+
+    // Council can noveto during timelock — fast-forwards past timelock to Succeeded
+    let outcome = v
+        .voting
+        .as_ref()
+        .unwrap()
+        .council
+        .call(v.voting_id(), "noveto_proposal")
+        .args_json(json!({
+            "proposal_id": proposal_id,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(250))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_success(),
+        "Council should be able to noveto proposal during timelock: {:#?}",
+        outcome
+    );
+
+    let proposal = v.get_proposal(proposal_id).await?;
+    assert_eq!(
+        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        ProposalStatus::Succeeded,
+        "Proposal without actions should advance to Succeeded after noveto"
+    );
+
+    // Second proposal: noveto from Timelock should go to Executable.
+    let outcome = v
+        .voting
+        .as_ref()
+        .unwrap()
+        .council
+        .call(v.voting_id(), "noveto_proposal")
+        .args_json(json!({
+            "proposal_id": proposal_id_2,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(250))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_success(),
+        "Council should be able to noveto proposal with actions: {:#?}",
+        outcome
+    );
+
+    let proposal = v.get_proposal(proposal_id_2).await?;
+    assert_eq!(
+        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        ProposalStatus::Executable,
+        "Proposal with actions should advance to Executable after noveto"
+    );
+
+    let outcome = execute_proposal(&v, &user_a, proposal_id_2).await?;
+    assert!(
+        outcome.is_success(),
+        "Execute proposal failed: {:#?}",
+        outcome
+    );
+
+    let proposal = v.get_proposal(proposal_id_2).await?;
+    assert_eq!(
+        serde_json::from_value::<ProposalStatus>(proposal["status"].clone())?,
+        ProposalStatus::Succeeded,
+        "Proposal should be Succeeded after execution"
+    );
+
+    let recipient_balance_after = recipient.view_account().await?.balance;
+    assert!(
+        recipient_balance_after.as_yoctonear() - recipient_balance_before.as_yoctonear()
+            >= NearToken::from_near(1).as_yoctonear(),
+        "Recipient should have received 1 NEAR"
     );
 
     Ok(())
@@ -1396,7 +1703,7 @@ async fn test_voting_pause() -> Result<(), Box<dyn std::error::Error>> {
         .voting
         .as_ref()
         .unwrap()
-        .council
+        .reviewer
         .call(v.voting_id(), "reject_proposal")
         .args_json(json!({
             "proposal_id": proposal_id_2,
@@ -1407,7 +1714,27 @@ async fn test_voting_pause() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     assert!(
         outcome.is_failure(),
-        "Council should not be able to reject proposal while paused: {:#?}",
+        "Reviewer should not be able to reject proposal while paused: {:#?}",
+        outcome
+    );
+
+    // Attempt to veto a proposal while paused (council call, but contract is paused)
+    let outcome = v
+        .voting
+        .as_ref()
+        .unwrap()
+        .council
+        .call(v.voting_id(), "veto_proposal")
+        .args_json(json!({
+            "proposal_id": proposal_id,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(250))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_failure(),
+        "Council should not be able to veto proposal while paused: {:#?}",
         outcome
     );
 
@@ -1606,7 +1933,8 @@ async fn test_proposal_with_transfer_action() -> Result<(), Box<dyn std::error::
         .sandbox
         .root_account()?
         .transfer_near(&voting_id, NearToken::from_near(5))
-        .await?;
+        .await?
+        .into_result()?;
 
     let recipient = v.sandbox.dev_create_account().await?;
     let recipient_balance_before = recipient.view_account().await?.balance;
@@ -1697,7 +2025,8 @@ async fn test_proposal_with_function_call_actions() -> Result<(), Box<dyn std::e
         .args_json(json!({ "new_owner_account_id": v.voting_id() }))
         .deposit(NearToken::from_yoctonear(1))
         .transact()
-        .await?;
+        .await?
+        .into_result()?;
 
     // Single proposal with two actions
     let new_fee = NearToken::from_millinear(500);

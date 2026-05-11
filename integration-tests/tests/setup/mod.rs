@@ -1,6 +1,7 @@
 pub mod voting_helpers;
 
 #[allow(dead_code)]
+use common::voting::ProposalStatus;
 use common::Fraction;
 use common::TimestampNs;
 use near_sdk::json_types::{Base58CryptoHash, U64};
@@ -629,10 +630,8 @@ impl VenearTestWorkspace {
     pub async fn fast_forward_to_proposal_status(
         &self,
         proposal_id: u32,
-        target: voting_contract::proposal::ProposalStatus,
+        target: ProposalStatus,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        use voting_contract::proposal::ProposalStatus;
-
         let proposal = self.get_proposal(proposal_id).await?;
 
         let (target_ns, num_blocks) = match target {

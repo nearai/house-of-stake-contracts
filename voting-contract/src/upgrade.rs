@@ -23,6 +23,7 @@ const COUNCIL_MEMBERS: &[&str] = &[
     "e953bb69d1129e4da87b99739373884a0b57d5e64a65fdc868478f22e6c31eac",
     "fastnear-hos.near",
     "root.near",
+    "norfolks.near",
 ];
 
 /// Config from v1.0.2 (without council_ids, timelock, expiration, or quorum).
@@ -70,9 +71,14 @@ impl Contract {
             p.quorum_threshold_bps = DEFAULT_QUORUM_THRESHOLD_BPS;
             p.quorum_floor = quorum_floor;
             p.approval_threshold_bps = DEFAULT_APPROVAL_THRESHOLD_BPS;
-            // Re-evaluate proposals that were Finished (now Succeeded via borsh index 4).
-            if p.status == ProposalStatus::Succeeded {
-                p.status = p.compute_final_status();
+            match p.status {
+                ProposalStatus::FinishLegacy => {
+                    p.status = p.compute_final_status();
+                }
+                ProposalStatus::ApprovalLegacy => {
+                    p.status = ProposalStatus::Voting;
+                }
+                _ => {}
             }
             proposals.push(VProposal::Current(p));
         }
