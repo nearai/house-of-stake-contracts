@@ -55,7 +55,7 @@ See source files under [src/](../src/). Key modules: `config`, `types`, `ids`, `
 
 - **Contract state**: `config`, `paused`, `validators` (allowlist + pool accounting), `validator_ids`, `product_ids`, catalog maps (`products`, `prices`), `accounts`, `subscriptions`, `locks`, `user_validator_shares`, `user_pending_unstake`, `user_lock_count` (locks ever created; drives per-lock storage requirement), `subscription_by_account_product`, `id_nonce`.
 - **Config**: owner, guardians, operators, min/max lock duration, epoch unstake settle epochs, min storage deposit, `per_lock_storage_stake`, min lock amount. No oracle or foreign-denomination fields.
-- **Validator**: `pool_account_id`, `owner_account_id`, status, `total_shares`, `total_staked_balance`, pending stake/unstake/withdraw, epoch and `tx_status` (Idle/Busy), etc. (see [validators.rs](../src/validators.rs)).
+- **Validator**: `pool_account_id`, status, `total_shares`, `total_staked_balance`, pending stake/unstake/withdraw, epoch and `tx_status` (Idle/Busy), etc. (see [validators.rs](../src/validators.rs)). Pool operator identity for catalog calls comes from the pool’s `get_owner_id()`, not from this struct.
 - **Price**: NEAR amount in yocto, `price_type` (one-off vs recurring), optional `billing_period`, `lock_factor_near_months` for the duration-weighted sufficiency check.
 - **IDs**: `prod_*`, `price_*`, `sub_*`, `lock_*` with deterministic base62 suffixes (details in [PLAN.md](PLAN.md)).
 - **Unlock**: The lock owner calls `unlock(lock_id)` once `now >= lock.end_ns`; share→NEAR conversion runs at unlock time so rewards that accrued to the user’s share position are reflected in the exit.

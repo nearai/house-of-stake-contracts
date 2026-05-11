@@ -6,9 +6,6 @@ use near_sdk::{AccountId, NearToken, env, near, require};
 #[near(serializers = [borsh, json])]
 pub struct Validator {
     pub pool_account_id: AccountId,
-    /// Snapshot of the validator owner supplied at [`Contract::add_validator`] (informational; catalog
-    /// mutations always re-check the pool's `get_owner_id()` — see `products.rs`).
-    pub owner_account_id: AccountId,
     pub status: ValidatorStatus,
 
     pub total_shares: U128,
@@ -31,13 +28,10 @@ pub struct Validator {
 
 #[near]
 impl Contract {
-    /// Contract owner: add a validator to the allowlist.
+    /// Contract owner: add a validator pool to the allowlist. Pool ownership for catalog operations is
+    /// always verified via `get_owner_id()` on the pool ([`crate::products`]).
     #[payable]
-    pub fn add_validator(
-        &mut self,
-        pool_account_id: AccountId,
-        validator_owner_account_id: AccountId,
-    ) {
+    pub fn add_validator(&mut self, pool_account_id: AccountId) {
         near_sdk::assert_one_yocto();
         self.assert_owner();
         require!(
@@ -47,7 +41,6 @@ impl Contract {
 
         let v = Validator {
             pool_account_id: pool_account_id.clone(),
-            owner_account_id: validator_owner_account_id,
             status: ValidatorStatus::Active,
             total_shares: U128(0),
             total_staked_balance: NearToken::from_near(0),

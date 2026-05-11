@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{OWNER, POOL, VALIDATOR_OWNER_ACCOUNT, acct, ctx, deploy, one_yocto};
+use common::{OWNER, POOL, acct, add_validator_allowlisted, ctx, deploy, one_yocto};
 use near_sdk::testing_env;
 use staking_contract::types::ValidatorStatus;
 
@@ -10,8 +10,7 @@ use staking_contract::types::ValidatorStatus;
 fn list_validator_ids_includes_registered_pool() {
     let mut c = deploy();
 
-    testing_env!(ctx(acct(OWNER), one_yocto()));
-    c.add_validator(acct(POOL), acct(VALIDATOR_OWNER_ACCOUNT));
+    add_validator_allowlisted(&mut c);
 
     let ids = c.list_validator_ids(0, 10);
     assert_eq!(ids, vec![acct(POOL)]);
@@ -26,8 +25,7 @@ fn list_validator_ids_includes_registered_pool() {
 fn remove_validator_on_idle_pool_marks_removed() {
     let mut c = deploy();
 
-    testing_env!(ctx(acct(OWNER), one_yocto()));
-    c.add_validator(acct(POOL), acct(VALIDATOR_OWNER_ACCOUNT));
+    add_validator_allowlisted(&mut c);
 
     testing_env!(ctx(acct(OWNER), one_yocto()));
     c.remove_validator(acct(POOL));

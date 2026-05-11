@@ -157,7 +157,6 @@ The validator allowlist is the contract-internal `validators: UnorderedMap<Accou
 ```rust
 pub struct Validator {
     pub pool_account_id: AccountId,
-    pub owner_account_id: AccountId,         // manages products/prices for this validator
     pub status: ValidatorStatus,             // Active | Paused | Removed
 
     pub total_shares: U128,                  // contract-level total shares for this validator
@@ -391,7 +390,7 @@ Two distinct roles. The contract owner administers the protocol; each validator 
 - `set_lock_bounds`, `set_min_lock_amount`, `set_min_storage_deposit`, `set_per_lock_storage_stake`, `set_epoch_unstake_settle_epochs` (see [governance.rs](../src/governance.rs)).
 
 Validator allowlist (contract owner only):
-- `add_validator(pool_account_id, validator_owner_account_id)` — synchronous; inserts a new entry into the on-contract `validators` map with `total_shares = 0`, `status = Active`, and `owner_account_id = validator_owner_account_id`. There is no external whitelist call (the on-contract `validators` map is itself the allowlist; see §4.2).
+- `add_validator(pool_account_id)` — synchronous; inserts into the on-contract `validators` map with `total_shares = 0`, `status = Active` (the on-contract `validators` map is itself the allowlist; see §4.2). Pool ownership for catalog changes is always verified via on-chain `get_owner_id` (§6).
 - `set_validator_owner(pool_account_id, new_owner)` — contract owner can rotate a validator's owner (e.g., after a SputnikDAO migration).
 - `pause_validator(pool_account_id)` — flips `status = Paused`; no new locks; existing locks unchanged.
 - `remove_validator(pool_account_id)` — flips `status = Removed`; permitted only when `total_shares == 0 && pending_to_stake == 0 && pending_to_unstake == 0 && pending_to_withdraw == 0`. (Resolves the README "TODO: handle the validators removed from whitelist".)
@@ -410,7 +409,7 @@ Catalog:
 - `archive_price(price_id)`
 - `delete_price(price_id)` — requires `usage_count == 0`.
 
-Once a Price has been used (any Lock references it), it is immutable except for archival/edit-of-display-fields, ensuring stable accounting. `assert_validator_owner` looks up `Product.validator_id` (or `Price.product_id → Product.validator_id`) and checks `predecessor_account_id == validators[validator_id].owner_account_id`.
+Once a Price has been used (any Lock references it), it is immutable except for archival/edit-of-display-fields, ensuring stable accounting. Validator-owner catalog actions compare `predecessor_account_id` to the pool’s on-chain `get_owner_id()` (see `products.rs`), not a cached owner field on [`Validator`].
 
 ## 7. External interfaces
 
@@ -425,7 +424,7 @@ pub trait ExtStakingPool {
 }
 ```
 
-There is no `ext_whitelist`: the validator allowlist is internal to stake.dao and validated synchronously inside `add_validator`.
+There is no `ext_whitelist`: the validator allowlist is internal to stake.dao; `add_validator` only records the pool account. Catalog methods resolve the operator via on-chain `get_owner_id` on the pool.
 
 There is **no** oracle contract interface in this crate; pricing does not depend on off-chain FX.
 
@@ -461,7 +460,7 @@ Extend [common/src/events.rs](house-of-stake-contracts/common/src/events.rs) (ne
 2. **Subscription month length** — **decided: calendar months, Stripe-anchored** (see §5.2). Open sub-question: confirm `avg_month_ns = 30.4375 days` as the divisor for the price-formula `duration_months_equivalent` on top-ups, or use the exact `(new_end_ns - old_end_ns)` in nanoseconds with the price factor expressed in NEAR-nanoseconds.
 3. **Operator allowlist** — empty (permissionless) by default vs initial NEAR AI ops accounts. Default proposed: permissionless with rate-limit on `epoch_*` (one call per validator per epoch).
 4. **veNEAR integration** — deferred to v2; designed-in seam: emit a `lock_create`/`unlock_settled` event the veNEAR side can consume, plus reserve a `register_with_venear: bool` field on `Lock`.
-5. **Validator allowlist source** — **decided: stake.dao maintains its own internal allowlist** (the `validators` map). It is unrelated to the HoS staking pool whitelist consumed by the lockup contract. The contract owner adds entries via `add_validator(pool_account_id, validator_owner_account_id)`; once added, the validator owner manages products/prices for that validator (see §6).
+5. **Validator allowlist source** — **decided: stake.dao maintains its own internal allowlist** (the `validators` map). It is unrelated to the HoS staking pool whitelist consumed by the lockup contract. The contract owner adds entries via `add_validator(pool_account_id)`; catalog/auth uses each pool’s `get_owner_id()` (see §6).
 6. **Stripe ID suffix lengths** — proposed: 14 chars for `prod_`, 24 chars for `price_`, 17 chars for `sub_`/`lock_` (matches Stripe's observed lengths). Confirm before launch since they are externally observable and parsers may rely on length.
 
 ## 12. Testing strategy

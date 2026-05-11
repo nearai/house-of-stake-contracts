@@ -32,3 +32,5 @@ serde_json.workspace = true
 [dev-dependencies]
 # `unit-testing` enables `testing_env!` / `VMContextBuilder` for `tests/*.rs` (host only; not in wasm).
 near-sdk = { workspace = true, features = ["unit-testing"] }
+near-workspaces = { version = "0.18" }
+tokio = { version = "1", features = ["full"] }

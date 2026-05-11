@@ -3,8 +3,8 @@
 mod common;
 
 use common::{
-    VALIDATOR_OWNER_ACCOUNT, acct, ctx, deploy, setup_catalog_near_oneoff,
-    testing_env_catalog_callback,
+    VALIDATOR_OWNER_ACCOUNT, acct, add_validator_allowlisted, ctx, deploy,
+    setup_catalog_near_oneoff, testing_env_catalog_callback,
 };
 use near_sdk::{NearToken, testing_env};
 
@@ -25,8 +25,7 @@ fn delete_product_fails_while_prices_attached() {
 #[test]
 fn delete_product_succeeds_when_empty() {
     let mut c = deploy();
-    testing_env!(ctx(acct(common::OWNER), NearToken::from_yoctonear(1)));
-    c.add_validator(acct(common::POOL), acct(VALIDATOR_OWNER_ACCOUNT));
+    add_validator_allowlisted(&mut c);
 
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
     let product_id = c.create_product_after_get_owner(

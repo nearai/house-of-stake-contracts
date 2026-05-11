@@ -106,10 +106,15 @@ pub fn deploy() -> Contract {
     deploy_with_config(base_config())
 }
 
+/// Registers [`POOL`] on the allowlist (contract owner).
+pub fn add_validator_allowlisted(contract: &mut Contract) {
+    testing_env!(ctx(acct(OWNER), NearToken::from_yoctonear(1)));
+    contract.add_validator(acct(POOL));
+}
+
 /// Owner registers pool; validator owner creates active catalog entries for NEAR one-off purchase.
 pub fn setup_catalog_near_oneoff(contract: &mut Contract) -> (String, String) {
-    testing_env!(ctx(acct(OWNER), NearToken::from_yoctonear(1)));
-    contract.add_validator(acct(POOL), acct(VALIDATOR_OWNER_ACCOUNT));
+    add_validator_allowlisted(contract);
 
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
     let product_id = contract.create_product_after_get_owner(
@@ -158,8 +163,7 @@ pub fn add_subscription_price(
 }
 
 pub fn setup_catalog_near_subscription(contract: &mut Contract) -> (String, String) {
-    testing_env!(ctx(acct(OWNER), NearToken::from_yoctonear(1)));
-    contract.add_validator(acct(POOL), acct(VALIDATOR_OWNER_ACCOUNT));
+    add_validator_allowlisted(contract);
 
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
     let product_id = contract.create_product_after_get_owner(

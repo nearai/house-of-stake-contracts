@@ -22,6 +22,8 @@ cargo near build non-reproducible-wasm --manifest-path staking-contract/Cargo.to
 
 `build_all.sh` also builds this crate and copies `staking_contract.wasm` to `res/local/`.
 
+For **sandbox integration tests** that exercise real pool cross-contract calls, build the mock pool (`../mock-staking-pool-contract`) as well: `make mock-staking-pool-contract` (repo root `Makefile`, alias `make mock-pool`) or run `build_all.sh`. Tests live in [`tests/sandbox_mock_pool.rs`](tests/sandbox_mock_pool.rs) (helpers in [`tests/mock_pool/mod.rs`](tests/mock_pool/mod.rs)) and load WASM from `res/local/`, `target/near/…`, or `target/wasm32-unknown-unknown/release/…`.
+
 ## Operator / user cadence (unlock → cash)
 
 Typical sequence after locks exist:
@@ -52,7 +54,7 @@ Implemented in code:
 Still to refine per [docs/PLAN.md](docs/PLAN.md) / [docs/ACTION_ITEMS.md](docs/ACTION_ITEMS.md):
 
 - **Calendar-accurate** subscription billing (average-month linear helper only in [`subscriptions.rs`](src/subscriptions.rs); **`lock_for_subscription`** exists but uses linear months)
-- Deeper integration tests (full epoch/pool loop beyond smoke deploy / storage)
+- Longer **sandbox E2E** (unlock → `epoch_unstake` → `epoch_withdraw` → `claim_unlocked_near` → `withdraw`) — see [`tests/sandbox_mock_pool.rs`](tests/sandbox_mock_pool.rs); extend as needed
 
 ## Workspace
 
