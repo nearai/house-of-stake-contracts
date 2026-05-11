@@ -24,6 +24,13 @@ pub const POOL: &str = "pool.near";
 /// Account that owns the staking pool (`get_owner_id`), used when simulating catalog callbacks.
 pub const VALIDATOR_OWNER_ACCOUNT: &str = "vowner.near";
 pub const BUYER: &str = "buyer.near";
+pub const NEW_OWNER: &str = "newowner.near";
+pub const GUARDIAN: &str = "guardian.near";
+
+#[inline]
+pub fn one_yocto() -> NearToken {
+    NearToken::from_yoctonear(1)
+}
 
 /// Baseline config; override fields in tests as needed.
 pub fn base_config() -> Config {
