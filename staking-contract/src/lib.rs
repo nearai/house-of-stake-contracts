@@ -47,25 +47,39 @@ enum StorageKeys {
 #[derive(PanicOnDefault)]
 #[near(contract_state)]
 pub struct Contract {
+    /// Protocol configuration: owner, guardians, operators, pause-independent bounds (`min_lock_amount`,
+    /// lock duration range), epoch settle epochs, storage minimums, and per-lock storage stake.
     pub config: Config,
+    /// When `true`, user-facing mutating methods reject until [`crate::pause::Contract::unpause`]
+    /// (operator epoch calls also check this).
     pub paused: bool,
+    /// Allowlisted staking pools (`validator_id` = pool account). Holds share-pool and epoch pipeline state
+    /// per [`Validator`].
     pub validators: LookupMap<AccountId, Validator>,
+    /// Insertion order of allowlisted pools; drives paginated [`crate::validators::Contract::get_validators`].
     pub validator_ids: Vector<AccountId>,
-    /// Stable ordering for [`crate::products::Contract::get_products`].
+    /// Creation order of catalog products; stable ordering for [`crate::products::Contract::get_products`].
     pub product_ids: Vector<ProductId>,
+    /// Product catalog rows (`prod_*` ids); validator-scoped via [`Product::validator_id`](crate::types::Product::validator_id).
     pub products: LookupMap<ProductId, Product>,
+    /// Price lines (`price_*` ids); [`Price::product_id`](crate::types::Price::product_id) links to a product.
     pub prices: LookupMap<PriceId, Price>,
+    /// Per-user accounting: NEP-145-style registered storage and [`Account::withdrawable_balance`] after claims.
     pub accounts: LookupMap<AccountId, Account>,
+    /// Subscription records keyed by [`Subscription::subscription_id`] (`sub_*`).
     pub subscriptions: LookupMap<SubscriptionId, Subscription>,
+    /// Active and historical locks keyed by [`Lock::lock_id`] (`lock_*`).
     pub locks: LookupMap<LockId, Lock>,
-    /// (user, validator_id) -> share units (yocto-scale integer).
+    /// User stake position on a pool: `(account_id, validator_id)` → outstanding share units (integer, same scale as [`Validator::total_shares`]).
     pub user_validator_shares: LookupMap<(AccountId, AccountId), u128>,
-    /// NEAR queued from unlock, waiting for epoch distribution after withdraw from pool.
+    /// After unlock, NEAR value queued for this user on this pool until [`crate::withdraw::Contract::claim_unlocked_near`]
+    /// (filled once [`crate::epoch::Contract::epoch_withdraw`] has moved funds into `pending_to_withdraw`).
     pub user_pending_unstake: LookupMap<(AccountId, AccountId), NearToken>,
-    /// Locks ever created per account (increments on each new lock; used for per-lock storage prepaid).
+    /// Monotonic count of locks created per account; multiplied by [`Config::per_lock_storage_stake`] for prepaid lock storage.
     pub user_lock_count: LookupMap<AccountId, u32>,
-    /// One subscription row per `(user, product_id)`; tier is [`Subscription::price_id`] (upgrade/downgrade).
+    /// Secondary index: `(subscriber, product_id)` → `subscription_id` for at-most-one subscription per product per account.
     pub subscription_by_account_product: LookupMap<(AccountId, ProductId), SubscriptionId>,
+    /// Counter mixed into deterministic ids ([`crate::ids`]) for products, prices, subscriptions, locks.
     pub id_nonce: u64,
 }
 
