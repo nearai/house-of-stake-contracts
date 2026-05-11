@@ -91,6 +91,7 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 | `lock_for_product` | Buyer | **Attach NEAR** | One-off purchase: JSON **`price_id`**, **`lock_duration_ns`** (`U64`), **`product_id`**. Provide **exactly one** of **`price_id`** or **`product_id`** (the other **`null`**). If **`product_id`** is set, uses **`Product.default_price_id`** (must be a **one-off** price). Returns **`lock_id`**. |
 | `lock_for_subscription` | Subscriber | **Attach NEAR** | Recurring (monthly): **`price_id`**, **`product_id`** — same XOR rule as **`lock_for_product`**; default price must be **recurring** monthly. |
 | `cancel_subscription` | Subscriber | **1 yocto** | `product_id` — stop renewing after current period (`cancel_at_period_end`). After **`end_ns`**, the next **`lock_for_subscription`** replaces the row so the user may subscribe again (index is not left stale). |
+| `resume_subscription` | Subscriber | **1 yocto** | `product_id` — clear **`cancel_at_period_end`** while subscription is still **`Active`** (undo **`cancel_subscription`** before period end). Requires subscription was scheduled for cancellation; otherwise panics with **`Not scheduled for cancellation`**. |
 | `upgrade_subscription` | Subscriber | **Attach NEAR** (≥ `min_lock_amount`; tier differential) | `new_price_id` — upgrade recurring tier mid-period; returns **`LockId`**. |
 | `schedule_downgrade_subscription` | Subscriber | **1 yocto** | `target_price_id` — schedule lower tier for next billing period. |
 

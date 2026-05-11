@@ -48,6 +48,38 @@ fn cancel_then_renew_after_period_opens_fresh_subscription() {
 }
 
 #[test]
+fn resume_subscription_clears_cancel_before_period_end() {
+    let mut c = deploy();
+    let (product_id, price_id) = setup_catalog_near_subscription(&mut c);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let _lock_first = c.lock_for_subscription(Some(price_id.clone()), None);
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    c.cancel_subscription(product_id.clone());
+
+    let sub_cancelled = c
+        .get_subscription_for_product(acct(BUYER), product_id.clone())
+        .expect("subscription");
+    assert!(sub_cancelled.cancel_at_period_end);
+    let period_end_before = sub_cancelled.end_ns.0;
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    c.resume_subscription(product_id.clone());
+
+    let sub_resumed = c
+        .get_subscription_for_product(acct(BUYER), product_id)
+        .expect("subscription");
+    assert!(
+        !sub_resumed.cancel_at_period_end,
+        "resume should clear cancel-at-end within the same period"
+    );
+    assert_eq!(sub_resumed.end_ns.0, period_end_before);
+    assert_eq!(sub_resumed.status, SubscriptionStatus::Active);
+}
+
+#[test]
 fn upgrade_subscription_updates_tier_and_lock_amount() {
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);

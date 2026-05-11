@@ -287,6 +287,34 @@ impl Contract {
         crate::events::log_subscription_cancel(&buyer, &product_id);
     }
 
+    /// Undo [`Contract::cancel_subscription`] before the current billing period ends: clear `cancel_at_period_end`
+    /// so renewals resume normally after `end_ns`. Attach 1 yocto.
+    #[payable]
+    pub fn resume_subscription(&mut self, product_id: ProductId) {
+        assert_one_yocto();
+        self.assert_not_paused();
+        let buyer = env::predecessor_account_id();
+        let sid = self
+            .subscription_by_account_product
+            .get(&(buyer.clone(), product_id.clone()))
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("No subscription for this product"));
+        let mut sub = self
+            .subscriptions
+            .get(sid.as_str())
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("Unknown subscription"));
+        require!(sub.account_id == buyer);
+        require!(
+            sub.status == SubscriptionStatus::Active,
+            "Subscription not active"
+        );
+        require!(sub.cancel_at_period_end, "Not scheduled for cancellation");
+        sub.cancel_at_period_end = false;
+        self.subscriptions.insert(sid.clone(), sub.clone());
+        crate::events::log_subscription_resume(&buyer, &product_id);
+    }
+
     /// Upgrade to a higher-priced recurring tier on the same product immediately. Attach extra NEAR so that
     /// `existing_locked + deposit` satisfies [`check_near_price_lock`] for the new tier over the remainder of
     /// the current period (`lock.end_ns - now`).

@@ -1,9 +1,9 @@
 pub mod voting_helpers;
 
-#[allow(dead_code)]
-use common::voting::ProposalStatus;
 use common::Fraction;
 use common::TimestampNs;
+#[allow(dead_code)]
+use common::voting::ProposalStatus;
 use near_sdk::json_types::{Base58CryptoHash, U64};
 use near_sdk::{CryptoHash, Gas, NearToken, Timestamp};
 use near_workspaces::network::Sandbox;

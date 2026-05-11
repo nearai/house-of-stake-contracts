@@ -42,6 +42,16 @@ pub fn log_subscription_cancel(account: &AccountId, product_id: &str) {
     );
 }
 
+pub fn log_subscription_resume(account: &AccountId, product_id: &str) {
+    emit(
+        "subscription_resume",
+        serde_json::json!({
+            "account_id": account.to_string(),
+            "product_id": product_id,
+        }),
+    );
+}
+
 pub fn log_subscription_upgrade(account: &AccountId, new_price_id: &str) {
     emit(
         "subscription_upgrade",
