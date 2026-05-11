@@ -94,12 +94,12 @@ pub fn log_unlock(lock_id: &str, account: &AccountId, validator: &AccountId) {
     );
 }
 
-pub fn log_claim_unlocked(account: &AccountId, validator_pool: &AccountId) {
+pub fn log_claim_unlocked(account: &AccountId, validator_id: &AccountId) {
     emit(
         "claim_unlocked",
         serde_json::json!({
             "account_id": account.to_string(),
-            "validator_id": validator_pool.to_string(),
+            "validator_id": validator_id.to_string(),
         }),
     );
 }
@@ -114,21 +114,21 @@ pub fn log_withdraw(account: &AccountId, amount_yocto: u128) {
     );
 }
 
-pub fn log_epoch_operation(epoch_action: &str, validator_pool: &AccountId) {
+pub fn log_epoch_operation(epoch_action: &str, validator_id: &AccountId) {
     emit(
         epoch_action,
         serde_json::json!({
             "epoch_action": epoch_action,
-            "validator_id": validator_pool.to_string(),
+            "validator_id": validator_id.to_string(),
         }),
     );
 }
 
-pub fn log_pool_withdraw_in(amount_yocto: u128, validator_pool: &AccountId) {
+pub fn log_pool_withdraw_in(amount_yocto: u128, validator_id: &AccountId) {
     emit(
         "pool_withdraw_in",
         serde_json::json!({
-            "validator_id": validator_pool.to_string(),
+            "validator_id": validator_id.to_string(),
             "amount_yocto": amount_yocto.to_string(),
         }),
     );

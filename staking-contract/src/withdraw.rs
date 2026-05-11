@@ -7,14 +7,14 @@ impl Contract {
     /// Move a pro-rata share of [`Validator::pending_to_withdraw`] into this account's `withdrawable_balance`.
     /// Run after [`crate::epoch::Contract::epoch_withdraw`] has pulled NEAR from the pool into the contract bucket.
     #[payable]
-    pub fn claim_unlocked_near(&mut self, validator_pool: AccountId) {
+    pub fn claim_unlocked_near(&mut self, validator_id: AccountId) {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
 
         let account_id = env::predecessor_account_id();
         self.ensure_min_base_storage(&account_id);
 
-        let ukey = (account_id.clone(), validator_pool.clone());
+        let ukey = (account_id.clone(), validator_id.clone());
         let o = self
             .user_pending_unstake
             .get(&ukey)
@@ -27,7 +27,7 @@ impl Contract {
 
         let mut v = self
             .validators
-            .get(&validator_pool)
+            .get(&validator_id)
             .cloned()
             .unwrap_or_else(|| env::panic_str("Unknown validator"));
         let w = v.pending_to_withdraw;
@@ -82,23 +82,23 @@ impl Contract {
             .checked_add(credit)
             .expect("withdrawable overflow");
         self.accounts.insert(account_id.clone(), acc);
-        self.validators.insert(validator_pool.clone(), v);
+        self.validators.insert(validator_id.clone(), v);
 
-        crate::events::log_claim_unlocked(&account_id, &validator_pool);
+        crate::events::log_claim_unlocked(&account_id, &validator_id);
     }
 
     /// When [`Validator::pending_user_unstake_total`] is zero but [`Validator::pending_to_withdraw`] is still
     /// positive (e.g. pool rounding so `w > t` after the last user claims), transfer that remainder to the
     /// contract owner.
     #[payable]
-    pub fn sweep_stranded_withdraw_bucket(&mut self, validator_pool: AccountId) -> Promise {
+    pub fn sweep_stranded_withdraw_bucket(&mut self, validator_id: AccountId) -> Promise {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
         self.assert_owner();
 
         let mut v = self
             .validators
-            .get(&validator_pool)
+            .get(&validator_id)
             .cloned()
             .unwrap_or_else(|| env::panic_str("Unknown validator"));
         let w_y = v.pending_to_withdraw.as_yoctonear();
@@ -107,7 +107,7 @@ impl Contract {
         require!(w_y > 0, "No stranded balance in withdraw bucket");
 
         v.pending_to_withdraw = NearToken::from_near(0);
-        self.validators.insert(validator_pool, v);
+        self.validators.insert(validator_id, v);
 
         Promise::new(self.config.owner_account_id.clone()).transfer(NearToken::from_yoctonear(w_y))
     }

@@ -58,7 +58,7 @@ pub struct Contract {
     pub accounts: LookupMap<AccountId, Account>,
     pub subscriptions: LookupMap<SubscriptionId, Subscription>,
     pub locks: LookupMap<LockId, Lock>,
-    /// (user, validator_pool) -> share units (yocto-scale integer).
+    /// (user, validator_id) -> share units (yocto-scale integer).
     pub user_validator_shares: LookupMap<(AccountId, AccountId), u128>,
     /// NEAR queued from unlock, waiting for epoch distribution after withdraw from pool.
     pub user_pending_unstake: LookupMap<(AccountId, AccountId), NearToken>,

@@ -96,7 +96,7 @@ async fn staking_epoch_stake_fails_when_nothing_pending_after_successful_stake()
 
     buyer
         .call(staking.id(), "epoch_stake")
-        .args_json(json!({ "validator_pool": pool.id() }))
+        .args_json(json!({ "validator_id": pool.id() }))
         .gas(WsGas::from_tgas(200))
         .transact()
         .await?
@@ -104,7 +104,7 @@ async fn staking_epoch_stake_fails_when_nothing_pending_after_successful_stake()
 
     let again = buyer
         .call(staking.id(), "epoch_stake")
-        .args_json(json!({ "validator_pool": pool.id() }))
+        .args_json(json!({ "validator_id": pool.id() }))
         .gas(WsGas::from_tgas(200))
         .transact()
         .await?;
@@ -180,7 +180,7 @@ async fn staking_two_locks_aggregate_then_single_epoch_stake_clears_pending()
 
     buyer_a
         .call(staking.id(), "epoch_stake")
-        .args_json(json!({ "validator_pool": pool.id() }))
+        .args_json(json!({ "validator_id": pool.id() }))
         .gas(WsGas::from_tgas(200))
         .transact()
         .await?
@@ -327,7 +327,7 @@ async fn staking_contract_pause_blocks_epoch_stake() -> Result<(), Box<dyn std::
 
     let outcome = buyer
         .call(staking.id(), "epoch_stake")
-        .args_json(json!({ "validator_pool": pool.id() }))
+        .args_json(json!({ "validator_id": pool.id() }))
         .gas(WsGas::from_tgas(200))
         .transact()
         .await?;
@@ -391,7 +391,7 @@ async fn staking_withdraw_clears_withdrawable_after_claim_unlocked_near()
 
     buyer
         .call(staking.id(), "epoch_stake")
-        .args_json(json!({ "validator_pool": pool.id() }))
+        .args_json(json!({ "validator_id": pool.id() }))
         .gas(WsGas::from_tgas(200))
         .transact()
         .await?
@@ -416,7 +416,7 @@ async fn staking_withdraw_clears_withdrawable_after_claim_unlocked_near()
 
     buyer
         .call(staking.id(), "epoch_unstake")
-        .args_json(json!({ "validator_pool": pool.id() }))
+        .args_json(json!({ "validator_id": pool.id() }))
         .gas(WsGas::from_tgas(200))
         .transact()
         .await?
@@ -426,7 +426,7 @@ async fn staking_withdraw_clears_withdrawable_after_claim_unlocked_near()
 
     buyer
         .call(staking.id(), "epoch_withdraw")
-        .args_json(json!({ "validator_pool": pool.id() }))
+        .args_json(json!({ "validator_id": pool.id() }))
         .gas(WsGas::from_tgas(300))
         .transact()
         .await?
@@ -434,7 +434,7 @@ async fn staking_withdraw_clears_withdrawable_after_claim_unlocked_near()
 
     buyer
         .call(staking.id(), "claim_unlocked_near")
-        .args_json(json!({ "validator_pool": pool.id() }))
+        .args_json(json!({ "validator_id": pool.id() }))
         .deposit(NearToken::from_yoctonear(1))
         .gas(WsGas::from_tgas(200))
         .transact()
@@ -566,7 +566,7 @@ async fn staking_refresh_validator_balance_matches_pool_total_balance()
 
     buyer
         .call(staking.id(), "epoch_stake")
-        .args_json(json!({ "validator_pool": pool.id() }))
+        .args_json(json!({ "validator_id": pool.id() }))
         .gas(WsGas::from_tgas(200))
         .transact()
         .await?
@@ -575,7 +575,7 @@ async fn staking_refresh_validator_balance_matches_pool_total_balance()
     // `refresh_validator_balance` uses `assert_operator`; e2e config has empty operators so any account may call.
     staking
         .call(staking.id(), "refresh_validator_balance")
-        .args_json(json!({ "validator_pool": pool.id() }))
+        .args_json(json!({ "validator_id": pool.id() }))
         .gas(WsGas::from_tgas(200))
         .transact()
         .await?

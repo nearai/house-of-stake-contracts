@@ -110,10 +110,10 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 
 | Method | Description |
 |--------|-------------|
-| `epoch_stake` | `validator_pool` — stake **`pending_to_stake`** via pool **`deposit_and_stake`**. Serialized per pool (`tx_status`, one stake batch per epoch). |
-| `epoch_unstake` | `validator_pool` — unstake **`pending_to_unstake`**. Gated by **`epoch_unstake_settle_epochs`** vs last unstake epoch. |
-| `epoch_withdraw` | `validator_pool` — after settle epochs, pull unstaked NEAR from pool into **`pending_to_withdraw`**. |
-| `refresh_validator_balance` | `validator_pool` — **`get_account_total_balance`** callback updates **`Validator.total_staked_balance`**. Shares **`tx_status`** serialization with **`epoch_*`**. |
+| `epoch_stake` | `validator_id` — stake **`pending_to_stake`** via pool **`deposit_and_stake`**. Serialized per pool (`tx_status`, one stake batch per epoch). |
+| `epoch_unstake` | `validator_id` — unstake **`pending_to_unstake`**. Gated by **`epoch_unstake_settle_epochs`** vs last unstake epoch. |
+| `epoch_withdraw` | `validator_id` — after settle epochs, pull unstaked NEAR from pool into **`pending_to_withdraw`**. |
+| `refresh_validator_balance` | `validator_id` — **`get_account_total_balance`** callback updates **`Validator.total_staked_balance`**. Shares **`tx_status`** serialization with **`epoch_*`**. |
 
 ---
 
@@ -135,9 +135,9 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 
 | Method | Access | Deposit | Description |
 |--------|--------|---------|-------------|
-| `claim_unlocked_near` | User | **1 yocto** | `validator_pool` — pro-rata claim from **`pending_to_withdraw`** into **`withdrawable_balance`** (requires prior **`epoch_withdraw`** and liability bookkeeping). |
+| `claim_unlocked_near` | User | **1 yocto** | `validator_id` — pro-rata claim from **`pending_to_withdraw`** into **`withdrawable_balance`** (requires prior **`epoch_withdraw`** and liability bookkeeping). |
 | `withdraw` | User | **1 yocto** | JSON args are **`{ "amount": <NearToken> }`**; use **`"amount": null`** to withdraw the full **`withdrawable_balance`**. A bare JSON **`null`** body does not deserialize (near-sdk wraps args in a struct keyed by parameter names). |
-| `sweep_stranded_withdraw_bucket` | **Owner** | **1 yocto** | `validator_pool` — if user liability total is zero but **`pending_to_withdraw`** remains, send remainder to **`owner_account_id`**. |
+| `sweep_stranded_withdraw_bucket` | **Owner** | **1 yocto** | `validator_id` — if user liability total is zero but **`pending_to_withdraw`** remains, send remainder to **`owner_account_id`**. |
 
 ---
 

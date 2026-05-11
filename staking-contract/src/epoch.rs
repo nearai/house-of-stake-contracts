@@ -6,22 +6,22 @@ use near_sdk::{AccountId, NearToken, Promise, PromiseOrValue, env, near, require
 
 #[ext_contract(ext_self_epoch)]
 pub trait ExtSelfEpoch {
-    fn on_deposit_and_stake(&mut self, validator_pool: AccountId, amount: NearToken) -> bool;
-    fn on_unstake(&mut self, validator_pool: AccountId, amount: NearToken) -> bool;
+    fn on_deposit_and_stake(&mut self, validator_id: AccountId, amount: NearToken) -> bool;
+    fn on_unstake(&mut self, validator_id: AccountId, amount: NearToken) -> bool;
     fn on_refresh_total_balance(
         &mut self,
         #[callback] total_balance: NearToken,
-        validator_pool: AccountId,
+        validator_id: AccountId,
     );
     /// After `get_account_unstaked_balance`; may chain `withdraw` on the pool.
     fn on_get_unstaked_for_epoch_withdraw(
         &mut self,
         #[callback] unstaked_balance: NearToken,
-        validator_pool: AccountId,
+        validator_id: AccountId,
     ) -> PromiseOrValue<bool>;
     fn on_epoch_withdraw_transfer_done(
         &mut self,
-        validator_pool: AccountId,
+        validator_id: AccountId,
         withdrawn: NearToken,
     ) -> bool;
 }
@@ -43,14 +43,14 @@ pub trait ExtStakingPool {
 impl Contract {
     /// Operator: stake `pending_to_stake` on the pool. At most **one successful** stake batch per epoch per
     /// validator (retry the same epoch only if the pool call failed and `tx_status` returned to idle).
-    pub fn epoch_stake(&mut self, validator_pool: AccountId) -> Promise {
+    pub fn epoch_stake(&mut self, validator_id: AccountId) -> Promise {
         self.assert_not_paused();
         self.assert_operator();
-        events::log_epoch_operation("epoch_stake", &validator_pool);
+        events::log_epoch_operation("epoch_stake", &validator_id);
 
         let mut v = self
             .validators
-            .get(&validator_pool)
+            .get(&validator_id)
             .cloned()
             .expect("Unknown validator");
         require!(
@@ -65,30 +65,30 @@ impl Contract {
         require!(amt.as_yoctonear() > 0, "nothing to stake");
 
         v.tx_status = TransactionStatus::Busy;
-        self.validators.insert(validator_pool.clone(), v);
+        self.validators.insert(validator_id.clone(), v);
 
-        ext_staking_pool::ext(validator_pool.clone())
+        ext_staking_pool::ext(validator_id.clone())
             .with_static_gas(staking_pool::DEPOSIT_AND_STAKE)
             .with_attached_deposit(amt)
             .deposit_and_stake()
             .then(
                 ext_self_epoch::ext(env::current_account_id())
                     .with_static_gas(callbacks::ON_DEPOSIT_AND_STAKE)
-                    .on_deposit_and_stake(validator_pool, amt),
+                    .on_deposit_and_stake(validator_id, amt),
             )
     }
 
     /// Operator: request unstake for `pending_to_unstake` (after users called [`crate::unlock::Contract::unlock`]).
     /// A new unstake is rejected until `epoch_unstake_settle_epochs` have passed since the last successful
     /// unstake callback for this pool (serialize unstake rounds before the next batch).
-    pub fn epoch_unstake(&mut self, validator_pool: AccountId) -> Promise {
+    pub fn epoch_unstake(&mut self, validator_id: AccountId) -> Promise {
         self.assert_not_paused();
         self.assert_operator();
-        events::log_epoch_operation("epoch_unstake", &validator_pool);
+        events::log_epoch_operation("epoch_unstake", &validator_id);
 
         let mut v = self
             .validators
-            .get(&validator_pool)
+            .get(&validator_id)
             .cloned()
             .expect("Unknown validator");
         require!(
@@ -108,28 +108,28 @@ impl Contract {
         require!(amt.as_yoctonear() > 0, "nothing to unstake");
 
         v.tx_status = TransactionStatus::Busy;
-        self.validators.insert(validator_pool.clone(), v);
+        self.validators.insert(validator_id.clone(), v);
 
-        ext_staking_pool::ext(validator_pool.clone())
+        ext_staking_pool::ext(validator_id.clone())
             .with_static_gas(staking_pool::UNSTAKE)
             .unstake(amt)
             .then(
                 ext_self_epoch::ext(env::current_account_id())
                     .with_static_gas(callbacks::ON_UNSTAKE)
-                    .on_unstake(validator_pool, amt),
+                    .on_unstake(validator_id, amt),
             )
     }
 
     /// Operator: after unstake settles (`epoch_unstake_settle_epochs`), pull unstaked NEAR from the pool into
     /// `pending_to_withdraw`. Users then call `claim_unlocked_near`.
-    pub fn epoch_withdraw(&mut self, validator_pool: AccountId) -> Promise {
+    pub fn epoch_withdraw(&mut self, validator_id: AccountId) -> Promise {
         self.assert_not_paused();
         self.assert_operator();
-        events::log_epoch_operation("epoch_withdraw", &validator_pool);
+        events::log_epoch_operation("epoch_withdraw", &validator_id);
 
         let mut v = self
             .validators
-            .get(&validator_pool)
+            .get(&validator_id)
             .cloned()
             .expect("Unknown validator");
         require!(
@@ -145,26 +145,26 @@ impl Contract {
         );
 
         v.tx_status = TransactionStatus::Busy;
-        self.validators.insert(validator_pool.clone(), v);
+        self.validators.insert(validator_id.clone(), v);
 
-        ext_staking_pool::ext(validator_pool.clone())
+        ext_staking_pool::ext(validator_id.clone())
             .with_static_gas(staking_pool::GET_ACCOUNT_UNSTAKED_BALANCE)
             .get_account_unstaked_balance(env::current_account_id())
             .then(
                 ext_self_epoch::ext(env::current_account_id())
                     .with_static_gas(callbacks::ON_GET_UNSTAKED_FOR_WITHDRAW)
-                    .on_get_unstaked_for_epoch_withdraw(validator_pool),
+                    .on_get_unstaked_for_epoch_withdraw(validator_id),
             )
     }
 
     /// Refresh pool-reported balance into [`Validator::total_staked_balance`]. Same access as
     /// [`Contract::epoch_stake`] — [`Contract::assert_operator`].
-    pub fn refresh_validator_balance(&mut self, validator_pool: AccountId) -> Promise {
+    pub fn refresh_validator_balance(&mut self, validator_id: AccountId) -> Promise {
         self.assert_not_paused();
         self.assert_operator();
         let mut v = self
             .validators
-            .get(&validator_pool)
+            .get(&validator_id)
             .cloned()
             .expect("Unknown validator");
         require!(
@@ -172,15 +172,15 @@ impl Contract {
             "validator pool busy"
         );
         v.tx_status = TransactionStatus::Busy;
-        self.validators.insert(validator_pool.clone(), v);
+        self.validators.insert(validator_id.clone(), v);
 
-        ext_staking_pool::ext(validator_pool.clone())
+        ext_staking_pool::ext(validator_id.clone())
             .with_static_gas(staking_pool::GET_ACCOUNT_TOTAL_BALANCE)
             .get_account_total_balance(env::current_account_id())
             .then(
                 ext_self_epoch::ext(env::current_account_id())
                     .with_static_gas(callbacks::ON_TOTAL_BALANCE)
-                    .on_refresh_total_balance(validator_pool),
+                    .on_refresh_total_balance(validator_id),
             )
     }
 }
