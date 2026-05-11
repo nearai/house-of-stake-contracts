@@ -9,7 +9,7 @@ use near_sdk::{
     testing_env,
 };
 use staking_contract::internal::LOCK_FACTOR_DENOM;
-use staking_contract::types::{BillingPeriod, PriceType, ProductId};
+use staking_contract::types::{BillingPeriod, PriceId, PriceType, ProductId};
 use staking_contract::{Config, Contract};
 use std::collections::HashMap;
 use std::str::FromStr;
