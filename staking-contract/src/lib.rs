@@ -41,7 +41,7 @@ enum StorageKeys {
     UserValidatorShares,
     UserPendingUnstake,
     UserLockCount,
-    SubscriptionByAccountPrice,
+    SubscriptionByAccountProduct,
 }
 
 #[derive(PanicOnDefault)]
@@ -64,10 +64,8 @@ pub struct Contract {
     pub user_pending_unstake: LookupMap<(AccountId, AccountId), NearToken>,
     /// Locks ever created per account (increments on each new lock; used for per-lock storage prepaid).
     pub user_lock_count: LookupMap<AccountId, u32>,
-    /// One subscription row per `(user, recurring price_id)` — matches a single active subscription to that
-    /// catalog price (Stripe-style). Multiple concurrent subscriptions to the same price would need distinct
-    /// price IDs or a future “quantity / seats” model.
-    pub subscription_by_account_price: LookupMap<(AccountId, PriceId), SubscriptionId>,
+    /// One subscription row per `(user, product_id)`; tier is [`Subscription::price_id`] (upgrade/downgrade).
+    pub subscription_by_account_product: LookupMap<(AccountId, ProductId), SubscriptionId>,
     pub id_nonce: u64,
 }
 
@@ -89,7 +87,9 @@ impl Contract {
             user_validator_shares: LookupMap::new(StorageKeys::UserValidatorShares),
             user_pending_unstake: LookupMap::new(StorageKeys::UserPendingUnstake),
             user_lock_count: LookupMap::new(StorageKeys::UserLockCount),
-            subscription_by_account_price: LookupMap::new(StorageKeys::SubscriptionByAccountPrice),
+            subscription_by_account_product: LookupMap::new(
+                StorageKeys::SubscriptionByAccountProduct,
+            ),
             id_nonce: 0,
         }
     }

@@ -32,6 +32,47 @@ pub fn log_product_created(product_id: &str, validator_id: &AccountId) {
     );
 }
 
+pub fn log_subscription_cancel(account: &AccountId, product_id: &str) {
+    emit(
+        "subscription_cancel",
+        serde_json::json!({
+            "account_id": account.to_string(),
+            "product_id": product_id,
+        }),
+    );
+}
+
+pub fn log_subscription_upgrade(account: &AccountId, new_price_id: &str) {
+    emit(
+        "subscription_upgrade",
+        serde_json::json!({
+            "account_id": account.to_string(),
+            "new_price_id": new_price_id,
+        }),
+    );
+}
+
+pub fn log_subscription_downgrade_scheduled(account: &AccountId, target_price_id: &str) {
+    emit(
+        "subscription_downgrade_scheduled",
+        serde_json::json!({
+            "account_id": account.to_string(),
+            "target_price_id": target_price_id,
+        }),
+    );
+}
+
+pub fn log_subscription_downgrade_prorate(account: &AccountId, product_id: &str, near_yocto: u128) {
+    emit(
+        "subscription_downgrade_prorate",
+        serde_json::json!({
+            "account_id": account.to_string(),
+            "product_id": product_id,
+            "near_yocto": near_yocto.to_string(),
+        }),
+    );
+}
+
 pub fn log_lock(lock_id: &str, account: &AccountId) {
     emit(
         "lock_create",

@@ -43,6 +43,7 @@ Implemented in code:
 - Validator-owner **catalog** (`create_product`, `create_price`, …)
 - Stripe-like deterministic IDs (`prod_*`, `price_*`, `lock_*`, `sub_*`)
 - Share minting helpers (`internal.rs`) and NEAR-denominated `lock_for_product` / `lock_for_subscription`
+- Subscriptions keyed by `(account_id, product_id)` with tier = [`Subscription::price_id`](src/types.rs): **`cancel_subscription`**, **`upgrade_subscription`**, **`schedule_downgrade_subscription`**. On renewal with a scheduled downgrade, **Phase B prorate** releases catalog tier-gap stake into the normal unstake queue ([`lock.rs`](src/lock.rs) / [`unlock.rs`](src/unlock.rs)).
 - `unlock` (user-driven); operator **`epoch_stake`**, **`epoch_unstake`**, **`epoch_withdraw`**; user **`claim_unlocked_near`** → **`withdraw`**
 - `refresh_validator_balance` + pool callbacks; **`storage_withdraw`**
 - **EVENT_JSON** for lock/unlock, catalog, validators, epoch ops, claim/withdraw, pool withdraw-in ([`events.rs`](src/events.rs)) — `standard: "stake.dao"`, `version: "1.0.0"`, nested `data`

@@ -118,6 +118,10 @@ pub struct Subscription {
     pub anchor_day: u8,
     pub last_lock_id: LockId,
     pub status: SubscriptionStatus,
+    /// When true, no renewal after the current billing period (`end_ns`); lock still runs until unlock.
+    pub cancel_at_period_end: bool,
+    /// Lower tier to apply at the start of the **next** billing period (Phase A: no mid-cycle refund).
+    pub pending_downgrade_price_id: Option<PriceId>,
 }
 
 #[derive(Clone)]

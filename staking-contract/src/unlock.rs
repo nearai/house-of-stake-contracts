@@ -24,6 +24,27 @@ impl Contract {
         require!(env::block_timestamp() >= lock.end_ns.0, "Lock still active");
 
         let validator_id = lock.validator_id.clone();
+        let account_log = lock.account_id.clone();
+        let validator_log = lock.validator_id.clone();
+        let sh = lock.shares.0;
+        self.queue_shares_unstake(lock.account_id.clone(), validator_id, sh);
+        lock.status = LockStatus::UnlockRequested;
+        self.locks.insert(lock_id.clone(), lock);
+
+        crate::events::log_unlock(lock_id.as_str(), &account_log, &validator_log);
+    }
+}
+
+impl Contract {
+    /// Release staking shares into the same unstake queue as [`Contract::unlock`] (epoch settlement → claim).
+    /// Returns NEAR yocto amount moved to `user_pending_unstake` for this user/validator.
+    pub(crate) fn queue_shares_unstake(
+        &mut self,
+        account_id: AccountId,
+        validator_id: AccountId,
+        shares_remove: u128,
+    ) -> u128 {
+        require!(shares_remove > 0, "shares_remove");
         let mut v = self
             .validators
             .get(&validator_id)
@@ -32,12 +53,12 @@ impl Contract {
 
         let eff = effective_stake_yocto(v.total_staked_balance, v.pending_to_stake);
         let ts = v.total_shares.0;
-        let sh = lock.shares.0;
-        let near_amt = near_from_shares(sh, eff, ts);
-        require!(ts >= sh && ts > 0, "share underflow");
+        require!(ts > 0 && ts >= shares_remove, "share underflow");
 
-        v.total_shares = U128(ts - sh);
+        let near_amt = near_from_shares(shares_remove, eff, ts);
         let near_token = NearToken::from_yoctonear(near_amt);
+
+        v.total_shares = U128(ts - shares_remove);
         v.pending_to_unstake = v
             .pending_to_unstake
             .checked_add(near_token)
@@ -47,13 +68,14 @@ impl Contract {
             .checked_add(near_token)
             .expect("pending user total overflow");
 
-        let ukey = (lock.account_id.clone(), validator_id.clone());
+        let ukey = (account_id.clone(), validator_id.clone());
         let us = self.user_validator_shares.get(&ukey).copied().unwrap_or(0);
-        require!(us >= sh, "user shares");
-        if us == sh {
+        require!(us >= shares_remove, "user shares");
+        if us == shares_remove {
             self.user_validator_shares.remove(&ukey);
         } else {
-            self.user_validator_shares.insert(ukey.clone(), us - sh);
+            self.user_validator_shares
+                .insert(ukey.clone(), us - shares_remove);
         }
 
         let pending = self
@@ -64,12 +86,7 @@ impl Contract {
         self.user_pending_unstake
             .insert(ukey, pending.checked_add(near_token).expect("pending"));
 
-        let account_log = lock.account_id.clone();
-        let validator_log = lock.validator_id.clone();
-        lock.status = LockStatus::UnlockRequested;
-        self.locks.insert(lock_id.clone(), lock);
         self.validators.insert(validator_id, v);
-
-        crate::events::log_unlock(lock_id.as_str(), &account_log, &validator_log);
+        near_amt
     }
 }

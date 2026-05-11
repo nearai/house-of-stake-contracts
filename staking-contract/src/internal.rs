@@ -41,6 +41,28 @@ pub fn near_from_shares(shares: u128, effective_total: u128, total_shares: u128)
 /// where `required_near_months = amount * lock_factor / LOCK_FACTOR_DENOM`.
 ///
 /// [`Price::amount`] is **yoctoNEAR** for the catalog line item.
+/// Smallest integer `locked_yocto` such that [`check_near_price_lock`] passes for `(price, duration_ns)`.
+/// Used for tier-gap surplus when downgrading subscriptions (Phase B prorate).
+pub fn min_locked_yocto_for_duration(price: &Price, duration_ns: u128) -> u128 {
+    if duration_ns == 0 {
+        return 0;
+    }
+    let required_nm = price
+        .amount
+        .0
+        .saturating_mul(price.lock_factor_near_months.0)
+        / LOCK_FACTOR_DENOM;
+    let rhs = U256::from(required_nm) * U256::from(AVG_MONTH_NS);
+    let d = U256::from(duration_ns);
+    let q = rhs / d;
+    let r = rhs % d;
+    let mut out = q.as_u128();
+    if !r.is_zero() {
+        out = out.saturating_add(1);
+    }
+    out
+}
+
 pub fn check_near_price_lock(
     price: &Price,
     locked_yocto: u128,
@@ -76,5 +98,30 @@ mod tests {
     fn mint_pro_rata() {
         let s = mint_shares(2_000, 4_000, 1_000);
         assert_eq!(s, 500);
+    }
+
+    #[test]
+    fn min_locked_matches_price_check_boundary() {
+        use crate::types::{BillingPeriod, CatalogStatus, Price, PriceType};
+        use near_sdk::json_types::U128;
+        let price = Price {
+            price_id: "price_x".into(),
+            product_id: "prod_x".into(),
+            name: "".into(),
+            description: "".into(),
+            amount: U128(100),
+            price_type: PriceType::Recurring,
+            billing_period: Some(BillingPeriod::Monthly),
+            lock_factor_near_months: U128(LOCK_FACTOR_DENOM),
+            status: CatalogStatus::Active,
+            usage_count: 0,
+        };
+        let d: u128 = 1_000_000_000_000;
+        let m = min_locked_yocto_for_duration(&price, d);
+        assert!(check_near_price_lock(&price, m, d).is_ok());
+        assert!(m > 0);
+        if m > 1 {
+            assert!(check_near_price_lock(&price, m - 1, d).is_err());
+        }
     }
 }

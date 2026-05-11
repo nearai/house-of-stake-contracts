@@ -53,6 +53,18 @@ pub fn ctx(pred: AccountId, attached: NearToken) -> VMContext {
         .build()
 }
 
+pub fn ctx_ts(pred: AccountId, attached: NearToken, block_timestamp_ns: u64) -> VMContext {
+    VMContextBuilder::new()
+        .current_account_id(acct(STAKING))
+        .predecessor_account_id(pred.clone())
+        .signer_account_id(pred)
+        .attached_deposit(attached)
+        .account_balance(NearToken::from_near(500))
+        .block_height(42)
+        .block_timestamp(block_timestamp_ns)
+        .build()
+}
+
 /// Context for `#[private]` catalog callbacks (`*_after_get_owner`): contract calls itself.
 fn ctx_catalog_callback() -> VMContext {
     let id = acct(STAKING);
@@ -117,6 +129,27 @@ pub fn setup_catalog_near_oneoff(contract: &mut Contract) -> (String, String) {
 }
 
 /// Recurring monthly NEAR price for subscription tests.
+/// Extra recurring monthly price on an existing product (for tier upgrade/downgrade tests).
+pub fn add_subscription_price(
+    contract: &mut Contract,
+    product_id: String,
+    name: &str,
+    amount_yocto: u128,
+) -> String {
+    testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
+    contract.create_price_after_get_owner(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        product_id,
+        name.into(),
+        "".into(),
+        U128(amount_yocto),
+        PriceType::Recurring,
+        Some(BillingPeriod::Monthly),
+        U128(LOCK_FACTOR_DENOM),
+        acct(VALIDATOR_OWNER_ACCOUNT),
+    )
+}
+
 pub fn setup_catalog_near_subscription(contract: &mut Contract) -> (String, String) {
     testing_env!(ctx(acct(OWNER), NearToken::from_yoctonear(1)));
     contract.add_validator(acct(POOL), acct(VALIDATOR_OWNER_ACCOUNT));

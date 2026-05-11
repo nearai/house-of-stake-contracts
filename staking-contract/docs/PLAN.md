@@ -1,6 +1,6 @@
 ---
 name: staking-contract-detailed-design
-overview: Detailed design for `stake.dao` (the new `staking-contract` under `house-of-stake-contracts/`) using a pooled-custody / meta-validator model with hybrid USD-or-NEAR product pricing. The contract sells NEAR AI products and subscriptions whose price is paid via locked NEAR that is staked into the product's validator pool, with epoch-batched stake/unstake/withdraw operations and per-user-per-validator share accounting.
+overview: Detailed design for `stake.dao` (the `staking-contract` under `house-of-stake-contracts/`) using a pooled-custody / meta-validator model with **NEAR-only** catalog pricing. Product and subscription prices are expressed in yoctoNEAR; lock sufficiency uses on-chain duration-weighted checks ([`internal::check_near_price_lock`](../src/internal.rs)). There is no oracle or USD path. Epoch-batched stake/unstake/withdraw and per-user-per-validator share accounting match the implementation.
 todos:
   - id: scaffold_crate
     content: Scaffold staking-contract crate (Cargo.toml, src/, workspace member, build_all.sh, test_all.sh) using voting-contract as template
@@ -18,13 +18,13 @@ todos:
     content: "Implement products.rs + prices.rs: validator-owner-only create/edit/archive/delete with usage_count guards and CatalogStatus"
     status: pending
   - id: oracle_module
-    content: "Implement oracle.rs: ExtOracle trait, OraclePrice (with Fraction + timestamp), freshness checks, USD->NEAR helper"
-    status: pending
+    content: "Superseded — NEAR-only catalog; pricing in internal.rs (no oracle crate)"
+    status: cancelled
   - id: accounts_storage
     content: "Implement accounts.rs: Account struct, NEP-145 storage_deposit/withdraw, per-validator share holdings"
     status: pending
   - id: lock_module
-    content: "Implement lock.rs: lock_for_product, lock_for_subscription, hybrid pricing rule, share minting, pending_to_stake accounting"
+    content: "Implement lock.rs: lock_for_product, lock_for_subscription, NEAR price check, share minting, pending_to_stake accounting"
     status: pending
   - id: unlock_module
     content: "Implement unlock.rs: user-driven unlock; refresh validator balance (or assert recent), share->NEAR conversion, pending_to_unstake bookkeeping"
@@ -42,10 +42,10 @@ todos:
     content: Implement events.rs emitters for catalog, validators, lifecycle, subscription, epoch operations
     status: pending
   - id: unit_tests
-    content: Write unit tests for share math, hybrid pricing, lock duration enforcement, oracle freshness, paused/owner asserts
+    content: Write unit tests for share math, NEAR price lock check, lock duration enforcement, paused/owner asserts
     status: pending
   - id: integration_tests
-    content: Write integration test under integration-tests/ exercising end-to-end flow against sandbox whitelist + mock oracle
+    content: Write integration tests (crate tests/ or workspace integration-tests) for end-to-end NEAR lock flows without oracle
     status: pending
   - id: readme_replace
     content: Replace staking-contract/README.md with the finalized API/design summary derived from this plan
@@ -55,7 +55,7 @@ isProject: false
 
 # Staking Contract — Detailed Design
 
-The plan below specifies the on-chain design of the new contract that lives at [house-of-stake-contracts/staking-contract/](house-of-stake-contracts/staking-contract/). It is intentionally written so the `README.md` in that folder can be replaced with this content (or distilled into it) in the implementation step. No code is written yet.
+The plan below describes the on-chain design of the contract at [house-of-stake-contracts/staking-contract/](house-of-stake-contracts/staking-contract/). It is a living document: **NEAR-only** pricing is implemented; older references to USD/oracle/hybrid pricing are **obsolete** and kept only where they help explain removed scope.
 
 ## 1. Goals and non-goals
 
@@ -78,8 +78,7 @@ Non-goals (for v1):
 flowchart LR
     user[User wallet]
     stakeDao[stake.dao - staking-contract]
-    oracle[oracle - NEAR price]
-    whitelist[validator whitelist]
+    whitelist[validator allowlist on contract]
     poolA[validator A pool e.g. nearai.poolv1.near]
     poolB[validator B pool]
     venearDao[venear.dao optional later]
@@ -87,13 +86,12 @@ flowchart LR
     user -- "lock / unlock / withdraw" --> stakeDao
     stakeDao -- "deposit_and_stake / unstake / withdraw" --> poolA
     stakeDao -- "..." --> poolB
-    stakeDao -- "ft_price NEAR/USD" --> oracle
-    stakeDao -- "is_whitelisted?" --> whitelist
+    stakeDao -- "listed?" --> whitelist
     stakeDao -. "future: register_lock" .-> venearDao
 ```
 
 Key roles:
-- **Contract owner** — HoS DAO (initially a multisig). Onboards validators (adds them to the on-contract allowlist), assigns each validator's owner, sets oracle/operators/global parameters, upgrades the contract.
+- **Contract owner** — HoS DAO (initially a multisig). Onboards validators (adds them to the on-contract allowlist), assigns each validator's owner, sets operators/global parameters, upgrades the contract.
 - **Guardians** — can pause the contract (same pattern as [venear-contract/src/pause.rs](house-of-stake-contracts/venear-contract/src/pause.rs)).
 - **Operator(s)** — drive `epoch_stake`/`epoch_unstake`/`epoch_withdraw`. Restricted by `Config.operators` (empty list ⇒ permissionless).
 - **Validator owner** (e.g., `nearai.sputnik-dao.near`) — owner of an on-contract `Validator` entry. Manages that validator's products and prices on stake.dao, and (separately, off this contract) controls the underlying staking pool itself (commission, etc.). The contract owner does **not** manage products/prices.
@@ -103,25 +101,25 @@ Key roles:
 
 Add a new crate inside the workspace mirroring sibling crates. Suggested files (all under [house-of-stake-contracts/staking-contract/src/](house-of-stake-contracts/staking-contract/src/)):
 
-- `lib.rs` — `Contract` state, `#[init]`, ext interfaces (`ext_staking_pool`, `ext_oracle`, `ext_self`).
-- `config.rs` — `Config` (owner, guardians, oracle, fees, durations), `get_config`, propose/accept ownership.
+- `lib.rs` — `Contract` state, `#[init]`, ext interfaces (`ext_staking_pool`, `ext_self` for callbacks).
+- `config.rs` — `Config` (owner, guardians, operators, lock bounds, storage and min lock amounts), `get_config`, propose/accept ownership via governance.
 - `governance.rs` — contract-owner setters (`set_*`, `propose_new_owner_account_id`, `accept_ownership`), `assert_owner`, `assert_guardian`, `assert_validator_owner(validator_id)`.
 - `pause.rs` — `pause`/`unpause`/`is_paused` (port [venear-contract/src/pause.rs](house-of-stake-contracts/venear-contract/src/pause.rs)).
 - `upgrade.rs` — `upgrade()` extern + `migrate_state` (port [venear-contract/src/upgrade.rs](house-of-stake-contracts/venear-contract/src/upgrade.rs)).
 - `validators.rs` — `Validator` model and the on-contract validator allowlist (the `validators` map itself); `add_validator`/`pause_validator`/`remove_validator`/`set_validator_owner`/`list_validators`; share-pool math per validator.
 - `products.rs` — `Product`, `Price`, lifecycle (`create_product`, `edit_product`, `archive_product`, `delete_product`, plus parallel `*_price` methods). All gated by `assert_validator_owner` for the product's validator.
 - `subscriptions.rs` — `Subscription` model and lookup helpers.
-- `oracle.rs` — `ext_oracle` trait, `OraclePrice`, `set_oracle_account_id`, USD→NEAR conversion helpers (with min/max sanity bounds).
-- `accounts.rs` — `Account` (per-user balances, locks, share holdings), storage deposit pattern (NEP-145).
+- `internal.rs` — share pool math, `check_near_price_lock` (NEAR-only duration-weighted sufficiency vs catalog line item).
+- `accounts.rs` — `Account` (storage + withdrawable balance), NEP-145-style `storage_deposit` / `storage_withdraw`.
 - `ids.rs` — Stripe-style identifier wrappers (`ProductId`, `PriceId`, `SubscriptionId`, `LockId`) plus deterministic on-chain ID generator.
-- `lock.rs` — `lock_for_product`, `lock_for_subscription`, internal "create order + take payment + record lock + accrue shares".
+- `lock.rs` — `lock_for_product`, `lock_for_subscription`, `check_near_price_lock`, finalize lock and `pending_to_stake` accounting.
 - `unlock.rs` — `unlock(lock_id)`, user-initiated only.
 - `withdraw.rs` — user `withdraw` (after pool's 4-epoch settlement returns NEAR to `stake.dao`).
 - `epoch.rs` — `epoch_stake(validator_id)`, `epoch_unstake(validator_id)`, `epoch_withdraw(validator_id)`, `refresh_validator_balance(validator_id)` (mirrors [lockup-contract/src/owner.rs](house-of-stake-contracts/lockup-contract/src/owner.rs)).
 - `pool_callbacks.rs` — `on_*` callbacks for staking pool external calls.
 - `events.rs` — `EVENT_JSON` emitters for product/price/subscription/lock/unlock/withdraw (extends pattern from [common/src/events.rs](house-of-stake-contracts/common/src/events.rs)).
 - `gas.rs` — gas constants per external call (mirrors [lockup-contract/src/gas.rs](house-of-stake-contracts/lockup-contract/src/gas.rs)).
-- `types.rs` — `Currency`, `PriceType`, `BillingPeriod`, `OrderRef`, `LockStatus`, `CatalogStatus`, `SubscriptionStatus`, `ValidatorStatus`, `TransactionStatus`.
+- `types.rs` — `PriceType`, `BillingPeriod`, `OrderRef`, `LockStatus`, `CatalogStatus`, `SubscriptionStatus`, `ValidatorStatus`, `TransactionStatus`, `Product`, `Price`, `Lock`, etc.
 
 `Cargo.toml` mirrors the [voting-contract/Cargo.toml](house-of-stake-contracts/voting-contract/Cargo.toml) reproducible-build header; depends on `common`, `near-sdk`, `serde_json`. The crate is added to the workspace `members` and to `build_all.sh` / `test_all.sh`.
 
@@ -129,30 +127,7 @@ Add a new crate inside the workspace mirroring sibling crates. Suggested files (
 
 ### 4.1 Top-level state
 
-```rust
-#[near(contract_state)]
-pub struct Contract {
-    config: Config,
-    paused: bool,
-
-    // The on-contract validator allowlist. Only validators present here can host products.
-    validators: UnorderedMap<AccountId, Validator>,
-
-    // Catalog (Stripe-style string IDs)
-    products: UnorderedMap<ProductId, Product>,
-    prices: UnorderedMap<PriceId, Price>,
-
-    // Customers
-    accounts: LookupMap<AccountId, Account>,
-
-    // Subscriptions and locks (Stripe-style string IDs)
-    subscriptions: UnorderedMap<SubscriptionId, Subscription>,
-    locks: LookupMap<LockId, Lock>,
-
-    // Monotonic nonces feeding the deterministic Stripe-style ID generator (see §4.6).
-    id_nonce: u64,
-}
-```
+The live layout uses `near_sdk::store::{LookupMap, Vector}` and matches [staking-contract/src/lib.rs](../src/lib.rs): `validators`, `validator_ids`, `product_ids`, `products`, `prices`, `accounts`, `subscriptions`, `locks`, `user_validator_shares`, `user_pending_unstake`, `user_lock_count`, `subscription_by_account_product`, `id_nonce`. See the crate for exact types.
 
 ### 4.2 Config
 
@@ -162,15 +137,16 @@ pub struct Config {
     pub proposed_new_owner_account_id: Option<AccountId>,
     pub guardians: Vec<AccountId>,
     pub operators: Vec<AccountId>,
-    pub oracle_account_id: AccountId,
-    pub oracle_max_age_ns: U64,
     pub min_lock_duration_ns: U64,
     pub max_lock_duration_ns: U64,
     pub epoch_unstake_settle_epochs: u64,
     pub min_storage_deposit: NearToken,
+    pub per_lock_storage_stake: NearToken,
     pub min_lock_amount: NearToken,
 }
 ```
+
+There is no oracle account or max-age field; pricing is NEAR-only on lock.
 
 The validator allowlist is the contract-internal `validators: UnorderedMap<AccountId, Validator>` map. It is unrelated to the HoS staking pool whitelist used by [lockup-contract](house-of-stake-contracts/lockup-contract/) — that whitelist controls which pools any user can stake their lockup to, while stake.dao's allowlist controls which validator pools can list NEAR AI products.
 
@@ -213,8 +189,9 @@ A view method `get_validator(validator_id) -> Validator` (and a paginated `list_
 
 ### 4.4 Product / Price / Subscription
 
+Catalog amounts are **yoctoNEAR** (`Price.amount`). There is no `Currency` enum in the implementation.
+
 ```rust
-pub enum Currency { Near, Usd }
 pub enum PriceType { OneOff, Recurring }
 pub enum BillingPeriod { Monthly /* Yearly later */ }
 
@@ -244,11 +221,10 @@ pub struct Price {
     pub product_id: ProductId,
     pub name: String,
     pub description: String,
-    pub currency: Currency,
-    pub amount: U128,
+    pub amount: U128,                        // yoctoNEAR
     pub price_type: PriceType,
     pub billing_period: Option<BillingPeriod>,
-    pub lock_factor_near_months: U128,
+    pub lock_factor_near_months: U128,       // see internal::LOCK_FACTOR_DENOM
     pub status: CatalogStatus,
     pub usage_count: u64,
 }
@@ -266,26 +242,23 @@ pub struct Subscription {
 }
 ```
 
-Hybrid pricing rule (per "hybrid" choice):
-- If `Price.currency == Near`, `required_near_months = amount * lock_factor_near_months / 1_NEAR`.
-- If `Price.currency == Usd`, snapshot oracle on lock: `near_per_usd = oracle_price.near_per_usd`, then `required_near_months = amount_usd * near_per_usd * lock_factor_near_months`.
-- The snapshot is frozen on the resulting `Lock`; subsequent oracle moves do not change the lock requirement.
-- The user submits `(amount_near, duration_months)` and the contract enforces `amount_near * duration_months >= required_near_months` (strict integer math with milliNEAR truncation, similar to [common/src/types.rs](house-of-stake-contracts/common/src/types.rs)).
+NEAR pricing rule (implemented in [`internal::check_near_price_lock`](../src/internal.rs)):
+- Compute required NEAR-months from the catalog line: `required_nm = amount * lock_factor_near_months / LOCK_FACTOR_DENOM` (yocto-scale integers).
+- Require `locked_yocto * duration_ns >= required_nm * AVG_MONTH_NS` so the user’s attached lock and chosen duration jointly satisfy the price.
+- Product locks pass explicit `lock_duration_ns`; subscription locks derive duration from the active billing window (`end_ns - now`).
 
 ### 4.5 Account & Lock
 
+Per-user share totals live in `Contract.user_validator_shares` (not nested on `Account`). The account record is minimal:
+
 ```rust
 pub struct Account {
-    pub account_id: AccountId,
     pub storage_deposit: NearToken,
-
-    pub shares_by_validator: UnorderedMap<AccountId, U128>,
-
-    pub active_lock_ids: Vec<LockId>,
-
     pub withdrawable_balance: NearToken,
 }
+```
 
+```rust
 pub struct Lock {
     pub lock_id: LockId,
     pub account_id: AccountId,
@@ -294,12 +267,12 @@ pub struct Lock {
     pub shares: U128,
     pub start_ns: U64,
     pub end_ns: U64,
-    pub order: OrderRef, // ProductPurchase{product_id, price_id} | Subscription{subscription_id, price_id, period_start_ns, period_end_ns}
-    pub status: LockStatus, // Active | UnlockRequested(at_ns) | Withdrawn
+    pub order: OrderRef,
+    pub status: LockStatus,
 }
 ```
 
-`shares` are minted **at lock time** out of the validator's pool and assigned to the user's `shares_by_validator[validator_id]`. The lock "reserves" that many shares from being unstaked before `end_ns`. Multiple concurrent locks on the same validator simply add to the user's share total; the contract enforces "free shares (not held by any unexpired lock) are the only ones that can be unlocked early" by tracking the sum of `lock.shares` per user-per-validator with `lock.status == Active`.
+`shares` are minted **at lock time** and recorded on the lock; aggregate user position per validator is in `user_validator_shares`. The lock "reserves" that many shares from being unstaked before `end_ns`. Multiple concurrent locks on the same validator simply add to the user's share total; the contract enforces "free shares (not held by any unexpired lock) are the only ones that can be unlocked early" by tracking the sum of `lock.shares` per user-per-validator with `lock.status == Active`.
 
 ### 4.6 Stripe-style identifier format
 
@@ -334,31 +307,23 @@ Notes:
 sequenceDiagram
     participant User
     participant StakeDao as stake.dao
-    participant Oracle as price oracle
 
     User->>StakeDao: lock_for_product(price_id, duration_ns) attached_deposit=N NEAR
-    StakeDao->>StakeDao: assert_not_paused; load Price; load Product; assert validator Active
-    alt Price.currency == Usd
-        StakeDao->>Oracle: get_price()
-        Oracle-->>StakeDao: near_per_usd, ts
-        StakeDao->>StakeDao: assert ts fresh; compute required_near_months
-    else Near
-        StakeDao->>StakeDao: required_near_months = amount * factor
-    end
-    StakeDao->>StakeDao: require N * duration_months >= required_near_months
-    StakeDao->>StakeDao: mint shares for N at validator (using last total_staked_balance + pending_to_stake)
-    StakeDao->>StakeDao: account.shares_by_validator[v] += shares
-    StakeDao->>StakeDao: persist Lock; validator.pending_to_stake += N
-    StakeDao->>StakeDao: emit lock event; return lock_id
+    StakeDao->>StakeDao: assert_not_paused, load Price and Product, assert validator Active
+    StakeDao->>StakeDao: check_near_price_lock(price, N, duration_ns)
+    StakeDao->>StakeDao: mint shares for N at validator (last balance + pending_to_stake)
+    StakeDao->>StakeDao: user_validator_shares += shares
+    StakeDao->>StakeDao: persist Lock, validator.pending_to_stake += N
+    StakeDao->>StakeDao: emit lock event, return lock_id
 ```
 
 Notes:
 - The actual `deposit_and_stake` to the pool happens later in `epoch_stake(validator)` to amortize gas across users in the same epoch.
-- USD-priced lock is a 2-step xcc (oracle call + self callback that creates the lock); the 1 yocto + attached NEAR are held in a temporary "pending order" map keyed by `(account_id, nonce)` until the callback resolves, refunded on failure.
+- Catalog mutations (`create_product`, `create_price`, …) use a pool `get_owner_id` callback to verify the validator owner; that is unrelated to pricing—locks are priced purely in NEAR on-chain as above.
 
 ### 5.2 Locking for a subscription (`lock_for_subscription`)
 
-- Caller passes `(price_id, months)` with `Price.price_type == Recurring`.
+- Caller passes `price_id` with `Price.price_type == Recurring` (monthly billing period in the implementation).
 - Contract creates a new `Subscription` (or extends an existing active one for the same price), pinning `Subscription.anchor_day = day_of_month(start_ns)` on creation, then extends and creates a corresponding `Lock`.
 - Calendar-month extension (Stripe-compatible):
 
@@ -401,12 +366,12 @@ sequenceDiagram
     participant P as validator pool
 
     Op->>SD: epoch_stake(v)
-    SD->>SD: assert_not_paused; v.tx_status == Idle; pending_to_stake > 0
-    SD->>SD: amount = pending_to_stake; set tx_status = Busy
+    SD->>SD: assert_not_paused, tx_status Idle, pending_to_stake positive
+    SD->>SD: amount = pending_to_stake, set tx_status Busy
     SD->>P: deposit_and_stake() attach amount
     P-->>SD: ok
     SD->>SD: on_pool_deposit_and_stake_callback(v, amount)
-    SD->>SD: total_staked_balance += amount; pending_to_stake -= amount; tx_status = Idle
+    SD->>SD: total_staked_balance += amount, pending_to_stake -= amount, tx_status Idle
 ```
 
 `epoch_unstake(validator_id)` mirrors this, calling `unstake(amount)` and bumping `last_unstake_epoch = env::epoch_height()`.
@@ -423,8 +388,7 @@ Two distinct roles. The contract owner administers the protocol; each validator 
 
 - `propose_new_owner_account_id`, `accept_ownership`.
 - `set_guardians`, `set_operators`.
-- `set_oracle(account_id, max_age_ns)`.
-- `set_lock_bounds(min_ns, max_ns)`, `set_min_lock_amount`, `set_min_storage_deposit`.
+- `set_lock_bounds`, `set_min_lock_amount`, `set_min_storage_deposit`, `set_per_lock_storage_stake`, `set_epoch_unstake_settle_epochs` (see [governance.rs](../src/governance.rs)).
 
 Validator allowlist (contract owner only):
 - `add_validator(pool_account_id, validator_owner_account_id)` — synchronous; inserts a new entry into the on-contract `validators` map with `total_shares = 0`, `status = Active`, and `owner_account_id = validator_owner_account_id`. There is no external whitelist call (the on-contract `validators` map is itself the allowlist; see §4.2).
@@ -441,7 +405,7 @@ Catalog:
 - `edit_product(product_id, name, description)` — only `name`, `description` are mutable.
 - `archive_product(product_id)`
 - `delete_product(product_id)` — requires `usage_count == 0`.
-- `create_price(product_id, currency, amount, price_type, billing_period, lock_factor_near_months) -> PriceId`
+- `create_price(...)` — NEAR amount in yocto, `price_type`, optional `billing_period`, `lock_factor_near_months` (see implementation / tests for exact arity via pool-owner callbacks).
 - `edit_price(price_id, name, description)` — only `name`, `description` are mutable.
 - `archive_price(price_id)`
 - `delete_price(price_id)` — requires `usage_count == 0`.
@@ -459,25 +423,17 @@ pub trait ExtStakingPool {
     fn get_account_total_balance(&self, account_id: AccountId) -> NearToken;
     fn get_account_unstaked_balance(&self, account_id: AccountId) -> NearToken;
 }
-
-#[ext_contract(ext_oracle)]
-pub trait ExtOracle {
-    fn get_price(&self) -> OraclePrice;
-    fn get_price_30d_avg(&self) -> OraclePrice;
-}
 ```
 
 There is no `ext_whitelist`: the validator allowlist is internal to stake.dao and validated synchronously inside `add_validator`.
 
-`OraclePrice { near_per_usd: Fraction, timestamp_ns: U64 }` reuses [common/src/types.rs](house-of-stake-contracts/common/src/types.rs) `Fraction` for safe rational math.
+There is **no** oracle contract interface in this crate; pricing does not depend on off-chain FX.
 
 ## 8. Storage and gas budgeting
 
 - Storage deposit: NEP-145-style `storage_deposit` / `storage_withdraw` for accounts; `Config.min_storage_deposit` covers `Account` + a couple of `Lock` slots; additional locks that exceed the prepaid storage panic with a "top up storage" error.
 - Catalog (`Product`, `Price`) storage is owner-paid (owner attaches deposit on create).
-- Gas constants modeled on [lockup-contract/src/gas.rs](house-of-stake-contracts/lockup-contract/src/gas.rs): `BASE_GAS = 25 TGas`. New constants:
-  - `EPOCH_DEPOSIT_AND_STAKE = 3 * BASE_GAS`, `EPOCH_UNSTAKE = 3 * BASE_GAS`, `EPOCH_WITHDRAW = 3 * BASE_GAS`.
-  - `ORACLE_GET_PRICE = BASE_GAS`, callback `BASE_GAS`.
+- Gas constants modeled on [lockup-contract/src/gas.rs](house-of-stake-contracts/lockup-contract/src/gas.rs): `BASE_GAS = 25 TGas`. Epoch pool operations use dedicated static gas in [gas.rs](../src/gas.rs); there is no oracle call budget.
 - All multi-step pool operations gate on `Validator.tx_status == Idle` and flip to `Busy` exactly like [lockup-contract/src/owner.rs](house-of-stake-contracts/lockup-contract/src/owner.rs).
 
 ## 9. Events
@@ -485,7 +441,7 @@ There is no `ext_whitelist`: the validator allowlist is internal to stake.dao an
 Extend [common/src/events.rs](house-of-stake-contracts/common/src/events.rs) (new module, standard `"stake.dao"`, version `"1.0.0"`):
 - Catalog: `product_create`, `product_edit`, `product_archive`, `product_delete`, `price_create`, `price_edit`, `price_archive`, `price_delete`.
 - Validators: `validator_add`, `validator_pause`, `validator_remove`.
-- Lifecycle: `lock_create` (with `lock_id`, `account_id`, `validator_id`, `amount`, `duration_ns`, `order`, frozen `near_per_usd` if USD-priced), `unlock_request`, `unlock_settled`, `withdraw`.
+- Lifecycle: `lock_create` (with `lock_id`, `account_id`, `validator_id`, etc.), `unlock_request`, `unlock_settled`, `withdraw`.
 - Subscription: `subscription_create`, `subscription_extend`.
 - Operations: `epoch_stake`, `epoch_unstake`, `epoch_withdraw`, `validator_balance_refresh`.
 
@@ -497,8 +453,7 @@ Extend [common/src/events.rs](house-of-stake-contracts/common/src/events.rs) (ne
 - Validator status transitions guarded so a `Removed` validator can never serve new locks but existing locks can still be unlocked/withdrawn through it.
 - Slashing is tolerated: `total_staked_balance` only decreases via `refresh_validator_balance` callback, share holders share the loss proportionally (standard staking pool semantics). Locks remain valid by share count, but `near_for(shares)` decreases — explicit risk disclosure in README.
 - Reentrancy avoided via the `Idle/Busy` per-validator status flag.
-- USD price freshness enforced (`now - price.timestamp_ns <= oracle_max_age_ns`); USD locks panic if oracle is stale rather than using a default.
-- Integer-overflow safety with `U256/U384` (already in `common`) for `shares * staked_balance` math.
+- Integer-overflow safety: share–NEAR products use `U256` where needed (see [internal.rs](../src/internal.rs)); lock pricing uses `U256` for the NEAR-months inequality.
 
 ## 11. Open items to confirm during implementation
 
@@ -511,11 +466,11 @@ Extend [common/src/events.rs](house-of-stake-contracts/common/src/events.rs) (ne
 
 ## 12. Testing strategy
 
-- Unit tests inside each module using `near_sdk::testing_env!` (mirrors [lockup-contract/src/lib.rs](house-of-stake-contracts/lockup-contract/src/lib.rs) tests) for share math, hybrid pricing, lock-amount-vs-duration enforcement, oracle freshness.
-- Integration tests under `house-of-stake-contracts/integration-tests/` against `sandbox-staking-whitelist-contract` (existing) plus a small mock oracle WASM. Scenarios:
-  - Owner setup → add validator → create product+price → user `lock` → operator `epoch_stake` → time skip → `unlock` → operator `epoch_unstake` → epoch skip → operator `epoch_withdraw` → user `withdraw`.
-  - USD-priced product with stale oracle → lock panics.
-  - Slashed pool reduces `total_staked_balance` → `near_for(shares)` decreases for all users proportionally.
-  - Recurring subscription extension over multiple `lock` calls.
+- Unit tests inside each module using `near_sdk::testing_env!` for share math, `check_near_price_lock`, lock duration bounds, paused/owner asserts.
+- Integration-style tests in [staking-contract/tests/](../tests/) (deploy catalog via pool-owner callbacks, `lock_for_product` / `lock_for_subscription`, storage). Full epoch/pool pipelines may use workspace integration tests or sandbox later.
+- Scenarios worth covering:
+  - Owner setup → add validator → create product+price → user lock → (epoch jobs when simulated) → unlock → withdraw path.
+  - Insufficient NEAR or duration for catalog line → lock panics.
+  - Recurring subscription rules (one lock per active period, renewal window).
   - Validator removal blocked while shares outstanding.
-- Add `staking-contract` to `build_all.sh` and `test_all.sh`.
+- `staking-contract` is included in workspace `build_all.sh` / `test_all.sh` when present.

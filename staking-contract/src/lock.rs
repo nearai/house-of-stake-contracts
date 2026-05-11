@@ -1,7 +1,10 @@
-use crate::internal::{check_near_price_lock, effective_stake_yocto, mint_shares};
+use crate::internal::{
+    check_near_price_lock, effective_stake_yocto, mint_shares, near_from_shares,
+};
 use crate::*;
+use common::U256;
 use near_sdk::json_types::{U64, U128};
-use near_sdk::{NearToken, env, near, require};
+use near_sdk::{NearToken, assert_one_yocto, env, near, require};
 
 const NS_PER_DAY: u64 = 86_400_000_000_000;
 
@@ -64,7 +67,7 @@ impl Contract {
     }
 
     /// Lock NEAR for a **monthly recurring** catalog price (NEAR-denominated). One subscription row per
-    /// `(account, price_id)`; renews the billing window when the previous period has ended.
+    /// `(account, product_id)`; [`Subscription::price_id`] is the active tier.
     #[payable]
     pub fn lock_for_subscription(&mut self, price_id: PriceId) -> LockId {
         self.assert_not_paused();
@@ -101,11 +104,12 @@ impl Contract {
         let validator_id = product.validator_id.clone();
         self.assert_validator_active_for_lock(&validator_id);
 
-        let sub_key = (buyer.clone(), price_id.clone());
+        let product_id = product.product_id.clone();
+        let sub_key = (buyer.clone(), product_id.clone());
         let now = env::block_timestamp();
 
         let (mut subscription, sub_id, is_new_index) = if let Some(sid_ref) =
-            self.subscription_by_account_price.get(&sub_key)
+            self.subscription_by_account_product.get(&sub_key)
         {
             let sid = sid_ref.clone();
             let mut sub = self
@@ -122,7 +126,33 @@ impl Contract {
                     );
                 }
             } else {
-                // Late renewal: start the new period at `now` if the previous `end_ns` is already in the past.
+                // Renewal window: honour cancel / scheduled downgrade before extending period.
+                if sub.cancel_at_period_end {
+                    sub.status = SubscriptionStatus::Cancelled;
+                    self.subscriptions.insert(sid.clone(), sub);
+                    env::panic_str("Subscription cancelled; renewal not allowed");
+                }
+                if let Some(low_id) = sub.pending_downgrade_price_id.take() {
+                    let high_price = self
+                        .prices
+                        .get(&sub.price_id)
+                        .cloned()
+                        .unwrap_or_else(|| env::panic_str("Unknown high tier price"));
+                    let low_price = self
+                        .prices
+                        .get(&low_id)
+                        .cloned()
+                        .unwrap_or_else(|| env::panic_str("Unknown low tier price"));
+                    let completed_ns = u128::from(sub.end_ns.0.saturating_sub(sub.start_ns.0));
+                    self.apply_downgrade_prorate_at_renewal(
+                        &buyer,
+                        &sub,
+                        &high_price,
+                        &low_price,
+                        completed_ns,
+                    );
+                    sub.price_id = low_id;
+                }
                 let start = sub.end_ns.0.max(now);
                 let end = crate::subscriptions::add_months_stripe_style(sub.anchor_day, 1, start);
                 sub.start_ns = U64(start);
@@ -144,9 +174,18 @@ impl Contract {
                 anchor_day: anchor,
                 last_lock_id: String::new(),
                 status: SubscriptionStatus::Active,
+                cancel_at_period_end: false,
+                pending_downgrade_price_id: None,
             };
             (sub, sid, true)
         };
+
+        if !is_new_index {
+            require!(
+                price_id == subscription.price_id,
+                "price_id must match current subscription tier"
+            );
+        }
 
         require!(subscription.end_ns.0 > now, "Invalid subscription period");
         let duration_ns = u128::from(subscription.end_ns.0.saturating_sub(now));
@@ -167,10 +206,226 @@ impl Contract {
         subscription.last_lock_id = lock_id.clone();
         self.subscriptions.insert(sub_id.clone(), subscription);
         if is_new_index {
-            self.subscription_by_account_price.insert(sub_key, sub_id);
+            self.subscription_by_account_product.insert(sub_key, sub_id);
         }
 
         lock_id
+    }
+
+    /// Stop renewing after the current billing period. The active lock remains until `lock.end_ns`; use
+    /// [`Contract::unlock`] afterwards. Attach 1 yocto.
+    #[payable]
+    pub fn cancel_subscription(&mut self, product_id: ProductId) {
+        assert_one_yocto();
+        self.assert_not_paused();
+        let buyer = env::predecessor_account_id();
+        let sid = self
+            .subscription_by_account_product
+            .get(&(buyer.clone(), product_id.clone()))
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("No subscription for this product"));
+        let mut sub = self
+            .subscriptions
+            .get(sid.as_str())
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("Unknown subscription"));
+        require!(sub.account_id == buyer);
+        require!(
+            sub.status == SubscriptionStatus::Active,
+            "Subscription not active"
+        );
+        sub.cancel_at_period_end = true;
+        self.subscriptions.insert(sid.clone(), sub.clone());
+        crate::events::log_subscription_cancel(&buyer, &product_id);
+    }
+
+    /// Upgrade to a higher-priced recurring tier on the same product immediately. Attach extra NEAR so that
+    /// `existing_locked + deposit` satisfies [`check_near_price_lock`] for the new tier over the remainder of
+    /// the current period (`lock.end_ns - now`).
+    #[payable]
+    pub fn upgrade_subscription(&mut self, new_price_id: PriceId) -> LockId {
+        self.assert_not_paused();
+        let buyer = env::predecessor_account_id();
+
+        let deposit = env::attached_deposit();
+        require!(
+            deposit.as_yoctonear() >= self.config.min_lock_amount.as_yoctonear(),
+            "Attached deposit below min_lock_amount"
+        );
+
+        let new_price = self
+            .prices
+            .get(&new_price_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("Unknown price"));
+        require!(
+            new_price.status == CatalogStatus::Active,
+            "Price not active"
+        );
+        require!(
+            new_price.price_type == PriceType::Recurring,
+            "Not a subscription price"
+        );
+        require!(
+            new_price.billing_period == Some(BillingPeriod::Monthly),
+            "Only monthly billing is supported"
+        );
+
+        let product = self
+            .products
+            .get(&new_price.product_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("Unknown product"));
+        require!(
+            product.status == CatalogStatus::Active,
+            "Product not active"
+        );
+
+        let sid = self
+            .subscription_by_account_product
+            .get(&(buyer.clone(), new_price.product_id.clone()))
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("No subscription for this product"));
+        let mut sub = self
+            .subscriptions
+            .get(sid.as_str())
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("Unknown subscription"));
+        require!(sub.account_id == buyer);
+
+        let old_price = self
+            .prices
+            .get(&sub.price_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("Unknown current price"));
+        require!(
+            new_price.product_id == sub.product_id,
+            "Price must belong to this subscription product"
+        );
+        require!(
+            new_price.amount.0 > old_price.amount.0,
+            "New tier must have a higher catalog amount than current tier"
+        );
+
+        let mut lock = self
+            .locks
+            .get(&sub.last_lock_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("No lock on subscription"));
+        require!(lock.account_id == buyer, "Lock account mismatch");
+        require!(lock.status == LockStatus::Active, "Lock not active");
+
+        let now = env::block_timestamp();
+        require!(
+            now < lock.end_ns.0,
+            "Current period already ended; renew instead"
+        );
+
+        let rem_ns = u128::from(lock.end_ns.0.saturating_sub(now));
+        let total_locked = lock
+            .amount_near
+            .as_yoctonear()
+            .saturating_add(deposit.as_yoctonear());
+        check_near_price_lock(&new_price, total_locked, rem_ns)
+            .unwrap_or_else(|e| env::panic_str(e));
+
+        let validator_id = product.validator_id.clone();
+        self.assert_validator_active_for_lock(&validator_id);
+
+        let mut v = self
+            .validators
+            .get(&validator_id)
+            .cloned()
+            .expect("validator");
+
+        let eff = effective_stake_yocto(v.total_staked_balance, v.pending_to_stake);
+        let ts = v.total_shares.0;
+        let add_shares = mint_shares(ts, eff, deposit.as_yoctonear());
+
+        v.total_shares = U128(ts.saturating_add(add_shares));
+        v.pending_to_stake = v
+            .pending_to_stake
+            .checked_add(deposit)
+            .expect("pending stake overflow");
+
+        let ukey = (buyer.clone(), validator_id.clone());
+        let prev_u = self.user_validator_shares.get(&ukey).copied().unwrap_or(0);
+        self.user_validator_shares
+            .insert(ukey, prev_u.saturating_add(add_shares));
+
+        lock.amount_near = lock
+            .amount_near
+            .checked_add(deposit)
+            .expect("lock amount overflow");
+        lock.shares = U128(lock.shares.0.saturating_add(add_shares));
+        lock.order = OrderRef::Subscription {
+            subscription_id: sub.subscription_id.clone(),
+            price_id: new_price_id.clone(),
+            period_start_ns: sub.start_ns,
+            period_end_ns: sub.end_ns,
+        };
+
+        sub.price_id = new_price_id.clone();
+
+        let lock_id_out = lock.lock_id.clone();
+        self.validators.insert(validator_id.clone(), v);
+        self.locks.insert(lock_id_out.clone(), lock);
+        self.subscriptions.insert(sid, sub);
+
+        crate::events::log_subscription_upgrade(&buyer, &new_price_id);
+        crate::events::log_lock(lock_id_out.as_str(), &buyer);
+
+        lock_id_out
+    }
+
+    /// Schedule a lower tier for the **next** billing period (Phase A: applied at renewal; no automatic refund).
+    #[payable]
+    pub fn schedule_downgrade_subscription(&mut self, target_price_id: PriceId) {
+        assert_one_yocto();
+        self.assert_not_paused();
+        let buyer = env::predecessor_account_id();
+
+        let target = self
+            .prices
+            .get(&target_price_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("Unknown price"));
+        require!(target.status == CatalogStatus::Active, "Price not active");
+        require!(
+            target.price_type == PriceType::Recurring,
+            "Not a subscription price"
+        );
+
+        let sid = self
+            .subscription_by_account_product
+            .get(&(buyer.clone(), target.product_id.clone()))
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("No subscription for this product"));
+        let mut sub = self
+            .subscriptions
+            .get(sid.as_str())
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("Unknown subscription"));
+        require!(sub.account_id == buyer);
+        require!(
+            target.product_id == sub.product_id,
+            "Price must belong to this subscription product"
+        );
+
+        let current = self
+            .prices
+            .get(&sub.price_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("Unknown current price"));
+        require!(
+            target.amount.0 < current.amount.0,
+            "Target tier must have a lower catalog amount than current tier"
+        );
+
+        sub.pending_downgrade_price_id = Some(target_price_id.clone());
+        self.subscriptions.insert(sid, sub.clone());
+
+        crate::events::log_subscription_downgrade_scheduled(&buyer, &target_price_id);
     }
 
     pub fn get_lock(&self, lock_id: LockId) -> Option<Lock> {
@@ -181,19 +436,92 @@ impl Contract {
         self.subscriptions.get(subscription_id.as_str()).cloned()
     }
 
+    /// Lookup subscription by account and catalog product (one row per product).
+    pub fn get_subscription_for_product(
+        &self,
+        account_id: AccountId,
+        product_id: ProductId,
+    ) -> Option<Subscription> {
+        let sid = self
+            .subscription_by_account_product
+            .get(&(account_id, product_id.clone()))?
+            .clone();
+        self.subscriptions.get(sid.as_str()).cloned()
+    }
+
     pub fn get_subscription_for_price(
         &self,
         account_id: AccountId,
         price_id: PriceId,
     ) -> Option<Subscription> {
-        let sid = self
-            .subscription_by_account_price
-            .get(&(account_id, price_id))?;
-        self.subscriptions.get(sid.as_str()).cloned()
+        let price = self.prices.get(&price_id)?;
+        self.get_subscription_for_product(account_id, price.product_id.clone())
     }
 }
 
 impl Contract {
+    /// Phase B: at scheduled downgrade renewal, release catalog **tier-gap** stake (min high − min low for
+    /// the completed period) as shares → same unstake queue as [`crate::unlock::Contract::unlock`].
+    fn apply_downgrade_prorate_at_renewal(
+        &mut self,
+        buyer: &AccountId,
+        sub: &Subscription,
+        high_price: &Price,
+        low_price: &Price,
+        completed_period_ns: u128,
+    ) {
+        if completed_period_ns == 0 {
+            return;
+        }
+        let min_h = crate::internal::min_locked_yocto_for_duration(high_price, completed_period_ns);
+        let min_l = crate::internal::min_locked_yocto_for_duration(low_price, completed_period_ns);
+        let surplus_target = min_h.saturating_sub(min_l);
+        if surplus_target == 0 {
+            return;
+        }
+
+        let mut lock = match self.locks.get(&sub.last_lock_id).cloned() {
+            Some(l) => l,
+            None => return,
+        };
+        if &lock.account_id != buyer || lock.status != LockStatus::Active {
+            return;
+        }
+
+        let validator_id = lock.validator_id.clone();
+        let v = self
+            .validators
+            .get(&validator_id)
+            .cloned()
+            .expect("validator");
+        let eff = effective_stake_yocto(v.total_staked_balance, v.pending_to_stake);
+        let ts = v.total_shares.0;
+        let lock_near_val = near_from_shares(lock.shares.0, eff, ts);
+        if lock_near_val == 0 {
+            return;
+        }
+
+        let surplus_near = surplus_target.min(lock_near_val);
+        let shares_remove = (U256::from(lock.shares.0) * U256::from(surplus_near)
+            / U256::from(lock_near_val))
+        .as_u128();
+        let shares_remove = shares_remove.min(lock.shares.0);
+        if shares_remove == 0 {
+            return;
+        }
+
+        let near_amt = self.queue_shares_unstake(buyer.clone(), validator_id, shares_remove);
+        lock.shares = U128(lock.shares.0.saturating_sub(shares_remove));
+        let new_amt = lock.amount_near.as_yoctonear().saturating_sub(near_amt);
+        lock.amount_near = NearToken::from_yoctonear(new_amt);
+        if lock.shares.0 == 0 {
+            lock.status = LockStatus::UnlockRequested;
+        }
+        self.locks.insert(lock.lock_id.clone(), lock);
+
+        crate::events::log_subscription_downgrade_prorate(buyer, &sub.product_id, near_amt);
+    }
+
     pub(crate) fn finalize_product_lock(
         &mut self,
         buyer: AccountId,
