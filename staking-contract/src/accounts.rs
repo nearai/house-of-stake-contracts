@@ -33,7 +33,7 @@ impl Contract {
         acc.storage_deposit = acc
             .storage_deposit
             .checked_add(dep)
-            .expect("storage_deposit overflow");
+            .expect("Storage deposit overflow; reduce the attached amount");
         self.accounts.insert(pred, acc);
     }
 
@@ -42,14 +42,17 @@ impl Contract {
     pub fn storage_withdraw(&mut self, amount: NearToken) -> Promise {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
-        require!(amount.as_yoctonear() > 0, "amount");
+        require!(
+            amount.as_yoctonear() > 0,
+            "Withdraw amount must be greater than zero"
+        );
 
         let pred = env::predecessor_account_id();
         let mut acc = self
             .accounts
             .get(&pred)
             .cloned()
-            .expect("No account; call storage_deposit");
+            .expect("Account not registered; call storage_deposit first");
 
         let storage_yocto = acc.storage_deposit.as_yoctonear();
         // Never withdraw more than prepaid: avoids transferring more than recorded storage when
@@ -62,7 +65,7 @@ impl Contract {
         let required = self.required_storage_deposit_yocto(&pred, 0);
         let after = storage_yocto
             .checked_sub(amount.as_yoctonear())
-            .expect("amount bound above");
+            .expect("Internal error: storage withdraw amount was not bounded correctly");
         require!(
             after >= required,
             "Must retain required storage (min + per-lock stake)"
@@ -114,7 +117,10 @@ impl Contract {
             .get(account_id)
             .expect("Account not registered; call storage_deposit");
         let need = self.required_storage_deposit_yocto(account_id, 0);
-        require!(a.storage_deposit.as_yoctonear() >= need, "Top up storage");
+        require!(
+            a.storage_deposit.as_yoctonear() >= need,
+            "Prepaid storage is too low; call storage_deposit to top up (minimum plus per-lock stake)"
+        );
     }
 
     /// Before creating a lock: require prepaid storage for one more lock entry.

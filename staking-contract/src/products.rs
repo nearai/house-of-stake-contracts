@@ -12,7 +12,7 @@ fn next_unique_product_id(contract: &mut Contract) -> ProductId {
             return id;
         }
     }
-    env::panic_str("could not allocate unique product id")
+    env::panic_str("Could not allocate a unique product id; try again")
 }
 
 fn next_unique_price_id(contract: &mut Contract) -> PriceId {
@@ -22,7 +22,7 @@ fn next_unique_price_id(contract: &mut Contract) -> PriceId {
             return id;
         }
     }
-    env::panic_str("could not allocate unique price id")
+    env::panic_str("Could not allocate a unique price id; try again")
 }
 
 /// Self callbacks after `get_owner_id` on the staking pool.
@@ -147,7 +147,7 @@ impl Contract {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
         let p = self.products.get(&product_id).cloned();
-        require!(p.is_some(), "Unknown product");
+        require!(p.is_some(), "Product not found in the catalog");
         let p = p.unwrap();
         self.assert_validator_allowlisted(&p.validator_id);
         let expected_caller = env::predecessor_account_id();
@@ -167,7 +167,7 @@ impl Contract {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
         let p = self.products.get(&product_id).cloned();
-        require!(p.is_some(), "Unknown product");
+        require!(p.is_some(), "Product not found in the catalog");
         let p = p.unwrap();
         self.assert_validator_allowlisted(&p.validator_id);
         let expected_caller = env::predecessor_account_id();
@@ -187,7 +187,7 @@ impl Contract {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
         let p = self.products.get(&product_id).cloned();
-        require!(p.is_some(), "Unknown product");
+        require!(p.is_some(), "Product not found in the catalog");
         let p = p.unwrap();
         self.assert_validator_allowlisted(&p.validator_id);
         let expected_caller = env::predecessor_account_id();
@@ -216,7 +216,7 @@ impl Contract {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
         let product = self.products.get(&product_id).cloned();
-        require!(product.is_some(), "Unknown product");
+        require!(product.is_some(), "Product not found in the catalog");
         let product = product.unwrap();
         self.assert_validator_allowlisted(&product.validator_id);
         let expected_caller = env::predecessor_account_id();
@@ -245,10 +245,10 @@ impl Contract {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
         let pr = self.prices.get(&price_id).cloned();
-        require!(pr.is_some(), "Unknown price");
+        require!(pr.is_some(), "Price not found in the catalog");
         let pr = pr.unwrap();
         let product = self.products.get(&pr.product_id).cloned();
-        require!(product.is_some(), "Unknown product");
+        require!(product.is_some(), "Product not found in the catalog");
         let product = product.unwrap();
         self.assert_validator_allowlisted(&product.validator_id);
         let expected_caller = env::predecessor_account_id();
@@ -268,10 +268,10 @@ impl Contract {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
         let pr = self.prices.get(&price_id).cloned();
-        require!(pr.is_some(), "Unknown price");
+        require!(pr.is_some(), "Price not found in the catalog");
         let pr = pr.unwrap();
         let product = self.products.get(&pr.product_id).cloned();
-        require!(product.is_some(), "Unknown product");
+        require!(product.is_some(), "Product not found in the catalog");
         let product = product.unwrap();
         self.assert_validator_allowlisted(&product.validator_id);
         let expected_caller = env::predecessor_account_id();
@@ -291,7 +291,7 @@ impl Contract {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
         let p = self.products.get(&product_id).cloned();
-        require!(p.is_some(), "Unknown product");
+        require!(p.is_some(), "Product not found in the catalog");
         let p = p.unwrap();
         self.assert_validator_allowlisted(&p.validator_id);
         let expected_caller = env::predecessor_account_id();
@@ -311,10 +311,10 @@ impl Contract {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
         let pr = self.prices.get(&price_id).cloned();
-        require!(pr.is_some(), "Unknown price");
+        require!(pr.is_some(), "Price not found in the catalog");
         let pr = pr.unwrap();
         let product = self.products.get(&pr.product_id).cloned();
-        require!(product.is_some(), "Unknown product");
+        require!(product.is_some(), "Product not found in the catalog");
         let product = product.unwrap();
         self.assert_validator_allowlisted(&product.validator_id);
         let expected_caller = env::predecessor_account_id();
@@ -338,7 +338,7 @@ impl Contract {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
         let p = self.products.get(&product_id).cloned();
-        require!(p.is_some(), "Unknown product");
+        require!(p.is_some(), "Product not found in the catalog");
         let p = p.unwrap();
         self.assert_validator_allowlisted(&p.validator_id);
         let expected_caller = env::predecessor_account_id();
@@ -362,10 +362,10 @@ impl Contract {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
         let pr = self.prices.get(&price_id).cloned();
-        require!(pr.is_some(), "Unknown price");
+        require!(pr.is_some(), "Price not found in the catalog");
         let pr = pr.unwrap();
         let product = self.products.get(&pr.product_id).cloned();
-        require!(product.is_some(), "Unknown product");
+        require!(product.is_some(), "Product not found in the catalog");
         let product = product.unwrap();
         self.assert_validator_allowlisted(&product.validator_id);
         let expected_caller = env::predecessor_account_id();
@@ -389,7 +389,10 @@ impl Contract {
         description: String,
         expected_caller: AccountId,
     ) -> ProductId {
-        require!(is_promise_success(), "get_owner_id failed");
+        require!(
+            is_promise_success(),
+            "Could not read the validator pool owner; try again later"
+        );
         self.assert_not_paused();
         require!(
             pool_owner == expected_caller,
@@ -423,7 +426,10 @@ impl Contract {
         description: String,
         expected_caller: AccountId,
     ) {
-        require!(is_promise_success(), "get_owner_id failed");
+        require!(
+            is_promise_success(),
+            "Could not read the validator pool owner; try again later"
+        );
         self.assert_not_paused();
         require!(
             pool_owner == expected_caller,
@@ -433,7 +439,7 @@ impl Contract {
             .products
             .get(&product_id)
             .cloned()
-            .expect("Unknown product");
+            .expect("Product not found in the catalog");
         p.name = name;
         p.description = description;
         self.products.insert(product_id, p);
@@ -446,7 +452,10 @@ impl Contract {
         product_id: ProductId,
         expected_caller: AccountId,
     ) {
-        require!(is_promise_success(), "get_owner_id failed");
+        require!(
+            is_promise_success(),
+            "Could not read the validator pool owner; try again later"
+        );
         self.assert_not_paused();
         require!(
             pool_owner == expected_caller,
@@ -456,7 +465,7 @@ impl Contract {
             .products
             .get(&product_id)
             .cloned()
-            .expect("Unknown product");
+            .expect("Product not found in the catalog");
         p.default_price_id = None;
         p.status = CatalogStatus::Archived;
         self.products.insert(product_id, p);
@@ -469,7 +478,10 @@ impl Contract {
         product_id: ProductId,
         expected_caller: AccountId,
     ) {
-        require!(is_promise_success(), "get_owner_id failed");
+        require!(
+            is_promise_success(),
+            "Could not read the validator pool owner; try again later"
+        );
         self.assert_not_paused();
         require!(
             pool_owner == expected_caller,
@@ -479,8 +491,11 @@ impl Contract {
             .products
             .get(&product_id)
             .cloned()
-            .expect("Unknown product");
-        require!(p.usage_count == 0, "Product in use");
+            .expect("Product not found in the catalog");
+        require!(
+            p.usage_count == 0,
+            "Cannot delete this product while it is in use"
+        );
         require!(
             p.price_ids.is_empty(),
             "Remove or delete all prices for this product first"
@@ -502,7 +517,10 @@ impl Contract {
         lock_factor_near_months: U128,
         expected_caller: AccountId,
     ) -> PriceId {
-        require!(is_promise_success(), "get_owner_id failed");
+        require!(
+            is_promise_success(),
+            "Could not read the validator pool owner; try again later"
+        );
         self.assert_not_paused();
         require!(
             pool_owner == expected_caller,
@@ -512,8 +530,11 @@ impl Contract {
             .products
             .get(&product_id)
             .cloned()
-            .expect("Unknown product");
-        require!(product.status == CatalogStatus::Active, "Product archived");
+            .expect("Product not found in the catalog");
+        require!(
+            product.status == CatalogStatus::Active,
+            "This product is archived or inactive"
+        );
 
         let price_id = next_unique_price_id(self);
         let price = Price {
@@ -543,13 +564,20 @@ impl Contract {
         description: String,
         expected_caller: AccountId,
     ) {
-        require!(is_promise_success(), "get_owner_id failed");
+        require!(
+            is_promise_success(),
+            "Could not read the validator pool owner; try again later"
+        );
         self.assert_not_paused();
         require!(
             pool_owner == expected_caller,
             "Only the validator owner can call this method"
         );
-        let mut pr = self.prices.get(&price_id).cloned().expect("Unknown price");
+        let mut pr = self
+            .prices
+            .get(&price_id)
+            .cloned()
+            .expect("Price not found in the catalog");
         pr.name = name;
         pr.description = description;
         self.prices.insert(price_id, pr);
@@ -562,13 +590,20 @@ impl Contract {
         price_id: PriceId,
         expected_caller: AccountId,
     ) {
-        require!(is_promise_success(), "get_owner_id failed");
+        require!(
+            is_promise_success(),
+            "Could not read the validator pool owner; try again later"
+        );
         self.assert_not_paused();
         require!(
             pool_owner == expected_caller,
             "Only the validator owner can call this method"
         );
-        let mut pr = self.prices.get(&price_id).cloned().expect("Unknown price");
+        let mut pr = self
+            .prices
+            .get(&price_id)
+            .cloned()
+            .expect("Price not found in the catalog");
         let product_id = pr.product_id.clone();
         pr.status = CatalogStatus::Archived;
         self.prices.insert(price_id.clone(), pr);
@@ -582,20 +617,30 @@ impl Contract {
         price_id: PriceId,
         expected_caller: AccountId,
     ) {
-        require!(is_promise_success(), "get_owner_id failed");
+        require!(
+            is_promise_success(),
+            "Could not read the validator pool owner; try again later"
+        );
         self.assert_not_paused();
         require!(
             pool_owner == expected_caller,
             "Only the validator owner can call this method"
         );
-        let pr = self.prices.get(&price_id).cloned().expect("Unknown price");
-        require!(pr.usage_count == 0, "Price in use");
+        let pr = self
+            .prices
+            .get(&price_id)
+            .cloned()
+            .expect("Price not found in the catalog");
+        require!(
+            pr.usage_count == 0,
+            "Cannot delete this price while it is in use"
+        );
         let pid = pr.product_id.clone();
         let mut product = self
             .products
             .get(&pr.product_id)
             .cloned()
-            .expect("Unknown product");
+            .expect("Product not found in the catalog");
         product.price_ids.retain(|x| x != &price_id);
         self.products.insert(pr.product_id.clone(), product);
         self.prices.remove(&price_id);
@@ -609,7 +654,10 @@ impl Contract {
         product_id: ProductId,
         expected_caller: AccountId,
     ) {
-        require!(is_promise_success(), "get_owner_id failed");
+        require!(
+            is_promise_success(),
+            "Could not read the validator pool owner; try again later"
+        );
         self.assert_not_paused();
         require!(
             pool_owner == expected_caller,
@@ -619,7 +667,7 @@ impl Contract {
             .products
             .get(&product_id)
             .cloned()
-            .expect("Unknown product");
+            .expect("Product not found in the catalog");
         require!(
             p.status == CatalogStatus::Archived,
             "Product is not archived"
@@ -635,13 +683,20 @@ impl Contract {
         price_id: PriceId,
         expected_caller: AccountId,
     ) {
-        require!(is_promise_success(), "get_owner_id failed");
+        require!(
+            is_promise_success(),
+            "Could not read the validator pool owner; try again later"
+        );
         self.assert_not_paused();
         require!(
             pool_owner == expected_caller,
             "Only the validator owner can call this method"
         );
-        let mut pr = self.prices.get(&price_id).cloned().expect("Unknown price");
+        let mut pr = self
+            .prices
+            .get(&price_id)
+            .cloned()
+            .expect("Price not found in the catalog");
         require!(
             pr.status == CatalogStatus::Archived,
             "Price is not archived"
@@ -658,7 +713,10 @@ impl Contract {
         price_id: Option<PriceId>,
         expected_caller: AccountId,
     ) {
-        require!(is_promise_success(), "get_owner_id failed");
+        require!(
+            is_promise_success(),
+            "Could not read the validator pool owner; try again later"
+        );
         self.assert_not_paused();
         require!(
             pool_owner == expected_caller,
@@ -668,14 +726,21 @@ impl Contract {
             .products
             .get(&product_id)
             .cloned()
-            .expect("Unknown product");
-        require!(product.status == CatalogStatus::Active, "Product archived");
+            .expect("Product not found in the catalog");
+        require!(
+            product.status == CatalogStatus::Active,
+            "This product is archived or inactive"
+        );
         match price_id {
             None => {
                 product.default_price_id = None;
             }
             Some(pid) => {
-                let pr = self.prices.get(&pid).cloned().expect("Unknown price");
+                let pr = self
+                    .prices
+                    .get(&pid)
+                    .cloned()
+                    .expect("Price not found in the catalog");
                 require!(
                     pr.product_id == product_id,
                     "Price does not belong to this product"
@@ -747,11 +812,9 @@ impl Contract {
         for i in 0..len {
             if self.product_ids.get(i).is_some_and(|s| s == product_id) {
                 for j in (i + 1)..len {
-                    let id = self
-                        .product_ids
-                        .get(j)
-                        .cloned()
-                        .unwrap_or_else(|| env::panic_str("product_ids index"));
+                    let id = self.product_ids.get(j).cloned().unwrap_or_else(|| {
+                        env::panic_str("Catalog index error while removing product id")
+                    });
                     self.product_ids.set(j - 1, id);
                 }
                 let _ = self.product_ids.pop();

@@ -105,7 +105,7 @@ impl Contract {
             .validators
             .get(&validator_id)
             .cloned()
-            .expect("Unknown validator");
+            .expect("Validator not found on the allowlist");
         v.status = ValidatorStatus::Paused;
         self.validators.insert(validator_id, v);
     }
@@ -118,14 +118,14 @@ impl Contract {
             .validators
             .get(&validator_id)
             .cloned()
-            .expect("Unknown validator");
+            .expect("Validator not found on the allowlist");
         require!(
             v.total_shares.0 == 0
                 && v.pending_to_stake.as_yoctonear() == 0
                 && v.pending_to_unstake.as_yoctonear() == 0
                 && v.pending_to_withdraw.as_yoctonear() == 0
                 && v.pending_user_unstake_total.as_yoctonear() == 0,
-            "Validator still has stake or pending operations"
+            "Cannot remove this validator: all stake, pending stake and unstake, withdraw bucket, and user claims must be cleared first"
         );
         let mut v = v;
         v.status = ValidatorStatus::Removed;
@@ -139,7 +139,7 @@ impl Contract {
     pub fn assert_validator_allowlisted(&self, validator_id: &AccountId) {
         require!(
             self.validators.get(validator_id).is_some(),
-            "Unknown validator"
+            "Validator not found on the allowlist"
         );
     }
 
@@ -147,10 +147,10 @@ impl Contract {
         let v = self
             .validators
             .get(validator_id)
-            .expect("Unknown validator");
+            .expect("Validator not found on the allowlist");
         require!(
             v.status == ValidatorStatus::Active,
-            "Validator not active for new locks"
+            "This validator is paused or removed; new locks are not allowed on it"
         );
     }
 }

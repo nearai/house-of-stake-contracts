@@ -7,7 +7,7 @@ use near_sdk::{NearToken, testing_env};
 use staking_contract::PendingUnstakeTranche;
 
 #[test]
-#[should_panic(expected = "Nothing in withdraw bucket yet; wait for epoch_withdraw")]
+#[should_panic(expected = "No NEAR is in the withdraw bucket yet")]
 fn claim_unlocked_near_fails_when_pool_withdraw_bucket_empty() {
     let mut c = deploy();
     common::add_validator_allowlisted(&mut c);
@@ -47,7 +47,7 @@ fn withdraw_partial_leaves_remainder() {
 }
 
 #[test]
-#[should_panic(expected = "Too much")]
+#[should_panic(expected = "Withdraw amount is larger than your withdrawable balance")]
 fn withdraw_rejects_partial_above_withdrawable() {
     let mut c = deploy();
     register_buyer(&mut c);

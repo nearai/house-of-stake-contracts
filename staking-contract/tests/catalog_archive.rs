@@ -10,7 +10,7 @@ use near_sdk::json_types::U64;
 use near_sdk::{NearToken, testing_env};
 
 #[test]
-#[should_panic(expected = "Price not active")]
+#[should_panic(expected = "This price is not active")]
 fn lock_for_product_rejects_archived_price() {
     let mut c = deploy();
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
@@ -29,7 +29,7 @@ fn lock_for_product_rejects_archived_price() {
 }
 
 #[test]
-#[should_panic(expected = "Product not active")]
+#[should_panic(expected = "This product is not active")]
 fn lock_for_product_rejects_archived_product() {
     let mut c = deploy();
     let (product_id, price_id) = setup_catalog_near_oneoff(&mut c);

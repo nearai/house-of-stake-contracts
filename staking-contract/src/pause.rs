@@ -24,6 +24,9 @@ impl Contract {
 
 impl Contract {
     pub fn assert_not_paused(&self) {
-        require!(!self.paused, "Contract is paused. Please try again later.");
+        require!(
+            !self.paused,
+            "The contract is paused; try again after it has been unpaused"
+        );
     }
 }

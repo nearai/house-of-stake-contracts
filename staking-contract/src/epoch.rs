@@ -52,17 +52,20 @@ impl Contract {
             .validators
             .get(&validator_id)
             .cloned()
-            .expect("Unknown validator");
+            .expect("Validator not found on the allowlist");
         require!(
             v.tx_status == TransactionStatus::Idle,
-            "validator pool busy"
+            "Validator pool is busy; wait for the in-flight pool call to finish"
         );
         require!(
             v.last_stake_epoch < env::epoch_height(),
-            "already completed a stake batch this epoch"
+            "A stake batch already succeeded this epoch for this validator"
         );
         let amt = v.pending_to_stake;
-        require!(amt.as_yoctonear() > 0, "nothing to stake");
+        require!(
+            amt.as_yoctonear() > 0,
+            "No NEAR is queued to stake for this validator"
+        );
 
         v.tx_status = TransactionStatus::Busy;
         self.validators.insert(validator_id.clone(), v);
@@ -90,10 +93,10 @@ impl Contract {
             .validators
             .get(&validator_id)
             .cloned()
-            .expect("Unknown validator");
+            .expect("Validator not found on the allowlist");
         require!(
             v.tx_status == TransactionStatus::Idle,
-            "validator pool busy"
+            "Validator pool is busy; wait for the in-flight pool call to finish"
         );
         if v.last_unstake_epoch > 0 {
             let ready_epoch = v
@@ -101,11 +104,14 @@ impl Contract {
                 .saturating_add(self.config.epoch_unstake_settle_epochs);
             require!(
                 env::epoch_height() >= ready_epoch,
-                "wait until previous unstake has settled before unstaking again"
+                "Wait until the previous unstake has finished its settle period before unstaking again"
             );
         }
         let amt = v.pending_to_unstake;
-        require!(amt.as_yoctonear() > 0, "nothing to unstake");
+        require!(
+            amt.as_yoctonear() > 0,
+            "No NEAR is queued to unstake for this validator"
+        );
 
         v.tx_status = TransactionStatus::Busy;
         self.validators.insert(validator_id.clone(), v);
@@ -131,17 +137,20 @@ impl Contract {
             .validators
             .get(&validator_id)
             .cloned()
-            .expect("Unknown validator");
+            .expect("Validator not found on the allowlist");
         require!(
             v.tx_status == TransactionStatus::Idle,
-            "validator pool busy"
+            "Validator pool is busy; wait for the in-flight pool call to finish"
         );
-        require!(v.last_unstake_epoch > 0, "run epoch_unstake first");
+        require!(
+            v.last_unstake_epoch > 0,
+            "Run epoch_unstake for this validator before epoch_withdraw"
+        );
         require!(
             env::epoch_height()
                 >= v.last_unstake_epoch
                     .saturating_add(self.config.epoch_unstake_settle_epochs),
-            "wait unstake settlement epochs"
+            "Wait until enough epochs have passed after the last unstake before withdrawing"
         );
 
         v.tx_status = TransactionStatus::Busy;
@@ -166,10 +175,10 @@ impl Contract {
             .validators
             .get(&validator_id)
             .cloned()
-            .expect("Unknown validator");
+            .expect("Validator not found on the allowlist");
         require!(
             v.tx_status == TransactionStatus::Idle,
-            "validator pool busy"
+            "Validator pool is busy; wait for the in-flight pool call to finish"
         );
         v.tx_status = TransactionStatus::Busy;
         self.validators.insert(validator_id.clone(), v);

@@ -12,7 +12,7 @@ use near_sdk::{NearToken, testing_env};
 const BASE_TS: u64 = 1_700_000_000_000_000_000;
 
 #[test]
-#[should_panic(expected = "lock_duration_ns out of bounds")]
+#[should_panic(expected = "Lock duration is outside the allowed range")]
 fn lock_for_product_rejects_duration_below_min() {
     let mut c = deploy();
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
@@ -24,7 +24,7 @@ fn lock_for_product_rejects_duration_below_min() {
 }
 
 #[test]
-#[should_panic(expected = "lock_duration_ns out of bounds")]
+#[should_panic(expected = "Lock duration is outside the allowed range")]
 fn lock_for_product_rejects_duration_above_max() {
     let mut c = deploy();
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
@@ -36,7 +36,7 @@ fn lock_for_product_rejects_duration_above_max() {
 }
 
 #[test]
-#[should_panic(expected = "Attached deposit below min_lock_amount")]
+#[should_panic(expected = "Attached NEAR is below the contract minimum lock amount")]
 fn lock_for_product_rejects_deposit_below_min_lock_amount() {
     let mut c = deploy();
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
@@ -82,7 +82,7 @@ fn lock_for_subscription_rejects_wrong_tier_at_renewal_without_upgrade() {
 }
 
 #[test]
-#[should_panic(expected = "Validator not active for new locks")]
+#[should_panic(expected = "This validator is paused or removed")]
 fn lock_for_product_fails_when_validator_paused() {
     let mut c = deploy();
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);

@@ -36,7 +36,7 @@ fn remove_validator_on_idle_pool_marks_removed() {
 }
 
 #[test]
-#[should_panic(expected = "Validator still has stake or pending operations")]
+#[should_panic(expected = "Cannot remove this validator")]
 fn remove_validator_fails_while_pending_stake_exists() {
     let mut c = deploy();
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);

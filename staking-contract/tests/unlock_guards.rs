@@ -8,7 +8,7 @@ use common::{
 use near_sdk::json_types::U64;
 use near_sdk::{NearToken, testing_env};
 #[test]
-#[should_panic(expected = "Only lock owner")]
+#[should_panic(expected = "Only the lock owner can unlock")]
 fn unlock_rejects_wrong_predecessor() {
     let mut c = deploy();
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
@@ -28,7 +28,7 @@ fn unlock_rejects_wrong_predecessor() {
 }
 
 #[test]
-#[should_panic(expected = "Lock still active")]
+#[should_panic(expected = "Lock period has not ended yet")]
 fn unlock_rejects_before_end_ns() {
     let mut c = deploy();
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
@@ -45,7 +45,7 @@ fn unlock_rejects_before_end_ns() {
 }
 
 #[test]
-#[should_panic(expected = "Unknown lock")]
+#[should_panic(expected = "Lock not found")]
 fn unlock_rejects_unknown_lock_id() {
     let mut c = deploy();
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
@@ -66,7 +66,7 @@ fn unlock_rejects_unknown_lock_id() {
 }
 
 #[test]
-#[should_panic(expected = "Lock not active")]
+#[should_panic(expected = "Lock is not active")]
 fn unlock_rejects_second_call_after_unlock_requested() {
     let mut c = deploy();
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);

@@ -42,7 +42,7 @@ fn accept_ownership_rejects_wrong_account() {
 }
 
 #[test]
-#[should_panic(expected = "Only the owner can call this method")]
+#[should_panic(expected = "Only the contract owner can call this method")]
 fn non_owner_cannot_set_guardians() {
     let mut c = deploy();
 
@@ -101,7 +101,7 @@ fn guardian_can_pause() {
 }
 
 #[test]
-#[should_panic(expected = "Only the guardian can call this method")]
+#[should_panic(expected = "Only a guardian or the contract owner can call this method")]
 fn random_account_cannot_pause() {
     let mut c = deploy();
 

@@ -46,25 +46,28 @@ impl Contract {
         let locked = env::attached_deposit();
         require!(
             locked.as_yoctonear() >= self.config.min_lock_amount.as_yoctonear(),
-            "Attached deposit below min_lock_amount"
+            "Attached NEAR is below the contract minimum lock amount (min_lock_amount)"
         );
 
         let dur = lock_duration_ns.0;
         require!(
             dur >= self.config.min_lock_duration_ns.0 && dur <= self.config.max_lock_duration_ns.0,
-            "lock_duration_ns out of bounds"
+            "Lock duration is outside the allowed range for this contract"
         );
 
         let price_opt = self.prices.get(&price_id).cloned();
-        require!(price_opt.is_some(), "Unknown price");
+        require!(price_opt.is_some(), "Price not found in the catalog");
         let price = price_opt.unwrap();
         let product_opt = self.products.get(&price.product_id).cloned();
-        require!(product_opt.is_some(), "Unknown product");
+        require!(product_opt.is_some(), "Product not found in the catalog");
         let product = product_opt.unwrap();
-        require!(price.status == CatalogStatus::Active, "Price not active");
+        require!(
+            price.status == CatalogStatus::Active,
+            "This price is not active; pick an active price"
+        );
         require!(
             product.status == CatalogStatus::Active,
-            "Product not active"
+            "This product is not active; pick an active product"
         );
         require!(
             price.price_type == PriceType::OneOff,
@@ -107,16 +110,19 @@ impl Contract {
         let locked = env::attached_deposit();
         require!(
             locked.as_yoctonear() >= self.config.min_lock_amount.as_yoctonear(),
-            "Attached deposit below min_lock_amount"
+            "Attached NEAR is below the contract minimum lock amount (min_lock_amount)"
         );
 
         let price_opt = self.prices.get(&price_id).cloned();
-        require!(price_opt.is_some(), "Unknown price");
+        require!(price_opt.is_some(), "Price not found in the catalog");
         let price = price_opt.unwrap();
-        require!(price.status == CatalogStatus::Active, "Price not active");
+        require!(
+            price.status == CatalogStatus::Active,
+            "This price is not active; pick an active price"
+        );
         require!(
             price.price_type == PriceType::Recurring,
-            "Not a subscription price"
+            "This price is not a recurring subscription price"
         );
         require!(
             price.billing_period == Some(BillingPeriod::Monthly),
@@ -124,11 +130,11 @@ impl Contract {
         );
 
         let product_opt = self.products.get(&price.product_id).cloned();
-        require!(product_opt.is_some(), "Unknown product");
+        require!(product_opt.is_some(), "Product not found in the catalog");
         let product = product_opt.unwrap();
         require!(
             product.status == CatalogStatus::Active,
-            "Product not active"
+            "This product is not active; pick an active product"
         );
 
         let validator_id = product.validator_id.clone();
@@ -146,8 +152,11 @@ impl Contract {
                 .subscriptions
                 .get(sid_ref.as_str())
                 .cloned()
-                .unwrap_or_else(|| env::panic_str("Unknown subscription"));
-            require!(sub.account_id == buyer, "Subscription account mismatch");
+                .unwrap_or_else(|| env::panic_str("Subscription not found"));
+            require!(
+                sub.account_id == buyer,
+                "Only the subscription owner can perform this action"
+            );
             if now < sub.end_ns.0 {
                 if let Some(prev) = self.locks.get(&sub.last_lock_id) {
                     require!(
@@ -181,16 +190,12 @@ impl Contract {
             } else {
                 // Renewal window: scheduled downgrade / extend billing period.
                 if let Some(low_id) = sub.pending_downgrade_price_id.take() {
-                    let high_price = self
-                        .prices
-                        .get(&sub.price_id)
-                        .cloned()
-                        .unwrap_or_else(|| env::panic_str("Unknown high tier price"));
-                    let low_price = self
-                        .prices
-                        .get(&low_id)
-                        .cloned()
-                        .unwrap_or_else(|| env::panic_str("Unknown low tier price"));
+                    let high_price = self.prices.get(&sub.price_id).cloned().unwrap_or_else(|| {
+                        env::panic_str("High tier price not found in the catalog")
+                    });
+                    let low_price = self.prices.get(&low_id).cloned().unwrap_or_else(|| {
+                        env::panic_str("Low tier price not found in the catalog")
+                    });
                     let completed_ns = u128::from(sub.end_ns.0.saturating_sub(sub.start_ns.0));
                     self.apply_downgrade_prorate_at_renewal(
                         &buyer,
@@ -235,7 +240,10 @@ impl Contract {
             );
         }
 
-        require!(subscription.end_ns.0 > now, "Invalid subscription period");
+        require!(
+            subscription.end_ns.0 > now,
+            "Subscription billing period has already ended"
+        );
         let duration_ns = u128::from(subscription.end_ns.0.saturating_sub(now));
         require!(duration_ns > 0, "Lock duration must be positive");
 
@@ -271,16 +279,19 @@ impl Contract {
             .subscription_by_account_product
             .get(&(buyer.clone(), product_id.clone()))
             .cloned()
-            .unwrap_or_else(|| env::panic_str("No subscription for this product"));
+            .unwrap_or_else(|| env::panic_str("No subscription for this product; subscribe first"));
         let mut sub = self
             .subscriptions
             .get(sid.as_str())
             .cloned()
-            .unwrap_or_else(|| env::panic_str("Unknown subscription"));
-        require!(sub.account_id == buyer);
+            .unwrap_or_else(|| env::panic_str("Subscription not found"));
+        require!(
+            sub.account_id == buyer,
+            "Only the subscription owner can perform this action"
+        );
         require!(
             sub.status == SubscriptionStatus::Active,
-            "Subscription not active"
+            "This subscription is not active (cancelled, expired, or not yet started)"
         );
         sub.cancel_at_period_end = true;
         self.subscriptions.insert(sid.clone(), sub.clone());
@@ -298,18 +309,24 @@ impl Contract {
             .subscription_by_account_product
             .get(&(buyer.clone(), product_id.clone()))
             .cloned()
-            .unwrap_or_else(|| env::panic_str("No subscription for this product"));
+            .unwrap_or_else(|| env::panic_str("No subscription for this product; subscribe first"));
         let mut sub = self
             .subscriptions
             .get(sid.as_str())
             .cloned()
-            .unwrap_or_else(|| env::panic_str("Unknown subscription"));
-        require!(sub.account_id == buyer);
+            .unwrap_or_else(|| env::panic_str("Subscription not found"));
+        require!(
+            sub.account_id == buyer,
+            "Only the subscription owner can perform this action"
+        );
         require!(
             sub.status == SubscriptionStatus::Active,
-            "Subscription not active"
+            "This subscription is not active (cancelled, expired, or not yet started)"
         );
-        require!(sub.cancel_at_period_end, "Not scheduled for cancellation");
+        require!(
+            sub.cancel_at_period_end,
+            "Subscription is not scheduled to cancel at period end"
+        );
         sub.cancel_at_period_end = false;
         self.subscriptions.insert(sid.clone(), sub.clone());
         crate::events::log_subscription_resume(&buyer, &product_id);
@@ -326,21 +343,21 @@ impl Contract {
         let deposit = env::attached_deposit();
         require!(
             deposit.as_yoctonear() >= self.config.min_lock_amount.as_yoctonear(),
-            "Attached deposit below min_lock_amount"
+            "Attached NEAR is below the contract minimum lock amount (min_lock_amount)"
         );
 
         let new_price = self
             .prices
             .get(&new_price_id)
             .cloned()
-            .unwrap_or_else(|| env::panic_str("Unknown price"));
+            .unwrap_or_else(|| env::panic_str("Price not found in the catalog"));
         require!(
             new_price.status == CatalogStatus::Active,
-            "Price not active"
+            "This price is not active; pick an active price"
         );
         require!(
             new_price.price_type == PriceType::Recurring,
-            "Not a subscription price"
+            "This price is not a recurring subscription price"
         );
         require!(
             new_price.billing_period == Some(BillingPeriod::Monthly),
@@ -351,29 +368,30 @@ impl Contract {
             .products
             .get(&new_price.product_id)
             .cloned()
-            .unwrap_or_else(|| env::panic_str("Unknown product"));
+            .unwrap_or_else(|| env::panic_str("Product not found in the catalog"));
         require!(
             product.status == CatalogStatus::Active,
-            "Product not active"
+            "This product is not active; pick an active product"
         );
 
         let sid = self
             .subscription_by_account_product
             .get(&(buyer.clone(), new_price.product_id.clone()))
             .cloned()
-            .unwrap_or_else(|| env::panic_str("No subscription for this product"));
+            .unwrap_or_else(|| env::panic_str("No subscription for this product; subscribe first"));
         let mut sub = self
             .subscriptions
             .get(sid.as_str())
             .cloned()
-            .unwrap_or_else(|| env::panic_str("Unknown subscription"));
-        require!(sub.account_id == buyer);
+            .unwrap_or_else(|| env::panic_str("Subscription not found"));
+        require!(
+            sub.account_id == buyer,
+            "Only the subscription owner can perform this action"
+        );
 
-        let old_price = self
-            .prices
-            .get(&sub.price_id)
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("Unknown current price"));
+        let old_price = self.prices.get(&sub.price_id).cloned().unwrap_or_else(|| {
+            env::panic_str("Current subscription price not found in the catalog")
+        });
         require!(
             new_price.product_id == sub.product_id,
             "Price must belong to this subscription product"
@@ -387,9 +405,12 @@ impl Contract {
             .locks
             .get(&sub.last_lock_id)
             .cloned()
-            .unwrap_or_else(|| env::panic_str("No lock on subscription"));
-        require!(lock.account_id == buyer, "Lock account mismatch");
-        require!(lock.status == LockStatus::Active, "Lock not active");
+            .unwrap_or_else(|| env::panic_str("No lock is linked to this subscription"));
+        require!(
+            lock.account_id == buyer,
+            "Only the lock owner can change this subscription lock"
+        );
+        require!(lock.status == LockStatus::Active, "Lock is not active");
 
         let now = env::block_timestamp();
         require!(
@@ -412,7 +433,7 @@ impl Contract {
             .validators
             .get(&validator_id)
             .cloned()
-            .expect("validator");
+            .expect("Validator not found on the allowlist");
 
         let eff = effective_stake_for_share_exit(
             v.total_staked_balance,
@@ -432,7 +453,7 @@ impl Contract {
         v.pending_to_stake = v
             .pending_to_stake
             .checked_add(deposit)
-            .expect("pending stake overflow");
+            .expect("pending_to_stake overflow when recording this lock");
 
         let ukey = (buyer.clone(), validator_id.clone());
         let prev_u = self.user_validator_shares.get(&ukey).copied().unwrap_or(0);
@@ -442,7 +463,7 @@ impl Contract {
         lock.amount_near = lock
             .amount_near
             .checked_add(deposit)
-            .expect("lock amount overflow");
+            .expect("lock amount_near overflow");
         lock.shares = U128(lock.shares.0.saturating_add(add_shares));
         lock.order = OrderRef::Subscription {
             subscription_id: sub.subscription_id.clone(),
@@ -475,34 +496,38 @@ impl Contract {
             .prices
             .get(&target_price_id)
             .cloned()
-            .unwrap_or_else(|| env::panic_str("Unknown price"));
-        require!(target.status == CatalogStatus::Active, "Price not active");
+            .unwrap_or_else(|| env::panic_str("Price not found in the catalog"));
+        require!(
+            target.status == CatalogStatus::Active,
+            "This price is not active; pick an active price"
+        );
         require!(
             target.price_type == PriceType::Recurring,
-            "Not a subscription price"
+            "This price is not a recurring subscription price"
         );
 
         let sid = self
             .subscription_by_account_product
             .get(&(buyer.clone(), target.product_id.clone()))
             .cloned()
-            .unwrap_or_else(|| env::panic_str("No subscription for this product"));
+            .unwrap_or_else(|| env::panic_str("No subscription for this product; subscribe first"));
         let mut sub = self
             .subscriptions
             .get(sid.as_str())
             .cloned()
-            .unwrap_or_else(|| env::panic_str("Unknown subscription"));
-        require!(sub.account_id == buyer);
+            .unwrap_or_else(|| env::panic_str("Subscription not found"));
+        require!(
+            sub.account_id == buyer,
+            "Only the subscription owner can perform this action"
+        );
         require!(
             target.product_id == sub.product_id,
             "Price must belong to this subscription product"
         );
 
-        let current = self
-            .prices
-            .get(&sub.price_id)
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("Unknown current price"));
+        let current = self.prices.get(&sub.price_id).cloned().unwrap_or_else(|| {
+            env::panic_str("Current subscription price not found in the catalog")
+        });
         require!(
             target.amount.0 < current.amount.0,
             "Target tier must have a lower catalog amount than current tier"
@@ -563,7 +588,7 @@ impl Contract {
                     .prices
                     .get(&pr_id)
                     .cloned()
-                    .unwrap_or_else(|| env::panic_str("Unknown price"));
+                    .unwrap_or_else(|| env::panic_str("Price not found in the catalog"));
                 require!(
                     pr.product_id == prod_id,
                     "Default price does not belong to this product"
@@ -608,7 +633,7 @@ impl Contract {
             .validators
             .get(&validator_id)
             .cloned()
-            .expect("validator");
+            .expect("Validator not found on the allowlist");
         let eff = effective_stake_for_share_exit(
             v.total_staked_balance,
             v.pending_to_stake,
@@ -670,7 +695,7 @@ impl Contract {
             .validators
             .get(&validator_id)
             .cloned()
-            .expect("validator");
+            .expect("Validator not found on the allowlist");
 
         let eff = effective_stake_for_share_exit(
             v.total_staked_balance,
@@ -690,7 +715,7 @@ impl Contract {
         v.pending_to_stake = v
             .pending_to_stake
             .checked_add(locked)
-            .expect("pending stake");
+            .expect("pending_to_stake overflow when recording this lock");
 
         let key = (buyer.clone(), validator_id.clone());
         let prev = self.user_validator_shares.get(&key).copied().unwrap_or(0);

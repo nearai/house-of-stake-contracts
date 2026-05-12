@@ -29,14 +29,14 @@ impl Contract {
     pub fn on_deposit_and_stake(&mut self, validator_id: AccountId, amount: NearToken) -> bool {
         require!(
             env::predecessor_account_id() == env::current_account_id(),
-            "private"
+            "Only this staking contract may call this callback"
         );
         let ok = is_promise_success();
         let mut v = self
             .validators
             .get(&validator_id)
             .cloned()
-            .expect("validator");
+            .expect("Validator not found on allowlist (pool callback)");
 
         v.tx_status = TransactionStatus::Idle;
 
@@ -47,7 +47,7 @@ impl Contract {
             v.total_staked_balance = v
                 .total_staked_balance
                 .checked_add(NearToken::from_yoctonear(consume))
-                .expect("staked balance");
+                .expect("total_staked_balance overflow after stake");
             v.last_stake_epoch = env::epoch_height();
         }
         self.validators.insert(validator_id, v);
@@ -58,14 +58,14 @@ impl Contract {
     pub fn on_unstake(&mut self, validator_id: AccountId, amount: NearToken) -> bool {
         require!(
             env::predecessor_account_id() == env::current_account_id(),
-            "private"
+            "Only this staking contract may call this callback"
         );
         let ok = is_promise_success();
         let mut v = self
             .validators
             .get(&validator_id)
             .cloned()
-            .expect("validator");
+            .expect("Validator not found on allowlist (pool callback)");
         v.tx_status = TransactionStatus::Idle;
         if ok {
             v.last_unstake_epoch = env::epoch_height();
@@ -86,14 +86,14 @@ impl Contract {
     ) -> PromiseOrValue<bool> {
         require!(
             env::predecessor_account_id() == env::current_account_id(),
-            "private"
+            "Only this staking contract may call this callback"
         );
         if !is_promise_success() {
             let mut v = self
                 .validators
                 .get(&validator_id)
                 .cloned()
-                .expect("validator");
+                .expect("Validator not found on allowlist (pool callback)");
             v.tx_status = TransactionStatus::Idle;
             self.validators.insert(validator_id, v);
             return PromiseOrValue::Value(false);
@@ -104,7 +104,7 @@ impl Contract {
                 .validators
                 .get(&validator_id)
                 .cloned()
-                .expect("validator");
+                .expect("Validator not found on allowlist (pool callback)");
             v.tx_status = TransactionStatus::Idle;
             self.validators.insert(validator_id, v);
             return PromiseOrValue::Value(true);
@@ -129,14 +129,14 @@ impl Contract {
     ) -> bool {
         require!(
             env::predecessor_account_id() == env::current_account_id(),
-            "private"
+            "Only this staking contract may call this callback"
         );
         let ok = is_promise_success();
         let mut v = self
             .validators
             .get(&validator_id)
             .cloned()
-            .expect("validator");
+            .expect("Validator not found on allowlist (pool callback)");
         v.tx_status = TransactionStatus::Idle;
         let credited_yocto = if ok { withdrawn.as_yoctonear() } else { 0 };
         if ok && credited_yocto > 0 {
@@ -144,7 +144,7 @@ impl Contract {
             let bal_y = v.total_staked_balance.as_yoctonear();
             require!(
                 bal_y >= credited_yocto,
-                "Withdraw exceeds recorded pool balance; refresh_validator_balance then retry"
+                "Recorded pool balance is less than the withdrawn amount; run refresh_validator_balance for this validator, then retry"
             );
             v.total_staked_balance = NearToken::from_yoctonear(bal_y - credited_yocto);
             let k = v.withdraw_batches.len() as u32;
@@ -160,12 +160,15 @@ impl Contract {
                     }
                 }
             }
-            require!(l_k > 0, "Withdraw cohort liability is zero");
+            require!(
+                l_k > 0,
+                "Cannot record this withdraw: no user pending unstake matches this batch. Affected users should call claim_unlocked_near once, then the operator can retry epoch_withdraw"
+            );
             let l_near = NearToken::from_yoctonear(l_k);
             v.pending_to_withdraw = v
                 .pending_to_withdraw
                 .checked_add(add)
-                .expect("pending_to_withdraw overflow");
+                .expect("pending_to_withdraw overflow after pool transfer");
             v.withdraw_batches.push(WithdrawBatch {
                 remaining: add,
                 liability_at_fund: l_near,
@@ -184,13 +187,13 @@ impl Contract {
     ) {
         require!(
             env::predecessor_account_id() == env::current_account_id(),
-            "private"
+            "Only this staking contract may call this callback"
         );
         let mut v = self
             .validators
             .get(&validator_id)
             .cloned()
-            .expect("validator");
+            .expect("Validator not found on allowlist (pool callback)");
         v.tx_status = TransactionStatus::Idle;
         if is_promise_success() {
             v.total_staked_balance = total_balance;

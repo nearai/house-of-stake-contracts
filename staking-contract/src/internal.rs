@@ -100,7 +100,7 @@ pub fn check_near_price_lock(
     if lhs >= rhs {
         Ok(())
     } else {
-        Err("Insufficient locked NEAR or duration for this price")
+        Err("Locked NEAR or lock duration is too low for this catalog price")
     }
 }
 

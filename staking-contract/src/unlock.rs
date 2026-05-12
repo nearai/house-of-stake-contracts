@@ -15,13 +15,16 @@ impl Contract {
             .locks
             .get(&lock_id)
             .cloned()
-            .unwrap_or_else(|| env::panic_str("Unknown lock"));
+            .unwrap_or_else(|| env::panic_str("Lock not found; check the lock id"));
         require!(
             env::predecessor_account_id() == lock.account_id,
-            "Only lock owner"
+            "Only the lock owner can unlock"
         );
-        require!(lock.status == LockStatus::Active, "Lock not active");
-        require!(env::block_timestamp() >= lock.end_ns.0, "Lock still active");
+        require!(lock.status == LockStatus::Active, "Lock is not active");
+        require!(
+            env::block_timestamp() >= lock.end_ns.0,
+            "Lock period has not ended yet"
+        );
 
         let validator_id = lock.validator_id.clone();
         let account_log = lock.account_id.clone();
@@ -57,7 +60,7 @@ impl Contract {
             .validators
             .get(&validator_id)
             .cloned()
-            .unwrap_or_else(|| env::panic_str("Unknown validator"));
+            .unwrap_or_else(|| env::panic_str("Validator not found on the allowlist"));
 
         let ts = v.total_shares.0;
         require!(
@@ -72,7 +75,7 @@ impl Contract {
         );
         require!(
             eff > 0,
-            "No effective stake remaining for exit pricing (accounting invariant)"
+            "Cannot price this exit: no effective stake left for remaining shares. Ask the operator to run refresh_validator_balance, or wait for stake or withdraw steps to finish"
         );
 
         let near_amt = near_from_shares(shares_remove, eff, ts);
@@ -82,11 +85,11 @@ impl Contract {
         v.pending_to_unstake = v
             .pending_to_unstake
             .checked_add(near_token)
-            .expect("pending unstake overflow");
+            .expect("pending_to_unstake overflow");
         v.pending_user_unstake_total = v
             .pending_user_unstake_total
             .checked_add(near_token)
-            .expect("pending user total overflow");
+            .expect("pending_user_unstake_total overflow");
 
         let ukey = (account_id.clone(), validator_id.clone());
         let us = self.user_validator_shares.get(&ukey).copied().unwrap_or(0);

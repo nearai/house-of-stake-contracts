@@ -79,7 +79,7 @@ impl Contract {
     pub fn assert_owner(&self) {
         require!(
             env::predecessor_account_id() == self.config.owner_account_id,
-            "Only the owner can call this method"
+            "Only the contract owner can call this method"
         );
     }
 
@@ -87,7 +87,7 @@ impl Contract {
         let p = env::predecessor_account_id();
         require!(
             self.config.guardians.contains(&p) || p == self.config.owner_account_id,
-            "Only the guardian can call this method"
+            "Only a guardian or the contract owner can call this method"
         );
     }
 

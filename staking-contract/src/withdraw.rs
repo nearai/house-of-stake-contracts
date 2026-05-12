@@ -65,7 +65,7 @@ impl Contract {
         }
         require!(
             deduct_yocto == 0,
-            "Internal: claim exceeds eligible tranches for this batch"
+            "Claim does not match your pending unstake for this batch (contract accounting error)"
         );
         trs.retain(|t| t.amount.as_yoctonear() > 0);
         if trs.is_empty() {
@@ -92,24 +92,27 @@ impl Contract {
 
         let ukey = (account_id.clone(), validator_id.clone());
         let o_y = self.user_pending_tranches_total_yocto(&ukey);
-        require!(o_y > 0, "No pending unlocked NEAR for this validator");
+        require!(
+            o_y > 0,
+            "You have no unlocked NEAR waiting to claim for this validator"
+        );
 
         let mut v = self
             .validators
             .get(&validator_id)
             .cloned()
-            .unwrap_or_else(|| env::panic_str("Unknown validator"));
+            .unwrap_or_else(|| env::panic_str("Validator not found on the allowlist"));
         if o_y > 0 && !v.accounts_with_pending_unstake.contains(&account_id) {
             v.accounts_with_pending_unstake.push(account_id.clone());
         }
         let w_y = v.pending_to_withdraw.as_yoctonear();
         require!(
             w_y > 0,
-            "Nothing in withdraw bucket yet; wait for epoch_withdraw"
+            "No NEAR is in the withdraw bucket yet; wait until the operator runs epoch_withdraw"
         );
         require!(
             v.pending_user_unstake_total.as_yoctonear() > 0,
-            "Nothing to claim (liability total is zero). If the pool bucket still holds NEAR after all users have claimed, call sweep_stranded_withdraw_bucket"
+            "Nothing to claim: total user liability for this pool is zero. If NEAR is still stuck after everyone has claimed, the owner can call sweep_stranded_withdraw_bucket"
         );
 
         let mut total_credit_yocto = 0u128;
@@ -142,11 +145,13 @@ impl Contract {
             v.pending_to_withdraw = v
                 .pending_to_withdraw
                 .checked_sub(NearToken::from_yoctonear(c_y))
-                .expect("pending_to_withdraw underflow");
+                .expect(
+                    "pending_to_withdraw accounting mismatch; contact the contract maintainers",
+                );
             v.pending_user_unstake_total = v
                 .pending_user_unstake_total
                 .checked_sub(NearToken::from_yoctonear(c_y))
-                .expect("total underflow");
+                .expect("pending_user_unstake_total accounting mismatch; contact the contract maintainers");
 
             let user_done =
                 self.reduce_user_tranches_after_batch_claim(&ukey, batch_idx as u32, c_y);
@@ -160,19 +165,20 @@ impl Contract {
             v.accounts_with_pending_unstake.retain(|a| *a != account_id);
         }
 
-        require!(total_credit_yocto > 0, "Nothing to claim (rounding)");
+        require!(
+            total_credit_yocto > 0,
+            "Nothing to claim for this call (rounding produced zero across all withdraw batches)"
+        );
 
         let credit = NearToken::from_yoctonear(total_credit_yocto);
 
-        let mut acc = self
-            .accounts
-            .get(&account_id)
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("No account; call storage_deposit"));
+        let mut acc = self.accounts.get(&account_id).cloned().unwrap_or_else(|| {
+            env::panic_str("Account not registered; call storage_deposit first")
+        });
         acc.withdrawable_balance = acc
             .withdrawable_balance
             .checked_add(credit)
-            .expect("withdrawable overflow");
+            .expect("withdrawable_balance overflow; amount too large");
         self.accounts.insert(account_id.clone(), acc);
         self.validators.insert(validator_id.clone(), v);
 
@@ -192,11 +198,17 @@ impl Contract {
             .validators
             .get(&validator_id)
             .cloned()
-            .unwrap_or_else(|| env::panic_str("Unknown validator"));
+            .unwrap_or_else(|| env::panic_str("Validator not found on the allowlist"));
         let w_y = v.pending_to_withdraw.as_yoctonear();
         let t_y = v.pending_user_unstake_total.as_yoctonear();
-        require!(t_y == 0, "User liability must be zero before sweeping");
-        require!(w_y > 0, "No stranded balance in withdraw bucket");
+        require!(
+            t_y == 0,
+            "Cannot sweep: user liability for this pool must be zero first"
+        );
+        require!(
+            w_y > 0,
+            "Cannot sweep: there is no stranded balance in the withdraw bucket"
+        );
 
         v.pending_to_withdraw = NearToken::from_near(0);
         v.withdraw_batches.clear();
@@ -212,15 +224,16 @@ impl Contract {
         self.assert_not_paused();
 
         let pred = env::predecessor_account_id();
-        let mut acc = self
-            .accounts
-            .get(&pred)
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("No account; call storage_deposit"));
+        let mut acc = self.accounts.get(&pred).cloned().unwrap_or_else(|| {
+            env::panic_str("Account not registered; call storage_deposit first")
+        });
         let bal = acc.withdrawable_balance.as_yoctonear();
         let withdraw_yocto = match amount {
             Some(a) => {
-                require!(a.as_yoctonear() <= bal, "Too much");
+                require!(
+                    a.as_yoctonear() <= bal,
+                    "Withdraw amount is larger than your withdrawable balance"
+                );
                 a.as_yoctonear()
             }
             None => bal,
