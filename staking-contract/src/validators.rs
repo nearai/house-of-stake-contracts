@@ -2,6 +2,16 @@ use crate::*;
 use near_sdk::json_types::{U64, U128};
 use near_sdk::{AccountId, NearToken, env, near, require};
 
+/// One `epoch_withdraw` transfer into the contract: users with tranches eligible for this index
+/// share `remaining` pro-rata against the frozen `liability_at_fund` snapshot (so later unlocks
+/// cannot dilute an older bucket).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
+pub struct WithdrawBatch {
+    pub remaining: NearToken,
+    pub liability_at_fund: NearToken,
+}
+
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
 pub struct Validator {
@@ -21,8 +31,14 @@ pub struct Validator {
     pub last_stake_epoch: u64,
     /// NEAR returned from the pool (`epoch_withdraw`) not yet claimed into user accounts.
     pub pending_to_withdraw: NearToken,
-    /// Sum of `user_pending_unstake` for this pool; used with `pending_to_withdraw` for pro-rata claims.
+    /// Sum of all tranches in `user_pending_unstake` for this pool; paired with `withdraw_batches`
+    /// for order-independent claims.
     pub pending_user_unstake_total: NearToken,
+    /// FIFO withdraw buckets; index is frozen into each [`crate::types::PendingUnstakeTranche`].
+    pub withdraw_batches: Vec<WithdrawBatch>,
+    /// Accounts that currently hold at least one [`crate::types::PendingUnstakeTranche`] for this pool
+    /// (used to compute cohort liability when a batch is funded; bounded by active unlockers).
+    pub accounts_with_pending_unstake: Vec<AccountId>,
 
     pub tx_status: TransactionStatus,
 }
@@ -52,6 +68,8 @@ impl Contract {
             last_stake_epoch: 0,
             pending_to_withdraw: NearToken::from_near(0),
             pending_user_unstake_total: NearToken::from_near(0),
+            withdraw_batches: Vec::new(),
+            accounts_with_pending_unstake: Vec::new(),
             tx_status: TransactionStatus::Idle,
         };
         self.validators.insert(validator_id.clone(), v);

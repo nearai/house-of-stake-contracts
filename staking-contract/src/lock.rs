@@ -1,5 +1,5 @@
 use crate::internal::{
-    check_near_price_lock, effective_stake_yocto, mint_shares, near_from_shares,
+    check_near_price_lock, effective_stake_for_share_exit, mint_shares, near_from_shares,
 };
 use crate::*;
 use common::U256;
@@ -414,8 +414,18 @@ impl Contract {
             .cloned()
             .expect("validator");
 
-        let eff = effective_stake_yocto(v.total_staked_balance, v.pending_to_stake);
+        let eff = effective_stake_for_share_exit(
+            v.total_staked_balance,
+            v.pending_to_stake,
+            v.pending_user_unstake_total,
+        );
         let ts = v.total_shares.0;
+        if ts > 0 {
+            require!(
+                eff > 0,
+                "No effective stake for share minting; wait for balance refresh or settlement"
+            );
+        }
         let add_shares = mint_shares(ts, eff, deposit.as_yoctonear());
 
         v.total_shares = U128(ts.saturating_add(add_shares));
@@ -599,7 +609,11 @@ impl Contract {
             .get(&validator_id)
             .cloned()
             .expect("validator");
-        let eff = effective_stake_yocto(v.total_staked_balance, v.pending_to_stake);
+        let eff = effective_stake_for_share_exit(
+            v.total_staked_balance,
+            v.pending_to_stake,
+            v.pending_user_unstake_total,
+        );
         let ts = v.total_shares.0;
         let lock_near_val = near_from_shares(lock.shares.0, eff, ts);
         if lock_near_val == 0 {
@@ -658,8 +672,18 @@ impl Contract {
             .cloned()
             .expect("validator");
 
-        let eff = effective_stake_yocto(v.total_staked_balance, v.pending_to_stake);
+        let eff = effective_stake_for_share_exit(
+            v.total_staked_balance,
+            v.pending_to_stake,
+            v.pending_user_unstake_total,
+        );
         let ts = v.total_shares.0;
+        if ts > 0 {
+            require!(
+                eff > 0,
+                "No effective stake for share minting; wait for balance refresh or settlement"
+            );
+        }
         let new_shares = mint_shares(ts, eff, locked.as_yoctonear());
 
         v.total_shares = U128(ts.saturating_add(new_shares));

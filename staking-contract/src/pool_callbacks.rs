@@ -5,10 +5,12 @@
 //! when staking rewards accrue or rounding differs—use as an operator diagnostics aid unless reconciled later.
 //!
 //! **Share vs balance reconciliation:** pro-rata exits use [`crate::internal::near_from_shares`] against
-//! [`crate::internal::effective_stake_for_share_exit`] (gross staked + pending stake **minus** NEAR already
-//! queued in `pending_to_unstake`) so sequential unlocks cannot re-price against the full gross pool. If
-//! `total_staked_balance` is refreshed upward by rewards but shares are not re-minted, user NEAR-on-exit
-//! can still trail the pool’s notional balance; a future version could mint “donation” shares or true-up.
+//! [`crate::internal::effective_stake_for_share_exit`] (gross staked + pending stake **minus** the full
+//! unsettled user exit liability `pending_user_unstake_total`) so sequential unlocks cannot re-price against
+//! NEAR already owed to exiting users after `pending_to_unstake` drops on a successful pool unstake.
+//!
+//! `total_staked_balance` is reduced when `on_epoch_withdraw_transfer_done` confirms NEAR left
+//! the pool so share backing is not inflated by funds already sitting in `pending_to_withdraw`.
 //!
 //! `on_epoch_withdraw_transfer_done` credits the **requested** `withdrawn` amount on a successful
 //! pool `withdraw` return. (A balance-delta approach is unsafe if multiple pool withdrawals overlap in
@@ -139,10 +141,35 @@ impl Contract {
         let credited_yocto = if ok { withdrawn.as_yoctonear() } else { 0 };
         if ok && credited_yocto > 0 {
             let add = NearToken::from_yoctonear(credited_yocto);
+            let bal_y = v.total_staked_balance.as_yoctonear();
+            require!(
+                bal_y >= credited_yocto,
+                "Withdraw exceeds recorded pool balance; refresh_validator_balance then retry"
+            );
+            v.total_staked_balance = NearToken::from_yoctonear(bal_y - credited_yocto);
+            let k = v.withdraw_batches.len() as u32;
+            let accounts_snapshot = v.accounts_with_pending_unstake.clone();
+            let mut l_k = 0u128;
+            for uid in &accounts_snapshot {
+                let ukey = (uid.clone(), validator_id.clone());
+                if let Some(trs) = self.user_pending_unstake.get(&ukey) {
+                    for t in trs {
+                        if t.min_withdraw_batch_index <= k {
+                            l_k = l_k.saturating_add(t.amount.as_yoctonear());
+                        }
+                    }
+                }
+            }
+            require!(l_k > 0, "Withdraw cohort liability is zero");
+            let l_near = NearToken::from_yoctonear(l_k);
             v.pending_to_withdraw = v
                 .pending_to_withdraw
                 .checked_add(add)
                 .expect("pending_to_withdraw overflow");
+            v.withdraw_batches.push(WithdrawBatch {
+                remaining: add,
+                liability_at_fund: l_near,
+            });
             crate::events::log_pool_withdraw_in(credited_yocto, &validator_id);
         }
         self.validators.insert(validator_id, v);

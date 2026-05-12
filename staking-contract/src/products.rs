@@ -746,7 +746,15 @@ impl Contract {
         let len = self.product_ids.len();
         for i in 0..len {
             if self.product_ids.get(i).is_some_and(|s| s == product_id) {
-                self.product_ids.swap_remove(i);
+                for j in (i + 1)..len {
+                    let id = self
+                        .product_ids
+                        .get(j)
+                        .cloned()
+                        .unwrap_or_else(|| env::panic_str("product_ids index"));
+                    self.product_ids.set(j - 1, id);
+                }
+                let _ = self.product_ids.pop();
                 return;
             }
         }

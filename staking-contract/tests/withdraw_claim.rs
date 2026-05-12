@@ -4,6 +4,7 @@ mod common;
 
 use common::{BUYER, POOL, acct, ctx, deploy, one_yocto, register_buyer};
 use near_sdk::{NearToken, testing_env};
+use staking_contract::PendingUnstakeTranche;
 
 #[test]
 #[should_panic(expected = "Nothing in withdraw bucket yet; wait for epoch_withdraw")]
@@ -13,8 +14,13 @@ fn claim_unlocked_near_fails_when_pool_withdraw_bucket_empty() {
     register_buyer(&mut c);
 
     let ukey = (acct(BUYER), acct(POOL));
-    c.user_pending_unstake
-        .insert(ukey.clone(), NearToken::from_near(1));
+    c.user_pending_unstake.insert(
+        ukey.clone(),
+        vec![PendingUnstakeTranche {
+            amount: NearToken::from_near(1),
+            min_withdraw_batch_index: 0,
+        }],
+    );
 
     testing_env!(ctx(acct(BUYER), one_yocto()));
     c.claim_unlocked_near(acct(POOL));

@@ -133,12 +133,16 @@ fn downgrade_applies_at_next_renewal() {
     assert!(sub_after.pending_downgrade_price_id.is_none());
     assert_eq!(sub_after.status, SubscriptionStatus::Active);
 
-    let pending = c
+    let pending_tranches = c
         .user_pending_unstake
         .get(&(acct(BUYER), acct(POOL)))
         .expect("prorate should queue surplus on unstake path");
+    let pending_yocto: u128 = pending_tranches
+        .iter()
+        .map(|t| t.amount.as_yoctonear())
+        .sum();
     assert!(
-        pending.as_yoctonear() > 0,
+        pending_yocto > 0,
         "Phase B tier-gap should queue NEAR to pending unstake"
     );
 }
