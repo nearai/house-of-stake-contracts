@@ -101,11 +101,7 @@ impl Contract {
     pub fn pause_validator(&mut self, validator_id: AccountId) {
         near_sdk::assert_one_yocto();
         self.assert_owner();
-        let mut v = self
-            .validators
-            .get(&validator_id)
-            .cloned()
-            .expect("Validator not found on the allowlist");
+        let mut v = self.require_validator(&validator_id);
         v.status = ValidatorStatus::Paused;
         self.validators.insert(validator_id, v);
     }
@@ -114,11 +110,7 @@ impl Contract {
     pub fn remove_validator(&mut self, validator_id: AccountId) {
         near_sdk::assert_one_yocto();
         self.assert_owner();
-        let v = self
-            .validators
-            .get(&validator_id)
-            .cloned()
-            .expect("Validator not found on the allowlist");
+        let v = self.require_validator(&validator_id);
         require!(
             v.total_shares.0 == 0
                 && v.pending_to_stake.as_yoctonear() == 0
@@ -144,13 +136,24 @@ impl Contract {
     }
 
     pub fn assert_validator_active_for_lock(&self, validator_id: &AccountId) {
-        let v = self
-            .validators
-            .get(validator_id)
-            .expect("Validator not found on the allowlist");
+        let v = self.require_validator(validator_id);
         require!(
             v.status == ValidatorStatus::Active,
             "This validator is paused or removed; new locks are not allowed on it"
         );
+    }
+
+    pub(crate) fn require_validator(&self, validator_id: &AccountId) -> Validator {
+        self.validators
+            .get(validator_id)
+            .cloned()
+            .expect("Validator not found on the allowlist")
+    }
+
+    pub(crate) fn require_validator_pool_callback(&self, validator_id: &AccountId) -> Validator {
+        self.validators
+            .get(validator_id)
+            .cloned()
+            .expect("Validator not found on allowlist (pool callback)")
     }
 }

@@ -1,4 +1,7 @@
 //! Share minting and pricing helpers.
+//!
+//! Time constants: [`NS_PER_DAY`] is `u128` for fixed-point price math; [`NS_PER_DAY_TIMESTAMP`] is the same
+//! nanosecond length as `u64` for block timestamps (subscription billing anchors in `lock.rs`).
 
 use crate::Price;
 use common::U256;
@@ -7,10 +10,35 @@ use near_sdk::NearToken;
 /// Fixed-point denominator for `Price.lock_factor_near_months`.
 pub const LOCK_FACTOR_DENOM: u128 = 1_000_000_000_000_000_000_000_000;
 
-/// Nanoseconds in one Gregorian day (`86400 * 10^9`).
+/// Nanoseconds in one Gregorian day (`86400 * 10^9`), as `u128` (price lock and share math).
 pub const NS_PER_DAY: u128 = 86_400_000_000_000;
+/// Same interval as [`NS_PER_DAY`], as `u64`, for `u64` block timestamps (e.g. billing anchor day).
+pub const NS_PER_DAY_TIMESTAMP: u64 = 86_400_000_000_000;
 /// Average Gregorian month length in nanoseconds: `30.4375` days = `(487 / 16) * NS_PER_DAY`.
 pub const AVG_MONTH_NS: u128 = NS_PER_DAY * 487 / 16;
+
+/// Pro-rata credit from one withdraw batch toward a user: `floor(remaining * eligible / liability)`
+/// capped by `eligible` and `remaining`, plus a **1 yocto** minimum when all inputs are positive but the
+/// floor rounds to zero (matches [`crate::withdraw::Contract::claim_unlocked_near`]).
+pub fn withdraw_batch_credit_yocto(
+    batch_remaining_yocto: u128,
+    user_eligible_yocto: u128,
+    liability_at_fund_yocto: u128,
+) -> u128 {
+    if batch_remaining_yocto == 0 || user_eligible_yocto == 0 || liability_at_fund_yocto == 0 {
+        return 0;
+    }
+    let credit_raw = (U256::from(batch_remaining_yocto) * U256::from(user_eligible_yocto))
+        / U256::from(liability_at_fund_yocto);
+    let mut c_y = credit_raw
+        .as_u128()
+        .min(user_eligible_yocto)
+        .min(batch_remaining_yocto);
+    if c_y == 0 {
+        c_y = 1.min(user_eligible_yocto).min(batch_remaining_yocto);
+    }
+    c_y
+}
 
 pub fn effective_stake_yocto(total_staked_balance: NearToken, pending_to_stake: NearToken) -> u128 {
     total_staked_balance
@@ -161,5 +189,34 @@ mod tests {
         if m > 1 {
             assert!(check_near_price_lock(&price, m - 1, d).is_err());
         }
+    }
+
+    #[test]
+    fn withdraw_batch_credit_pro_rata_rounding() {
+        assert_eq!(withdraw_batch_credit_yocto(100, 30, 100), 30);
+    }
+
+    #[test]
+    fn withdraw_batch_credit_tiny_bucket_dust_minimum() {
+        assert_eq!(withdraw_batch_credit_yocto(1, 1, 2), 1);
+    }
+
+    #[test]
+    fn withdraw_batch_credit_large_product_uses_u256() {
+        let w_y: u128 = 1u128 << 64;
+        let o_y: u128 = 1u128 << 64;
+        let t_y: u128 = 1u128 << 64;
+        assert!(
+            w_y.checked_mul(o_y).is_none(),
+            "sanity: product overflows u128; math must use U256"
+        );
+        assert_eq!(withdraw_batch_credit_yocto(w_y, o_y, t_y), 1u128 << 64);
+    }
+
+    #[test]
+    fn withdraw_batch_credit_zero_when_any_operand_zero() {
+        assert_eq!(withdraw_batch_credit_yocto(0, 1, 1), 0);
+        assert_eq!(withdraw_batch_credit_yocto(1, 0, 1), 0);
+        assert_eq!(withdraw_batch_credit_yocto(1, 1, 0), 0);
     }
 }

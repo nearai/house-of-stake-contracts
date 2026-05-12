@@ -1,5 +1,5 @@
+use crate::internal::withdraw_batch_credit_yocto;
 use crate::*;
-use common::U256;
 use near_sdk::{AccountId, NearToken, Promise, env, near, require};
 
 impl Contract {
@@ -97,11 +97,7 @@ impl Contract {
             "You have no unlocked NEAR waiting to claim for this validator"
         );
 
-        let mut v = self
-            .validators
-            .get(&validator_id)
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("Validator not found on the allowlist"));
+        let mut v = self.require_validator(&validator_id);
         if o_y > 0 && !v.accounts_with_pending_unstake.contains(&account_id) {
             v.accounts_with_pending_unstake.push(account_id.clone());
         }
@@ -127,16 +123,7 @@ impl Contract {
                 continue;
             }
             let l_y = batch.liability_at_fund.as_yoctonear();
-            if l_y == 0 {
-                continue;
-            }
-            // Frozen denominator per batch so later unlocks cannot dilute an older bucket; use U256
-            // for (b * o) / L so yocto-scale products do not saturate u128.
-            let credit_raw = (U256::from(b_y) * U256::from(o_elig)) / U256::from(l_y);
-            let mut c_y = credit_raw.as_u128().min(o_elig).min(b_y);
-            if c_y == 0 && b_y > 0 && o_elig > 0 {
-                c_y = 1.min(o_elig).min(b_y);
-            }
+            let c_y = withdraw_batch_credit_yocto(b_y, o_elig, l_y);
             if c_y == 0 {
                 continue;
             }
@@ -194,11 +181,7 @@ impl Contract {
         self.assert_not_paused();
         self.assert_owner();
 
-        let mut v = self
-            .validators
-            .get(&validator_id)
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("Validator not found on the allowlist"));
+        let mut v = self.require_validator(&validator_id);
         let w_y = v.pending_to_withdraw.as_yoctonear();
         let t_y = v.pending_user_unstake_total.as_yoctonear();
         require!(
@@ -246,48 +229,5 @@ impl Contract {
         crate::events::log_withdraw(&pred, withdraw_yocto);
 
         Promise::new(pred).transfer(NearToken::from_yoctonear(withdraw_yocto))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use common::U256;
-
-    #[test]
-    fn pro_rata_claim_rounding() {
-        let w: u128 = 100;
-        let o: u128 = 30;
-        let t: u128 = 100;
-        let c = ((U256::from(w) * U256::from(o)) / U256::from(t)).as_u128();
-        assert_eq!(c, 30);
-    }
-
-    /// `floor(w*o/t)` is zero but bucket and liability are positive — claim uses 1 yocto dust rule.
-    #[test]
-    fn pro_rata_tiny_bucket_dust_minimum() {
-        let w_y: u128 = 1;
-        let o_y: u128 = 1;
-        let t_y: u128 = 2;
-        let floor = ((U256::from(w_y) * U256::from(o_y)) / U256::from(t_y)).as_u128();
-        assert_eq!(floor, 0);
-        let mut credit = floor.min(o_y).min(w_y);
-        if credit == 0 && w_y > 0 && o_y > 0 {
-            credit = 1.min(o_y).min(w_y);
-        }
-        assert_eq!(credit, 1);
-    }
-
-    /// `w * o` can exceed `u128::MAX` at yocto scale; pro-rata must use `U256` for the product.
-    #[test]
-    fn pro_rata_large_product_needs_u256() {
-        let w_y: u128 = 1u128 << 64;
-        let o_y: u128 = 1u128 << 64;
-        let t_y: u128 = 1u128 << 64;
-        assert!(
-            w_y.checked_mul(o_y).is_none(),
-            "sanity: product overflows u128; math must use U256"
-        );
-        let credit_raw = (U256::from(w_y) * U256::from(o_y)) / U256::from(t_y);
-        assert_eq!(credit_raw.as_u128(), 1u128 << 64);
     }
 }

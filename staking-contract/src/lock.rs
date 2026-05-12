@@ -1,17 +1,16 @@
 use crate::internal::{
-    check_near_price_lock, effective_stake_for_share_exit, mint_shares, near_from_shares,
+    NS_PER_DAY_TIMESTAMP, check_near_price_lock, effective_stake_for_share_exit, mint_shares,
+    near_from_shares,
 };
 use crate::*;
 use common::U256;
 use near_sdk::json_types::{U64, U128};
 use near_sdk::{NearToken, assert_one_yocto, env, near, require};
 
-const NS_PER_DAY: u64 = 86_400_000_000_000;
-
 /// Stripe-style **billing anchor day** (1–31). Not the real UTC calendar day-of-month; it is a stable
 /// fingerprint from block time until civil-calendar billing is implemented (see `subscriptions` / `docs/ACTION_ITEMS.md`).
 fn anchor_day_from_timestamp(ts: u64) -> u8 {
-    let d = (ts / NS_PER_DAY) % 31;
+    let d = (ts / NS_PER_DAY_TIMESTAMP) % 31;
     (d as u8 + 1).min(31)
 }
 
@@ -55,20 +54,7 @@ impl Contract {
             "Lock duration is outside the allowed range for this contract"
         );
 
-        let price_opt = self.prices.get(&price_id).cloned();
-        require!(price_opt.is_some(), "Price not found in the catalog");
-        let price = price_opt.unwrap();
-        let product_opt = self.products.get(&price.product_id).cloned();
-        require!(product_opt.is_some(), "Product not found in the catalog");
-        let product = product_opt.unwrap();
-        require!(
-            price.status == CatalogStatus::Active,
-            "This price is not active; pick an active price"
-        );
-        require!(
-            product.status == CatalogStatus::Active,
-            "This product is not active; pick an active product"
-        );
+        let (price, product) = self.load_active_catalog_price_product(&price_id);
         require!(
             price.price_type == PriceType::OneOff,
             "Recurring prices: use lock_for_subscription with price_id or product_id"
@@ -113,13 +99,7 @@ impl Contract {
             "Attached NEAR is below the contract minimum lock amount (min_lock_amount)"
         );
 
-        let price_opt = self.prices.get(&price_id).cloned();
-        require!(price_opt.is_some(), "Price not found in the catalog");
-        let price = price_opt.unwrap();
-        require!(
-            price.status == CatalogStatus::Active,
-            "This price is not active; pick an active price"
-        );
+        let (price, product) = self.load_active_catalog_price_product(&price_id);
         require!(
             price.price_type == PriceType::Recurring,
             "This price is not a recurring subscription price"
@@ -127,14 +107,6 @@ impl Contract {
         require!(
             price.billing_period == Some(BillingPeriod::Monthly),
             "Only monthly billing is supported"
-        );
-
-        let product_opt = self.products.get(&price.product_id).cloned();
-        require!(product_opt.is_some(), "Product not found in the catalog");
-        let product = product_opt.unwrap();
-        require!(
-            product.status == CatalogStatus::Active,
-            "This product is not active; pick an active product"
         );
 
         let validator_id = product.validator_id.clone();
@@ -429,11 +401,7 @@ impl Contract {
         let validator_id = product.validator_id.clone();
         self.assert_validator_active_for_lock(&validator_id);
 
-        let mut v = self
-            .validators
-            .get(&validator_id)
-            .cloned()
-            .expect("Validator not found on the allowlist");
+        let mut v = self.require_validator(&validator_id);
 
         let eff = effective_stake_for_share_exit(
             v.total_staked_balance,
@@ -571,6 +539,28 @@ impl Contract {
 }
 
 impl Contract {
+    fn load_active_catalog_price_product(&self, price_id: &PriceId) -> (Price, Product) {
+        let price = self
+            .prices
+            .get(price_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("Price not found in the catalog"));
+        require!(
+            price.status == CatalogStatus::Active,
+            "This price is not active; pick an active price"
+        );
+        let product = self
+            .products
+            .get(&price.product_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("Product not found in the catalog"));
+        require!(
+            product.status == CatalogStatus::Active,
+            "This product is not active; pick an active product"
+        );
+        (price, product)
+    }
+
     fn resolve_price_id_for_catalog_lock(
         &self,
         price_id: Option<PriceId>,
@@ -629,11 +619,7 @@ impl Contract {
         }
 
         let validator_id = lock.validator_id.clone();
-        let v = self
-            .validators
-            .get(&validator_id)
-            .cloned()
-            .expect("Validator not found on the allowlist");
+        let v = self.require_validator(&validator_id);
         let eff = effective_stake_for_share_exit(
             v.total_staked_balance,
             v.pending_to_stake,
@@ -691,11 +677,7 @@ impl Contract {
         order: OrderRef,
     ) -> LockId {
         let validator_id = product.validator_id.clone();
-        let mut v = self
-            .validators
-            .get(&validator_id)
-            .cloned()
-            .expect("Validator not found on the allowlist");
+        let mut v = self.require_validator(&validator_id);
 
         let eff = effective_stake_for_share_exit(
             v.total_staked_balance,

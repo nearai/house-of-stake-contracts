@@ -56,11 +56,7 @@ impl Contract {
             shares_remove > 0,
             "Cannot queue unstake: share amount must be greater than zero"
         );
-        let mut v = self
-            .validators
-            .get(&validator_id)
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("Validator not found on the allowlist"));
+        let mut v = self.require_validator(&validator_id);
 
         let ts = v.total_shares.0;
         require!(

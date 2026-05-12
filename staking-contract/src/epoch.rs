@@ -67,11 +67,7 @@ impl Contract {
         self.assert_operator();
         events::log_epoch_operation("epoch_stake", &validator_id);
 
-        let mut v = self
-            .validators
-            .get(&validator_id)
-            .cloned()
-            .expect("Validator not found on the allowlist");
+        let mut v = self.require_validator(&validator_id);
         require!(
             v.tx_status == TransactionStatus::Idle,
             "Validator pool is busy; wait for the in-flight pool call to finish"
@@ -108,11 +104,7 @@ impl Contract {
         self.assert_operator();
         events::log_epoch_operation("epoch_unstake", &validator_id);
 
-        let mut v = self
-            .validators
-            .get(&validator_id)
-            .cloned()
-            .expect("Validator not found on the allowlist");
+        let mut v = self.require_validator(&validator_id);
         require!(
             v.tx_status == TransactionStatus::Idle,
             "Validator pool is busy; wait for the in-flight pool call to finish"
@@ -152,11 +144,7 @@ impl Contract {
         self.assert_operator();
         events::log_epoch_operation("epoch_withdraw", &validator_id);
 
-        let mut v = self
-            .validators
-            .get(&validator_id)
-            .cloned()
-            .expect("Validator not found on the allowlist");
+        let mut v = self.require_validator(&validator_id);
         require!(
             v.tx_status == TransactionStatus::Idle,
             "Validator pool is busy; wait for the in-flight pool call to finish"
@@ -190,11 +178,7 @@ impl Contract {
     pub fn refresh_validator_balance(&mut self, validator_id: AccountId) -> Promise {
         self.assert_not_paused();
         self.assert_operator();
-        let mut v = self
-            .validators
-            .get(&validator_id)
-            .cloned()
-            .expect("Validator not found on the allowlist");
+        let mut v = self.require_validator(&validator_id);
         require!(
             v.tx_status == TransactionStatus::Idle,
             "Validator pool is busy; wait for the in-flight pool call to finish"
@@ -222,11 +206,7 @@ impl Contract {
             "Only this staking contract may call this callback"
         );
         let ok = is_promise_success();
-        let mut v = self
-            .validators
-            .get(&validator_id)
-            .cloned()
-            .expect("Validator not found on allowlist (pool callback)");
+        let mut v = self.require_validator_pool_callback(&validator_id);
 
         v.tx_status = TransactionStatus::Idle;
 
@@ -251,11 +231,7 @@ impl Contract {
             "Only this staking contract may call this callback"
         );
         let ok = is_promise_success();
-        let mut v = self
-            .validators
-            .get(&validator_id)
-            .cloned()
-            .expect("Validator not found on allowlist (pool callback)");
+        let mut v = self.require_validator_pool_callback(&validator_id);
         v.tx_status = TransactionStatus::Idle;
         if ok {
             v.last_unstake_epoch = env::epoch_height();
@@ -279,22 +255,14 @@ impl Contract {
             "Only this staking contract may call this callback"
         );
         if !is_promise_success() {
-            let mut v = self
-                .validators
-                .get(&validator_id)
-                .cloned()
-                .expect("Validator not found on allowlist (pool callback)");
+            let mut v = self.require_validator_pool_callback(&validator_id);
             v.tx_status = TransactionStatus::Idle;
             self.validators.insert(validator_id, v);
             return PromiseOrValue::Value(false);
         }
 
         if unstaked_balance.as_yoctonear() == 0 {
-            let mut v = self
-                .validators
-                .get(&validator_id)
-                .cloned()
-                .expect("Validator not found on allowlist (pool callback)");
+            let mut v = self.require_validator_pool_callback(&validator_id);
             v.tx_status = TransactionStatus::Idle;
             self.validators.insert(validator_id, v);
             return PromiseOrValue::Value(true);
@@ -322,11 +290,7 @@ impl Contract {
             "Only this staking contract may call this callback"
         );
         let ok = is_promise_success();
-        let mut v = self
-            .validators
-            .get(&validator_id)
-            .cloned()
-            .expect("Validator not found on allowlist (pool callback)");
+        let mut v = self.require_validator_pool_callback(&validator_id);
         v.tx_status = TransactionStatus::Idle;
         let credited_yocto = if ok { withdrawn.as_yoctonear() } else { 0 };
         if ok && credited_yocto > 0 {
@@ -379,11 +343,7 @@ impl Contract {
             env::predecessor_account_id() == env::current_account_id(),
             "Only this staking contract may call this callback"
         );
-        let mut v = self
-            .validators
-            .get(&validator_id)
-            .cloned()
-            .expect("Validator not found on allowlist (pool callback)");
+        let mut v = self.require_validator_pool_callback(&validator_id);
         v.tx_status = TransactionStatus::Idle;
         if is_promise_success() {
             v.total_staked_balance = total_balance;
