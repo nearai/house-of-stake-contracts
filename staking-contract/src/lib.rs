@@ -10,7 +10,6 @@ pub mod ids;
 pub mod internal;
 pub mod lock;
 pub mod pause;
-pub mod pool_callbacks;
 pub mod products;
 pub mod subscriptions;
 pub mod types;
