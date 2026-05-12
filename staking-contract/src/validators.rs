@@ -127,7 +127,7 @@ impl Contract {
 
 impl Contract {
     /// Pool must be on the allowlist. Catalog methods confirm the caller against the pool's
-    /// `get_owner_id()` via a cross-contract call (see `products.rs`).
+    /// `get_owner_id()` via a cross-contract call (see `products.rs` and `prices.rs`).
     pub fn assert_validator_allowlisted(&self, validator_id: &AccountId) {
         require!(
             self.validators.get(validator_id).is_some(),

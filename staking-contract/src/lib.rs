@@ -10,6 +10,7 @@ pub mod ids;
 pub mod internal;
 pub mod lock;
 pub mod pause;
+pub mod prices;
 pub mod products;
 pub mod subscriptions;
 pub mod types;
