@@ -269,6 +269,7 @@ impl Contract {
         // without executing the pool refresh promise chain.
         #[cfg(test)]
         {
+            let mut subscription = subscription;
             let lock_id = self.finalize_lock_common(
                 buyer.clone(),
                 price,
