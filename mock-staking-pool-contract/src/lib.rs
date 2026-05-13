@@ -2,8 +2,8 @@
 //!
 //! **Why this exists:** `staking-contract` calls a real staking pool through `ext_staking_pool`
 //! (`staking-contract/src/epoch.rs`). Integration tests deploy this contract at the pool account id so
-//! `epoch_stake`, `epoch_withdraw`, and catalog `get_owner_id` chains execute as real cross-contract
-//! promises instead of host-side mocks.
+//! `deposit_and_stake`, `unstake`, `withdraw`, balance views, and catalog `get_owner_id` chains execute as
+//! real cross-contract promises instead of host-side mocks.
 //!
 //! **Surface area:** matches what the staking contract actually invokes — `get_owner_id`,
 //! `deposit_and_stake`, `unstake`, `get_account_unstaked_balance`, `get_account_total_balance`,

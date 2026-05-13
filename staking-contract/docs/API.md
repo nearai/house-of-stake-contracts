@@ -6,9 +6,8 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 
 - **`#[payable]` + “attach 1 yocto”**: method calls [`near_sdk::assert_one_yocto()`](https://docs.rs/near-sdk/latest/near_sdk/fn.assert_one_yocto.html); attach exactly **1 yoctoNEAR**.
 - **Other `#[payable]`**: attach the stated NEAR (e.g. storage, lock stake).
-- **Operators**: `epoch_*` methods require `predecessor` ∈ `config.operators` **unless** `operators` is empty, in which case **any** account may call them.
 - **Catalog auth**: mutating catalog methods assert the caller equals the staking pool’s **`get_owner_id()`** for that validator’s pool (cross-contract view), not a cached field on-chain.
-- **Pause**: when `paused == true`, most mutating user/operator paths revert (see individual methods).
+- **Pause**: when `paused == true`, most mutating user paths revert (see individual methods).
 
 ---
 
@@ -88,8 +87,8 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 
 | Method | Access | Deposit | Description |
 |--------|--------|---------|-------------|
-| `lock_for_product` | Buyer | **Attach NEAR** | One-off purchase: JSON **`price_id`**, **`lock_duration_ns`** (`U64`), **`product_id`**. Provide **exactly one** of **`price_id`** or **`product_id`** (the other **`null`**). If **`product_id`** is set, uses **`Product.default_price_id`** (must be a **one-off** price). Returns **`lock_id`**. |
-| `lock_for_subscription` | Subscriber | **Attach NEAR** | Recurring (monthly): **`price_id`**, **`product_id`** — same XOR rule as **`lock_for_product`**; default price must be **recurring** monthly. |
+| `lock_for_product` | Buyer | **Attach NEAR** | One-off purchase: JSON **`price_id`**, **`lock_duration_ns`** (`U64`), **`product_id`**. Provide **exactly one** of **`price_id`** or **`product_id`** (the other **`null`**). If **`product_id`** is set, uses **`Product.default_price_id`** (must be a **one-off** price). Returns **`PromiseOrValue<LockId>`** (pool balance refresh then **`try_epoch_settle`**; see `docs/LAZY_EPOCH_PIPELINE.md`). |
+| `lock_for_subscription` | Subscriber | **Attach NEAR** | Recurring (monthly): **`price_id`**, **`product_id`** — same XOR rule as **`lock_for_product`**; default price must be **recurring** monthly. Returns **`PromiseOrValue<LockId>`**. |
 | `cancel_subscription` | Subscriber | **1 yocto** | `product_id` — stop renewing after current period (`cancel_at_period_end`). After **`end_ns`**, the next **`lock_for_subscription`** replaces the row so the user may subscribe again (index is not left stale). |
 | `resume_subscription` | Subscriber | **1 yocto** | `product_id` — clear **`cancel_at_period_end`** while subscription is still **`Active`** (undo **`cancel_subscription`** before period end). Requires subscription was scheduled for cancellation; otherwise panics with **`Not scheduled for cancellation`**. |
 | `upgrade_subscription` | Subscriber | **Attach NEAR** (≥ `min_lock_amount`; tier differential) | `new_price_id` — upgrade recurring tier mid-period; returns **`LockId`**. |
@@ -101,42 +100,47 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 
 | Method | Access | Deposit | Description |
 |--------|--------|---------|-------------|
-| `unlock` | Lock owner | **1 yocto** | After **`block_timestamp >= lock.end_ns`**, queues unstake for this lock’s shares (`UnlockRequested`). |
+| `unlock` | Lock owner | **1 yocto** | After **`block_timestamp >= lock.end_ns`**, refreshes pool balance, queues unstake, then runs withdraw-first / unstake on the pool. Returns **`Promise`**. |
 
 ---
 
-## Epoch operations — operators (`epoch.rs`)
+## Pool pipeline (`epoch.rs` — internal scheduling + user helpers)
 
-**`epoch_stake`**, **`epoch_unstake`**, **`epoch_withdraw`**, **`refresh_validator_balance`:** require **`assert_not_paused`** and **`assert_operator`** (if **`config.operators`** is non-empty, calls must come from a listed operator; if empty, any account may call — same rules for all four). Each **`epoch_*`** and **`refresh_validator_balance`** returns a **`Promise`** to the staking pool / callbacks.
+Public **`epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator_balance`** are **not** exposed. Pool work is scheduled from **`lock`**, **`unlock`**, **`claim_unlocked_near`**, and may be advanced manually via **`epoch_settle`** (`validator_id`).
 
-| Method | Description |
-|--------|-------------|
-| `epoch_stake` | `validator_id` — stake **`pending_to_stake`** via pool **`deposit_and_stake`**. Serialized per pool (`tx_status`, one stake batch per epoch). |
-| `epoch_unstake` | `validator_id` — unstake **`pending_to_unstake`**. Gated by **`epoch_unstake_settle_epochs`** vs last unstake epoch. |
-| `epoch_withdraw` | `validator_id` — after settle epochs, pull unstaked NEAR from pool into **`pending_to_withdraw`**. |
-| `refresh_validator_balance` | `validator_id` — **`get_account_total_balance`** callback updates **`Validator.total_staked_balance`**. Shares **`tx_status`** serialization with **`epoch_*`**. |
+**Per allowlisted pool (`validator_id` = staking pool contract account):**
+
+- **`tx_status`**: at most one in-flight cross-contract pool call at a time (`Idle` / `Busy`).
+- **Per NEAR `epoch_height`**: at most **one** successful pool **`deposit_and_stake`** **or** **`unstake`**. Both paths update **`Validator.last_settlement_epoch`** on success (same mutex). Catalog **`lock`** / **`unlock`** use **`last_settlement_epoch`** to branch: when it is **already** the current `epoch_height`, the contract **skips** the pre-user **`get_account_total_balance`**, withdraw-if-ready, and **`try_epoch_settle`** chain and proceeds directly to mint or unlock queue (cached `total_staked_balance`). When it is **behind** the current height, the contract runs withdraw-if-ready then **`try_epoch_settle`** on existing pending before the user action. **`try_epoch_settle`** nets **`pending_to_stake`** vs **`pending_to_unstake`** in yocto (stake excess, unstake excess, or clear-equal without a pool mutating call) in that single epoch slot.
+- **Unstake spacing**: further **`unstake`** rounds also require **`epoch_height >= last_unstake_epoch + epoch_unstake_settle_epochs`** (NEAR pool settlement).
+- **Withdraw from pool** (`get_account_unstaked_balance` → `withdraw`): does **not** consume the stake/unstake epoch slot above.
+
+| Method | Access | Deposit | Returns | Description |
+|--------|--------|---------|---------|-------------|
+| `epoch_settle` | Any | **None** | **`Promise`** | JSON **`validator_id`** (allowlisted pool account). Runs **`try_epoch_settle`** for manual retry or to advance pending stake/unstake when automatic scheduling did not complete; same per-epoch rules as automatic flows. |
 
 ---
 
-## Pool promise callbacks (`pool_callbacks.rs`)
+## Private pool callbacks (`epoch.rs`)
 
 **Not intended for users.** Marked **`#[private]`** — only the contract account may call (promise continuation).
 
 | Method | Role |
 |--------|------|
-| `on_deposit_and_stake` | Completes `epoch_stake`; clears pending / updates stake epoch / balance. |
-| `on_unstake` | Completes `epoch_unstake`. |
-| `on_get_unstaked_for_epoch_withdraw` | Continues `epoch_withdraw`; may chain **`withdraw`** on pool. |
+| `on_deposit_and_stake` | Completes stake; reduces **`pending_to_stake`** / **`pending_to_unstake`** per net-settle args, may absorb matching user unstake liability, updates **`total_staked_balance`**, sets **`last_settlement_epoch`**. |
+| `on_unstake` | Completes unstake; reduces **`pending_to_unstake`** / **`pending_to_stake`** per net-settle args; updates **`last_unstake_epoch`** and **`last_settlement_epoch`**. |
+| `on_settle_net_zero_done` | Internal: equal pending stake/unstake cleared without pool **`deposit`** / **`unstake`**. |
+| `on_get_unstaked_for_epoch_withdraw` | Continues withdraw-from-pool; may chain **`withdraw`** on pool. |
 | `on_epoch_withdraw_transfer_done` | Credits **`pending_to_withdraw`** after pool transfer. |
-| `on_refresh_total_balance` | Completes **`refresh_validator_balance`**. |
+| `on_unlock_refresh_then_queue` / `on_unstake_pipeline_unstaked_balance` / `on_after_withdraw_then_unstake` / `on_lock_refresh_then_finalize` | User-flow continuations for **`unlock`** / **`lock`**. |
 
 ---
 
 ## Withdrawals & claims (`withdraw.rs`)
 
-| Method | Access | Deposit | Description |
-|--------|--------|---------|-------------|
-| `claim_unlocked_near` | User | **1 yocto** | `validator_id` — pro-rata claim from **`pending_to_withdraw`** into **`withdrawable_balance`** (requires prior **`epoch_withdraw`** and liability bookkeeping). |
+| Method | Access | Deposit | Returns | Description |
+|--------|--------|---------|---------|-------------|
+| `claim_unlocked_near` | User | **1 yocto** | **`PromiseOrValue<()>`** | `validator_id` — pro-rata claim from **`pending_to_withdraw`** into **`withdrawable_balance`**. May chain an internal pool withdraw when the bucket is empty but settlement allows (see `docs/LAZY_EPOCH_PIPELINE.md`). |
 | `withdraw` | User | **1 yocto** | JSON args are **`{ "amount": <NearToken> }`**; use **`"amount": null`** to withdraw the full **`withdrawable_balance`**. A bare JSON **`null`** body does not deserialize (near-sdk wraps args in a struct keyed by parameter names). |
 | `sweep_stranded_withdraw_bucket` | **Owner** | **1 yocto** | `validator_id` — if user liability total is zero but **`pending_to_withdraw`** remains, send remainder to **`owner_account_id`**. |
 
@@ -151,7 +155,6 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 | `propose_new_owner_account_id` | `new_owner_account_id: AccountId \| null`. |
 | `accept_ownership` | **Proposed** account accepts (must match `proposed_new_owner_account_id`). |
 | `set_guardians` | Replace **`guardians`** list. |
-| `set_operators` | Replace **`operators`** list (empty ⇒ anyone may run **`epoch_*`**). |
 | `set_per_lock_storage_stake` | Per-lock storage surcharge config. |
 | `set_lock_bounds` | `min_lock_duration_ns`, `max_lock_duration_ns` (`U64`). |
 | `set_min_lock_amount` | Minimum attach for locks. |
@@ -188,7 +191,7 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 
 ## Main types (contract JSON views)
 
-- **`Config`** — [`../src/config.rs`](../src/config.rs): `owner_account_id`, `guardians`, `operators`, lock/storage economics, `epoch_unstake_settle_epochs`, …
+- **`Config`** — [`../src/config.rs`](../src/config.rs): `owner_account_id`, `guardians`, lock/storage economics, `epoch_unstake_settle_epochs`, … First delegation to an empty pool uses hardcoded **`MIN_FIRST_VALIDATOR_DEPOSIT_NEAR_YOCTO`** (1 NEAR), not a config field.
 - **`Validator`** — [`../src/validators.rs`](../src/validators.rs): **`validator_id`** (pool contract account), accounting fields, pending buckets, **`tx_status`** (`Idle` \| `Busy`).
 - **`Product`**, **`Price`**, **`Subscription`**, **`Lock`**, **`Account`** — [`../src/types.rs`](../src/types.rs), [`../src/accounts.rs`](../src/accounts.rs).
 

@@ -26,7 +26,7 @@ pub trait ExtSelfProducts {
     fn create_product_after_get_owner(
         &mut self,
         #[callback] pool_owner: AccountId,
-        validator_id: AccountId,
+        validator_id: ValidatorId,
         name: String,
         description: String,
         expected_caller: AccountId,
@@ -71,7 +71,7 @@ impl Contract {
     #[payable]
     pub fn create_product(
         &mut self,
-        validator_id: AccountId,
+        validator_id: ValidatorId,
         name: String,
         description: String,
     ) -> Promise {
@@ -103,12 +103,12 @@ impl Contract {
     ) -> Promise {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
-        let p = self.products.get(&product_id).cloned();
-        require!(p.is_some(), "Product not found in the catalog");
-        let p = p.unwrap();
-        self.assert_validator_allowlisted(&p.validator_id);
+        let maybe_product = self.products.get(&product_id).cloned();
+        require!(maybe_product.is_some(), "Product not found in the catalog");
+        let product = maybe_product.unwrap();
+        self.assert_validator_allowlisted(&product.validator_id);
         let expected_caller = env::predecessor_account_id();
-        let validator_id = p.validator_id.clone();
+        let validator_id = product.validator_id.clone();
         ext_staking_pool::ext(validator_id)
             .with_static_gas(staking_pool::GET_OWNER_ID)
             .get_owner_id()
@@ -123,12 +123,12 @@ impl Contract {
     pub fn archive_product(&mut self, product_id: ProductId) -> Promise {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
-        let p = self.products.get(&product_id).cloned();
-        require!(p.is_some(), "Product not found in the catalog");
-        let p = p.unwrap();
-        self.assert_validator_allowlisted(&p.validator_id);
+        let maybe_product = self.products.get(&product_id).cloned();
+        require!(maybe_product.is_some(), "Product not found in the catalog");
+        let product = maybe_product.unwrap();
+        self.assert_validator_allowlisted(&product.validator_id);
         let expected_caller = env::predecessor_account_id();
-        let validator_id = p.validator_id.clone();
+        let validator_id = product.validator_id.clone();
         ext_staking_pool::ext(validator_id)
             .with_static_gas(staking_pool::GET_OWNER_ID)
             .get_owner_id()
@@ -143,12 +143,12 @@ impl Contract {
     pub fn delete_product(&mut self, product_id: ProductId) -> Promise {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
-        let p = self.products.get(&product_id).cloned();
-        require!(p.is_some(), "Product not found in the catalog");
-        let p = p.unwrap();
-        self.assert_validator_allowlisted(&p.validator_id);
+        let maybe_product = self.products.get(&product_id).cloned();
+        require!(maybe_product.is_some(), "Product not found in the catalog");
+        let product = maybe_product.unwrap();
+        self.assert_validator_allowlisted(&product.validator_id);
         let expected_caller = env::predecessor_account_id();
-        let validator_id = p.validator_id.clone();
+        let validator_id = product.validator_id.clone();
         ext_staking_pool::ext(validator_id)
             .with_static_gas(staking_pool::GET_OWNER_ID)
             .get_owner_id()
@@ -163,12 +163,12 @@ impl Contract {
     pub fn unarchive_product(&mut self, product_id: ProductId) -> Promise {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
-        let p = self.products.get(&product_id).cloned();
-        require!(p.is_some(), "Product not found in the catalog");
-        let p = p.unwrap();
-        self.assert_validator_allowlisted(&p.validator_id);
+        let maybe_product = self.products.get(&product_id).cloned();
+        require!(maybe_product.is_some(), "Product not found in the catalog");
+        let product = maybe_product.unwrap();
+        self.assert_validator_allowlisted(&product.validator_id);
         let expected_caller = env::predecessor_account_id();
-        let validator_id = p.validator_id.clone();
+        let validator_id = product.validator_id.clone();
         ext_staking_pool::ext(validator_id)
             .with_static_gas(staking_pool::GET_OWNER_ID)
             .get_owner_id()
@@ -187,12 +187,12 @@ impl Contract {
     ) -> Promise {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
-        let p = self.products.get(&product_id).cloned();
-        require!(p.is_some(), "Product not found in the catalog");
-        let p = p.unwrap();
-        self.assert_validator_allowlisted(&p.validator_id);
+        let maybe_product = self.products.get(&product_id).cloned();
+        require!(maybe_product.is_some(), "Product not found in the catalog");
+        let product = maybe_product.unwrap();
+        self.assert_validator_allowlisted(&product.validator_id);
         let expected_caller = env::predecessor_account_id();
-        let validator_id = p.validator_id.clone();
+        let validator_id = product.validator_id.clone();
         ext_staking_pool::ext(validator_id)
             .with_static_gas(staking_pool::GET_OWNER_ID)
             .get_owner_id()
@@ -211,7 +211,7 @@ impl Contract {
     pub fn create_product_after_get_owner(
         &mut self,
         #[callback] pool_owner: AccountId,
-        validator_id: AccountId,
+        validator_id: ValidatorId,
         name: String,
         description: String,
         expected_caller: AccountId,
@@ -262,14 +262,14 @@ impl Contract {
             pool_owner == expected_caller,
             "Only the validator owner can call this method"
         );
-        let mut p = self
+        let mut product = self
             .products
             .get(&product_id)
             .cloned()
             .expect("Product not found in the catalog");
-        p.name = name;
-        p.description = description;
-        self.products.insert(product_id, p);
+        product.name = name;
+        product.description = description;
+        self.products.insert(product_id, product);
     }
 
     #[private]
@@ -288,14 +288,14 @@ impl Contract {
             pool_owner == expected_caller,
             "Only the validator owner can call this method"
         );
-        let mut p = self
+        let mut product = self
             .products
             .get(&product_id)
             .cloned()
             .expect("Product not found in the catalog");
-        p.default_price_id = None;
-        p.status = CatalogStatus::Archived;
-        self.products.insert(product_id, p);
+        product.default_price_id = None;
+        product.status = CatalogStatus::Archived;
+        self.products.insert(product_id, product);
     }
 
     #[private]
@@ -314,17 +314,17 @@ impl Contract {
             pool_owner == expected_caller,
             "Only the validator owner can call this method"
         );
-        let p = self
+        let product = self
             .products
             .get(&product_id)
             .cloned()
             .expect("Product not found in the catalog");
         require!(
-            p.usage_count == 0,
+            product.usage_count == 0,
             "Cannot delete this product while it is in use"
         );
         require!(
-            p.price_ids.is_empty(),
+            product.price_ids.is_empty(),
             "Remove or delete all prices for this product first"
         );
         self.remove_product_id_from_list(&product_id);
@@ -347,17 +347,17 @@ impl Contract {
             pool_owner == expected_caller,
             "Only the validator owner can call this method"
         );
-        let mut p = self
+        let mut product = self
             .products
             .get(&product_id)
             .cloned()
             .expect("Product not found in the catalog");
         require!(
-            p.status == CatalogStatus::Archived,
+            product.status == CatalogStatus::Archived,
             "Product is not archived"
         );
-        p.status = CatalogStatus::Active;
-        self.products.insert(product_id, p);
+        product.status = CatalogStatus::Active;
+        self.products.insert(product_id, product);
     }
 
     #[private]
@@ -391,17 +391,17 @@ impl Contract {
                 product.default_price_id = None;
             }
             Some(pid) => {
-                let pr = self
+                let catalog_price = self
                     .prices
                     .get(&pid)
                     .cloned()
                     .expect("Price not found in the catalog");
                 require!(
-                    pr.product_id == product_id,
+                    catalog_price.product_id == product_id,
                     "Price does not belong to this product"
                 );
                 require!(
-                    pr.status == CatalogStatus::Active,
+                    catalog_price.status == CatalogStatus::Active,
                     "Only an active (unarchived) price can be the default"
                 );
                 require!(
@@ -421,7 +421,7 @@ impl Contract {
     pub fn get_product_default_price(&self, product_id: ProductId) -> Option<PriceId> {
         self.products
             .get(&product_id)
-            .and_then(|p| p.default_price_id.clone())
+            .and_then(|product| product.default_price_id.clone())
     }
 
     /// Paginated catalog rows (stable creation order in [`Contract::product_ids`]).
@@ -431,8 +431,8 @@ impl Contract {
         let mut i = from_index;
         while i < len_u64 && (out.len() as u64) < limit {
             if let Some(id) = self.product_ids.get(i as u32) {
-                if let Some(p) = self.products.get(id).cloned() {
-                    out.push(p);
+                if let Some(catalog_product) = self.products.get(id).cloned() {
+                    out.push(catalog_product);
                 }
             }
             i += 1;
@@ -448,13 +448,13 @@ impl Contract {
         product_id: &ProductId,
         price_id: &PriceId,
     ) {
-        let mut p = match self.products.get(product_id).cloned() {
-            Some(x) => x,
+        let mut product = match self.products.get(product_id).cloned() {
+            Some(existing) => existing,
             None => return,
         };
-        if p.default_price_id.as_ref() == Some(price_id) {
-            p.default_price_id = None;
-            self.products.insert(product_id.clone(), p);
+        if product.default_price_id.as_ref() == Some(price_id) {
+            product.default_price_id = None;
+            self.products.insert(product_id.clone(), product);
         }
     }
 

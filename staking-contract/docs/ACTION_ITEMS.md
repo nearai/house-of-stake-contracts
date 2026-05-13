@@ -6,11 +6,11 @@ This file tracks open work relative to the intended design ([PLAN.md](PLAN.md), 
 
 ## P0 — Core unlock → withdraw path (funds must not stick)
 
-**Done (v1):** `epoch_unstake`, `epoch_withdraw` (get unstaked + `withdraw`), `on_epoch_withdraw_transfer_done` → `pending_to_withdraw`, `claim_unlocked_near` → `withdrawable_balance`, `withdraw`. See `src/epoch.rs`, `src/pool_callbacks.rs`, `src/withdraw.rs`, `src/unlock.rs`.
+**Done (v1):** Lazy pipeline in [`epoch.rs`](src/epoch.rs): pool `unstake` / withdraw-from-pool chains, `claim_unlocked_near` → tranche / `withdrawable_balance` / `withdraw`, plus [`unlock.rs`](src/unlock.rs) and [`withdraw.rs`](src/withdraw.rs). Public batch `epoch_unstake` / `epoch_withdraw` entrypoints are **not** exposed; see [`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md).
 
 **Follow-ups:**
 
-- [x] **Actual vs requested withdraw** — Current implementation: on success, [`on_epoch_withdraw_transfer_done`](src/pool_callbacks.rs) credits the requested `withdrawn` amount into [`Validator::pending_to_withdraw`](src/validators.rs). The snapshot-based reconciliation `min(balance_after − balance_before, requested)` and a `balance_before_epoch_withdraw` field are **not** implemented in this version.
+- [x] **Actual vs requested withdraw** — Current implementation: on success, withdraw completion callbacks in [`epoch.rs`](src/epoch.rs) credit the requested amount into [`Validator::pending_to_withdraw`](src/validators.rs). The snapshot-based reconciliation `min(balance_after − balance_before, requested)` and a `balance_before_epoch_withdraw` field are **not** implemented in this version.
 
 ---
 
@@ -46,15 +46,15 @@ The contract is **NEAR-only**: no oracle, no USD catalog path, no `oracle-relay-
 
 ## P2 — Accounting & edge cases
 
-- [x] **`on_refresh_total_balance` note** — Module doc in `pool_callbacks.rs` (share vs pool balance; future share true-up).
-- [ ] **Reconcile refresh with shares** — **Design:** periodic operator refresh vs reward drift; **no automatic mint/rebase** in this version (documented in [`pool_callbacks.rs`](src/pool_callbacks.rs)).
+- [x] **`on_refresh_total_balance`** — Removed from `epoch.rs` (never scheduled; balance sync uses settlement callbacks).
+- [ ] **Reconcile refresh with shares** — **Design:** reward drift vs cached `total_staked_balance`; **no automatic mint/rebase** in this version. Balance views run inside the lazy settlement pipeline ([`epoch.rs`](src/epoch.rs), [`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md)).
 
 ---
 
 ## P3 — Testing & docs
 
 - [x] **Unit tests** — Pro-rata claim, share mint (`internal.rs`, `withdraw.rs`, `subscriptions.rs`).
-- [x] **README** — Operator cadence + status (see [README.md](README.md)).
+- [x] **README** — User-driven lazy cadence (see [README.md](README.md)).
 - [x] **Integration / sandbox tests** — [`integration-tests/tests/test_staking_contract.rs`](../integration-tests/tests/test_staking_contract.rs) deploy + `get_config` (requires built WASM: `make staking-contract`).
 
 ---

@@ -5,7 +5,7 @@ use crate::internal::{
 use crate::*;
 use common::U256;
 use near_sdk::json_types::{U64, U128};
-use near_sdk::{NearToken, assert_one_yocto, env, near, require};
+use near_sdk::{NearToken, PromiseOrValue, assert_one_yocto, env, near, require};
 
 /// Stripe-style **billing anchor day** (1–31). Not the real UTC calendar day-of-month; it is a stable
 /// fingerprint from block time until civil-calendar billing is implemented (see `subscriptions` / `docs/ACTION_ITEMS.md`).
@@ -27,7 +27,7 @@ impl Contract {
         price_id: Option<PriceId>,
         lock_duration_ns: U64,
         product_id: Option<ProductId>,
-    ) -> LockId {
+    ) -> PromiseOrValue<LockId> {
         let resolved = self.resolve_price_id_for_catalog_lock(price_id, product_id);
         self.lock_for_product_with_price_id(resolved, lock_duration_ns)
     }
@@ -36,7 +36,7 @@ impl Contract {
         &mut self,
         price_id: PriceId,
         lock_duration_ns: U64,
-    ) -> LockId {
+    ) -> PromiseOrValue<LockId> {
         self.assert_not_paused();
 
         let buyer = env::predecessor_account_id();
@@ -71,7 +71,38 @@ impl Contract {
         check_near_price_lock(&price, locked.as_yoctonear(), dur_u128)
             .unwrap_or_else(|e| env::panic_str(e));
 
-        self.finalize_product_lock(buyer, price, product, locked, dur_u128)
+        let order = OrderRef::ProductPurchase {
+            product_id: product.product_id.clone(),
+            price_id: price.price_id.clone(),
+        };
+        let validator = self.require_validator(&validator_id);
+        require!(
+            validator.tx_status == TransactionStatus::Idle,
+            "Validator pool is busy; wait for the in-flight pool call to finish"
+        );
+        // Production: [`Contract::promise_validator_per_epoch_settlement_then`] then mint (see `epoch.rs`).
+        // Host `tests/*.rs` use `near_sdk::testing_env!`, which does not run returned promise chains like
+        // the real runtime; the `#[cfg(test)]` path runs the same mint/persist logic synchronously without
+        // a pool round-trip (see `finalize_lock_common` → `apply_lock_mint_after_pool_balance_refresh`).
+        #[cfg(test)]
+        {
+            return PromiseOrValue::Value(
+                self.finalize_lock_common(buyer, price, product, locked, dur_u128, order),
+            );
+        }
+        #[cfg(not(test))]
+        {
+            return self
+                .promise_lock_refresh_then_finalize(
+                    buyer,
+                    locked,
+                    dur_u128,
+                    order,
+                    validator_id,
+                    None,
+                )
+                .into();
+        }
     }
 
     /// Lock NEAR for a **monthly recurring** catalog price (NEAR-denominated). One subscription row per
@@ -83,12 +114,12 @@ impl Contract {
         &mut self,
         price_id: Option<PriceId>,
         product_id: Option<ProductId>,
-    ) -> LockId {
+    ) -> PromiseOrValue<LockId> {
         let resolved = self.resolve_price_id_for_catalog_lock(price_id, product_id);
         self.lock_for_subscription_with_price_id(resolved)
     }
 
-    fn lock_for_subscription_with_price_id(&mut self, price_id: PriceId) -> LockId {
+    fn lock_for_subscription_with_price_id(&mut self, price_id: PriceId) -> PromiseOrValue<LockId> {
         self.assert_not_paused();
         let buyer = env::predecessor_account_id();
         self.ensure_min_storage_for_new_lock(&buyer);
@@ -116,7 +147,7 @@ impl Contract {
         let sub_key = (buyer.clone(), product_id.clone());
         let now = env::block_timestamp();
 
-        let (mut subscription, sub_id, is_new_index) = if let Some(sid_ref) =
+        let (subscription, sub_id, is_new_index) = if let Some(sid_ref) =
             self.subscription_by_account_product.get(&sub_key)
         {
             let sid = sid_ref.clone();
@@ -229,15 +260,43 @@ impl Contract {
             period_end_ns: subscription.end_ns,
         };
 
-        let lock_id = self.finalize_lock_common(buyer, price, product, locked, duration_ns, order);
-
-        subscription.last_lock_id = lock_id.clone();
-        self.subscriptions.insert(sub_id.clone(), subscription);
-        if is_new_index {
-            self.subscription_by_account_product.insert(sub_key, sub_id);
+        let validator = self.require_validator(&validator_id);
+        require!(
+            validator.tx_status == TransactionStatus::Idle,
+            "Validator pool is busy; wait for the in-flight pool call to finish"
+        );
+        // Same `#[cfg(test)]` rationale as `lock_for_product_with_price_id`: sync finish for host tests
+        // without executing the pool refresh promise chain.
+        #[cfg(test)]
+        {
+            let lock_id = self.finalize_lock_common(
+                buyer.clone(),
+                price,
+                product,
+                locked,
+                duration_ns,
+                order.clone(),
+            );
+            subscription.last_lock_id = lock_id.clone();
+            self.subscriptions.insert(sub_id.clone(), subscription);
+            if is_new_index {
+                self.subscription_by_account_product.insert(sub_key, sub_id);
+            }
+            return PromiseOrValue::Value(lock_id);
         }
-
-        lock_id
+        #[cfg(not(test))]
+        {
+            return self
+                .promise_lock_refresh_then_finalize(
+                    buyer,
+                    locked,
+                    duration_ns,
+                    order,
+                    validator_id,
+                    Some((subscription, sub_id, is_new_index)),
+                )
+                .into();
+        }
     }
 
     /// Stop renewing after the current billing period. The active lock remains until `lock.end_ns`; use
@@ -401,32 +460,42 @@ impl Contract {
         let validator_id = product.validator_id.clone();
         self.assert_validator_active_for_lock(&validator_id);
 
-        let mut v = self.require_validator(&validator_id);
+        let mut validator = self.require_validator(&validator_id);
 
-        let eff = effective_stake_for_share_exit(
-            v.total_staked_balance,
-            v.pending_to_stake,
-            v.pending_user_unstake_total,
+        let effective_stake_yocto = effective_stake_for_share_exit(
+            validator.total_staked_balance,
+            validator.pending_to_stake,
+            validator.pending_user_unstake_total,
         );
-        let ts = v.total_shares.0;
-        if ts > 0 {
+        let validator_total_shares = validator.total_shares.0;
+        if validator_total_shares > 0 {
             require!(
-                eff > 0,
+                effective_stake_yocto > 0,
                 "No effective stake for share minting; wait for balance refresh or settlement"
             );
         }
-        let add_shares = mint_shares(ts, eff, deposit.as_yoctonear());
+        let add_shares = mint_shares(
+            validator_total_shares,
+            effective_stake_yocto,
+            deposit.as_yoctonear(),
+        );
 
-        v.total_shares = U128(ts.saturating_add(add_shares));
-        v.pending_to_stake = v
+        validator.total_shares = U128(validator_total_shares.saturating_add(add_shares));
+        validator.pending_to_stake = validator
             .pending_to_stake
             .checked_add(deposit)
             .expect("pending_to_stake overflow when recording this lock");
 
-        let ukey = (buyer.clone(), validator_id.clone());
-        let prev_u = self.user_validator_shares.get(&ukey).copied().unwrap_or(0);
-        self.user_validator_shares
-            .insert(ukey, prev_u.saturating_add(add_shares));
+        let user_validator_shares_key = (buyer.clone(), validator_id.clone());
+        let user_shares_before_upgrade = self
+            .user_validator_shares
+            .get(&user_validator_shares_key)
+            .copied()
+            .unwrap_or(0);
+        self.user_validator_shares.insert(
+            user_validator_shares_key,
+            user_shares_before_upgrade.saturating_add(add_shares),
+        );
 
         lock.amount_near = lock
             .amount_near
@@ -443,7 +512,7 @@ impl Contract {
         sub.price_id = new_price_id.clone();
 
         let lock_id_out = lock.lock_id.clone();
-        self.validators.insert(validator_id.clone(), v);
+        self.validators.insert(validator_id.clone(), validator);
         self.locks.insert(lock_id_out.clone(), lock);
         self.subscriptions.insert(sid, sub);
 
@@ -619,14 +688,15 @@ impl Contract {
         }
 
         let validator_id = lock.validator_id.clone();
-        let v = self.require_validator(&validator_id);
-        let eff = effective_stake_for_share_exit(
-            v.total_staked_balance,
-            v.pending_to_stake,
-            v.pending_user_unstake_total,
+        let validator = self.require_validator(&validator_id);
+        let effective_stake_yocto = effective_stake_for_share_exit(
+            validator.total_staked_balance,
+            validator.pending_to_stake,
+            validator.pending_user_unstake_total,
         );
-        let ts = v.total_shares.0;
-        let lock_near_val = near_from_shares(lock.shares.0, eff, ts);
+        let validator_total_shares = validator.total_shares.0;
+        let lock_near_val =
+            near_from_shares(lock.shares.0, effective_stake_yocto, validator_total_shares);
         if lock_near_val == 0 {
             return;
         }
@@ -652,57 +722,70 @@ impl Contract {
         crate::events::log_subscription_downgrade_prorate(buyer, &sub.product_id, near_amt);
     }
 
-    pub(crate) fn finalize_product_lock(
+    /// Mint shares, persist lock and catalog usage, and optional subscription index — after a successful
+    /// pool `get_account_total_balance` refresh (production) or in unit tests without cross-contract calls.
+    pub(crate) fn apply_lock_mint_after_pool_balance_refresh(
         &mut self,
         buyer: AccountId,
-        price: Price,
-        product: Product,
-        locked: NearToken,
-        duration_ns: u128,
-    ) -> LockId {
-        let order = OrderRef::ProductPurchase {
-            product_id: product.product_id.clone(),
-            price_id: price.price_id.clone(),
-        };
-        self.finalize_lock_common(buyer, price, product, locked, duration_ns, order)
-    }
-
-    pub(crate) fn finalize_lock_common(
-        &mut self,
-        buyer: AccountId,
-        mut price: Price,
-        mut product: Product,
         locked: NearToken,
         duration_ns: u128,
         order: OrderRef,
+        validator_id: ValidatorId,
+        subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
     ) -> LockId {
-        let validator_id = product.validator_id.clone();
-        let mut v = self.require_validator(&validator_id);
-
-        let eff = effective_stake_for_share_exit(
-            v.total_staked_balance,
-            v.pending_to_stake,
-            v.pending_user_unstake_total,
+        let price_id = match &order {
+            OrderRef::ProductPurchase { price_id, .. }
+            | OrderRef::Subscription { price_id, .. } => price_id.clone(),
+        };
+        let (mut price, mut product) = self.load_active_catalog_price_product(&price_id);
+        require!(
+            product.validator_id == validator_id,
+            "Catalog validator for this price does not match the pool used for this lock"
         );
-        let ts = v.total_shares.0;
-        if ts > 0 {
+
+        let mut validator = self.require_validator(&validator_id);
+
+        if validator.total_shares.0 == 0 {
             require!(
-                eff > 0,
+                locked.as_yoctonear() >= crate::config::MIN_FIRST_VALIDATOR_DEPOSIT_NEAR_YOCTO,
+                "The first stake on this validator must be at least 1 NEAR (protocol minimum)"
+            );
+        }
+
+        let effective_stake_yocto = effective_stake_for_share_exit(
+            validator.total_staked_balance,
+            validator.pending_to_stake,
+            validator.pending_user_unstake_total,
+        );
+        let validator_total_shares = validator.total_shares.0;
+        if validator_total_shares > 0 {
+            require!(
+                effective_stake_yocto > 0,
                 "No effective stake for share minting; wait for balance refresh or settlement"
             );
         }
-        let new_shares = mint_shares(ts, eff, locked.as_yoctonear());
+        let new_shares = mint_shares(
+            validator_total_shares,
+            effective_stake_yocto,
+            locked.as_yoctonear(),
+        );
 
-        v.total_shares = U128(ts.saturating_add(new_shares));
-        v.pending_to_stake = v
+        validator.total_shares = U128(validator_total_shares.saturating_add(new_shares));
+        validator.pending_to_stake = validator
             .pending_to_stake
             .checked_add(locked)
             .expect("pending_to_stake overflow when recording this lock");
 
-        let key = (buyer.clone(), validator_id.clone());
-        let prev = self.user_validator_shares.get(&key).copied().unwrap_or(0);
-        self.user_validator_shares
-            .insert(key, prev.saturating_add(new_shares));
+        let user_validator_shares_key = (buyer.clone(), validator_id.clone());
+        let user_shares_before_lock = self
+            .user_validator_shares
+            .get(&user_validator_shares_key)
+            .copied()
+            .unwrap_or(0);
+        self.user_validator_shares.insert(
+            user_validator_shares_key,
+            user_shares_before_lock.saturating_add(new_shares),
+        );
 
         let lock_id = crate::ids::next_lock_id(&mut self.id_nonce);
         let lock = Lock {
@@ -714,7 +797,7 @@ impl Contract {
             start_ns: U64(env::block_timestamp()),
             end_ns: U64(env::block_timestamp()
                 .saturating_add(u64::try_from(duration_ns).unwrap_or(u64::MAX))),
-            order,
+            order: order.clone(),
             status: LockStatus::Active,
         };
         self.locks.insert(lock_id.clone(), lock);
@@ -723,14 +806,47 @@ impl Contract {
         product.usage_count = product.usage_count.saturating_add(1);
         self.prices.insert(price.price_id.clone(), price);
         self.products.insert(product.product_id.clone(), product);
-        self.validators.insert(validator_id, v);
+        self.validators.insert(validator_id, validator);
 
-        let cnt = self.user_lock_count.get(&buyer).copied().unwrap_or(0);
+        let user_lock_count_before = self.user_lock_count.get(&buyer).copied().unwrap_or(0);
         self.user_lock_count
-            .insert(buyer.clone(), cnt.saturating_add(1));
+            .insert(buyer.clone(), user_lock_count_before.saturating_add(1));
+
+        if let Some((mut subscription, sub_id, is_new_index)) = subscription_followup {
+            subscription.last_lock_id = lock_id.clone();
+            let sub_key = (
+                subscription.account_id.clone(),
+                subscription.product_id.clone(),
+            );
+            self.subscriptions.insert(sub_id.clone(), subscription);
+            if is_new_index {
+                self.subscription_by_account_product.insert(sub_key, sub_id);
+            }
+        }
 
         crate::events::log_lock(lock_id.as_str(), &buyer);
 
         lock_id
+    }
+
+    #[cfg(test)]
+    /// Used only by the `#[cfg(test)]` lock paths above: skips pool balance refresh and stake promises.
+    pub(crate) fn finalize_lock_common(
+        &mut self,
+        buyer: AccountId,
+        _price: Price,
+        product: Product,
+        locked: NearToken,
+        duration_ns: u128,
+        order: OrderRef,
+    ) -> LockId {
+        self.apply_lock_mint_after_pool_balance_refresh(
+            buyer,
+            locked,
+            duration_ns,
+            order,
+            product.validator_id.clone(),
+            None,
+        )
     }
 }

@@ -4,7 +4,7 @@ mod common;
 
 use common::{
     BUYER, POOL, acct, add_subscription_price, ctx, ctx_ts, deploy, register_buyer,
-    setup_catalog_near_subscription,
+    setup_catalog_near_subscription, unwrap_sync_lock_id,
 };
 use near_sdk::NearToken;
 use near_sdk::testing_env;
@@ -19,7 +19,7 @@ fn cancel_then_renew_after_period_opens_fresh_subscription() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let lock_first = c.lock_for_subscription(Some(price_id.clone()), None);
+    let lock_first = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_id.clone()), None));
 
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
     c.cancel_subscription(product_id.clone());
@@ -31,7 +31,7 @@ fn cancel_then_renew_after_period_opens_fresh_subscription() {
 
     let renew_ts = sub.end_ns.0.saturating_add(1);
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), renew_ts));
-    let lock_second = c.lock_for_subscription(Some(price_id.clone()), None);
+    let lock_second = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_id.clone()), None));
     assert_ne!(
         lock_first, lock_second,
         "renewal after cancelled period should mint a new lock"
@@ -54,7 +54,7 @@ fn resume_subscription_clears_cancel_before_period_end() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let _lock_first = c.lock_for_subscription(Some(price_id.clone()), None);
+    let _lock_first = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_id.clone()), None));
 
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
     c.cancel_subscription(product_id.clone());
@@ -87,7 +87,7 @@ fn upgrade_subscription_updates_tier_and_lock_amount() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let lock_low = c.lock_for_subscription(Some(price_low.clone()), None);
+    let lock_low = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_low.clone()), None));
     let lock_before = c.get_lock(lock_low.clone()).expect("lock");
     let amt_before = lock_before.amount_near.as_yoctonear();
 
@@ -112,7 +112,7 @@ fn downgrade_applies_at_next_renewal() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let _ = c.lock_for_subscription(Some(price_high.clone()), None);
+    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_high.clone()), None));
 
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
     c.schedule_downgrade_subscription(price_low.clone());
@@ -124,7 +124,7 @@ fn downgrade_applies_at_next_renewal() {
 
     let renew_ts = sub.end_ns.0.saturating_add(1);
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), renew_ts));
-    let _ = c.lock_for_subscription(Some(price_low.clone()), None);
+    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_low.clone()), None));
 
     let sub_after = c
         .get_subscription_for_product(acct(BUYER), product_id)

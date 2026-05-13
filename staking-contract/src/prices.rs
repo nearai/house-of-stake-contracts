@@ -105,12 +105,12 @@ impl Contract {
     pub fn edit_price(&mut self, price_id: PriceId, name: String, description: String) -> Promise {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
-        let pr = self.prices.get(&price_id).cloned();
-        require!(pr.is_some(), "Price not found in the catalog");
-        let pr = pr.unwrap();
-        let product = self.products.get(&pr.product_id).cloned();
-        require!(product.is_some(), "Product not found in the catalog");
-        let product = product.unwrap();
+        let maybe_price = self.prices.get(&price_id).cloned();
+        require!(maybe_price.is_some(), "Price not found in the catalog");
+        let price = maybe_price.unwrap();
+        let maybe_product = self.products.get(&price.product_id).cloned();
+        require!(maybe_product.is_some(), "Product not found in the catalog");
+        let product = maybe_product.unwrap();
         self.assert_validator_allowlisted(&product.validator_id);
         let expected_caller = env::predecessor_account_id();
         let validator_id = product.validator_id.clone();
@@ -128,12 +128,12 @@ impl Contract {
     pub fn archive_price(&mut self, price_id: PriceId) -> Promise {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
-        let pr = self.prices.get(&price_id).cloned();
-        require!(pr.is_some(), "Price not found in the catalog");
-        let pr = pr.unwrap();
-        let product = self.products.get(&pr.product_id).cloned();
-        require!(product.is_some(), "Product not found in the catalog");
-        let product = product.unwrap();
+        let maybe_price = self.prices.get(&price_id).cloned();
+        require!(maybe_price.is_some(), "Price not found in the catalog");
+        let price = maybe_price.unwrap();
+        let maybe_product = self.products.get(&price.product_id).cloned();
+        require!(maybe_product.is_some(), "Product not found in the catalog");
+        let product = maybe_product.unwrap();
         self.assert_validator_allowlisted(&product.validator_id);
         let expected_caller = env::predecessor_account_id();
         let validator_id = product.validator_id.clone();
@@ -151,12 +151,12 @@ impl Contract {
     pub fn unarchive_price(&mut self, price_id: PriceId) -> Promise {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
-        let pr = self.prices.get(&price_id).cloned();
-        require!(pr.is_some(), "Price not found in the catalog");
-        let pr = pr.unwrap();
-        let product = self.products.get(&pr.product_id).cloned();
-        require!(product.is_some(), "Product not found in the catalog");
-        let product = product.unwrap();
+        let maybe_price = self.prices.get(&price_id).cloned();
+        require!(maybe_price.is_some(), "Price not found in the catalog");
+        let price = maybe_price.unwrap();
+        let maybe_product = self.products.get(&price.product_id).cloned();
+        require!(maybe_product.is_some(), "Product not found in the catalog");
+        let product = maybe_product.unwrap();
         self.assert_validator_allowlisted(&product.validator_id);
         let expected_caller = env::predecessor_account_id();
         let validator_id = product.validator_id.clone();
@@ -174,12 +174,12 @@ impl Contract {
     pub fn delete_price(&mut self, price_id: PriceId) -> Promise {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
-        let pr = self.prices.get(&price_id).cloned();
-        require!(pr.is_some(), "Price not found in the catalog");
-        let pr = pr.unwrap();
-        let product = self.products.get(&pr.product_id).cloned();
-        require!(product.is_some(), "Product not found in the catalog");
-        let product = product.unwrap();
+        let maybe_price = self.prices.get(&price_id).cloned();
+        require!(maybe_price.is_some(), "Price not found in the catalog");
+        let price = maybe_price.unwrap();
+        let maybe_product = self.products.get(&price.product_id).cloned();
+        require!(maybe_product.is_some(), "Product not found in the catalog");
+        let product = maybe_product.unwrap();
         self.assert_validator_allowlisted(&product.validator_id);
         let expected_caller = env::predecessor_account_id();
         let validator_id = product.validator_id.clone();
@@ -262,14 +262,14 @@ impl Contract {
             pool_owner == expected_caller,
             "Only the validator owner can call this method"
         );
-        let mut pr = self
+        let mut price = self
             .prices
             .get(&price_id)
             .cloned()
             .expect("Price not found in the catalog");
-        pr.name = name;
-        pr.description = description;
-        self.prices.insert(price_id, pr);
+        price.name = name;
+        price.description = description;
+        self.prices.insert(price_id, price);
     }
 
     #[private]
@@ -288,14 +288,14 @@ impl Contract {
             pool_owner == expected_caller,
             "Only the validator owner can call this method"
         );
-        let mut pr = self
+        let mut price = self
             .prices
             .get(&price_id)
             .cloned()
             .expect("Price not found in the catalog");
-        let product_id = pr.product_id.clone();
-        pr.status = CatalogStatus::Archived;
-        self.prices.insert(price_id.clone(), pr);
+        let product_id = price.product_id.clone();
+        price.status = CatalogStatus::Archived;
+        self.prices.insert(price_id.clone(), price);
         self.clear_product_default_price_field_if_matches(&product_id, &price_id);
     }
 
@@ -315,25 +315,25 @@ impl Contract {
             pool_owner == expected_caller,
             "Only the validator owner can call this method"
         );
-        let pr = self
+        let price = self
             .prices
             .get(&price_id)
             .cloned()
             .expect("Price not found in the catalog");
         require!(
-            pr.usage_count == 0,
+            price.usage_count == 0,
             "Cannot delete this price while it is in use"
         );
-        let pid = pr.product_id.clone();
+        let product_id = price.product_id.clone();
         let mut product = self
             .products
-            .get(&pr.product_id)
+            .get(&price.product_id)
             .cloned()
             .expect("Product not found in the catalog");
         product.price_ids.retain(|x| x != &price_id);
-        self.products.insert(pr.product_id.clone(), product);
+        self.products.insert(price.product_id.clone(), product);
         self.prices.remove(&price_id);
-        self.clear_product_default_price_field_if_matches(&pid, &price_id);
+        self.clear_product_default_price_field_if_matches(&product_id, &price_id);
     }
 
     #[private]
@@ -352,17 +352,17 @@ impl Contract {
             pool_owner == expected_caller,
             "Only the validator owner can call this method"
         );
-        let mut pr = self
+        let mut price = self
             .prices
             .get(&price_id)
             .cloned()
             .expect("Price not found in the catalog");
         require!(
-            pr.status == CatalogStatus::Archived,
+            price.status == CatalogStatus::Archived,
             "Price is not archived"
         );
-        pr.status = CatalogStatus::Active;
-        self.prices.insert(price_id, pr);
+        price.status = CatalogStatus::Active;
+        self.prices.insert(price_id, price);
     }
 
     pub fn get_price(&self, price_id: PriceId) -> Option<Price> {

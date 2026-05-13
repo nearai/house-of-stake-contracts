@@ -21,11 +21,12 @@
 #   STAKING_ACCOUNT_ID=…          # default: house-stake.<parent>
 #   OWNER_ACCOUNT_ID=…            # default: stake-owner.<parent>  (staking contract owner; signs add_validator)
 #   VALIDATOR_OWNER_ACCOUNT_ID=…  # default: stake-validator-owner.<parent> (mock pool get_owner_id; signs create_product)
-#   OPERATOR_ACCOUNT_ID=…         # default: stake-operator.<parent> (epoch_* unless USE_ANY_OPERATOR=1)
-#   USE_ANY_OPERATOR=1            # if set, operators=[] so any account may call epoch_* (testnet only)
 #   STAKING_WASM / MOCK_POOL_WASM # override paths to .wasm files
 #   SKIP_ACCOUNT_CREATE=1         # skip subaccount creation (reuse existing accounts)
-#   FUND_OWNER_NEAR / FUND_VALIDATOR_OWNER_NEAR / FUND_OPERATOR_NEAR / FUND_STAKING_NEAR / FUND_POOL_NEAR
+#   FUND_OWNER_NEAR / FUND_VALIDATOR_OWNER_NEAR / FUND_STAKING_NEAR / FUND_POOL_NEAR
+#
+# Pool work on the staking contract is user-driven (lock / unlock / claim_unlocked_near / epoch_settle);
+# there is no operators list in Config — see staking-contract/docs/LAZY_EPOCH_PIPELINE.md.
 #
 set -euo pipefail
 
@@ -55,14 +56,12 @@ fi
 : "${STAKING_ACCOUNT_ID:=house-stake.$ROOT_ACCOUNT_ID}"
 : "${OWNER_ACCOUNT_ID:=stake-owner.$ROOT_ACCOUNT_ID}"
 : "${VALIDATOR_OWNER_ACCOUNT_ID:=stake-validator-owner.$ROOT_ACCOUNT_ID}"
-: "${OPERATOR_ACCOUNT_ID:=stake-operator.$ROOT_ACCOUNT_ID}"
 
 : "${STAKING_WASM:=$REPO_ROOT/res/local/staking_contract.wasm}"
 : "${MOCK_POOL_WASM:=$REPO_ROOT/res/local/mock_staking_pool_contract.wasm}"
 
 : "${FUND_OWNER_NEAR:=2 NEAR}"
 : "${FUND_VALIDATOR_OWNER_NEAR:=1 NEAR}"
-: "${FUND_OPERATOR_NEAR:=0.5 NEAR}"
 : "${FUND_STAKING_NEAR:=6 NEAR}"
 : "${FUND_POOL_NEAR:=3 NEAR}"
 
@@ -89,7 +88,6 @@ echo "Parent (pays / signs account creation): $ROOT_ACCOUNT_ID"
 echo "Staking contract account:               $STAKING_ACCOUNT_ID"
 echo "Staking owner (allowlist / governance): $OWNER_ACCOUNT_ID"
 echo "Validator owner (pool get_owner_id):  $VALIDATOR_OWNER_ACCOUNT_ID"
-echo "Operator (epoch calls):               $OPERATOR_ACCOUNT_ID"
 echo "Mock pool accounts:                    ${POOL_IDS[*]}"
 echo "Network:                              $CHAIN_ID"
 echo
@@ -104,11 +102,6 @@ if [[ "${SKIP_ACCOUNT_CREATE:-}" != "1" ]]; then
 
   echo "Creating $VALIDATOR_OWNER_ACCOUNT_ID ($FUND_VALIDATOR_OWNER_NEAR)"
   near --quiet account create-account fund-myself "$VALIDATOR_OWNER_ACCOUNT_ID" "$FUND_VALIDATOR_OWNER_NEAR" \
-    autogenerate-new-keypair save-to-keychain sign-as "$ROOT_ACCOUNT_ID" \
-    network-config "$CHAIN_ID" sign-with-keychain send
-
-  echo "Creating $OPERATOR_ACCOUNT_ID ($FUND_OPERATOR_NEAR)"
-  near --quiet account create-account fund-myself "$OPERATOR_ACCOUNT_ID" "$FUND_OPERATOR_NEAR" \
     autogenerate-new-keypair save-to-keychain sign-as "$ROOT_ACCOUNT_ID" \
     network-config "$CHAIN_ID" sign-with-keychain send
 
@@ -147,16 +140,9 @@ echo "== Deploying staking-contract (init: new { config }) =="
 : "${PER_LOCK_STORAGE_STAKE_YOCTO:=0}"
 : "${MIN_LOCK_AMOUNT_YOCTO:=1000000000000000000000}"
 
-if [[ "${USE_ANY_OPERATOR:-}" == "1" ]]; then
-  operators_json='[]'
-else
-  operators_json=$(jq -n --arg op "$OPERATOR_ACCOUNT_ID" '[$op]')
-fi
-
 staking_init=$(
   jq -n \
     --arg owner "$OWNER_ACCOUNT_ID" \
-    --argjson operators "$operators_json" \
     --arg min_lock_d "$MIN_LOCK_DURATION_NS" \
     --arg max_lock_d "$MAX_LOCK_DURATION_NS" \
     --argjson epoch_unstake "$EPOCH_UNSTAKE_SETTLE_EPOCHS" \
@@ -168,7 +154,6 @@ staking_init=$(
         owner_account_id: $owner,
         proposed_new_owner_account_id: null,
         guardians: [],
-        operators: $operators,
         min_lock_duration_ns: $min_lock_d,
         max_lock_duration_ns: $max_lock_d,
         epoch_unstake_settle_epochs: $epoch_unstake,
@@ -212,7 +197,6 @@ echo "export ROOT_ACCOUNT_ID=$ROOT_ACCOUNT_ID"
 echo "export STAKING_ACCOUNT_ID=$STAKING_ACCOUNT_ID"
 echo "export OWNER_ACCOUNT_ID=$OWNER_ACCOUNT_ID"
 echo "export VALIDATOR_OWNER_ACCOUNT_ID=$VALIDATOR_OWNER_ACCOUNT_ID"
-echo "export OPERATOR_ACCOUNT_ID=$OPERATOR_ACCOUNT_ID"
 echo "export MOCK_POOL_IDS=\"${POOL_IDS[*]}\""
 i=0
 for pid in "${POOL_IDS[@]}"; do

@@ -5,12 +5,12 @@
 use near_sdk::json_types::{U64, U128};
 use near_sdk::test_utils::VMContextBuilder;
 use near_sdk::{
-    AccountId, NearToken, PromiseResult, RuntimeFeesConfig, VMContext, serde_json, test_vm_config,
-    testing_env,
+    AccountId, NearToken, PromiseOrValue, PromiseResult, RuntimeFeesConfig, VMContext, serde_json,
+    test_vm_config, testing_env,
 };
 use staking_contract::internal::LOCK_FACTOR_DENOM;
 use staking_contract::types::{BillingPeriod, PriceId, PriceType, ProductId};
-use staking_contract::{Config, Contract};
+use staking_contract::{Config, Contract, LockId};
 use std::collections::HashMap;
 use std::str::FromStr;
 
@@ -26,12 +26,23 @@ pub const VALIDATOR_OWNER_ACCOUNT: &str = "vowner.near";
 pub const BUYER: &str = "buyer.near";
 pub const NEW_OWNER: &str = "newowner.near";
 pub const GUARDIAN: &str = "guardian.near";
-/// Operator account used when `Config::operators` is non-empty (epoch ACL tests).
+/// Account used in removed operator ACL tests; kept for catalog owner simulations.
 pub const OPERATOR: &str = "operator.near";
 
 #[inline]
 pub fn one_yocto() -> NearToken {
     NearToken::from_yoctonear(1)
+}
+
+/// `lock_for_product` / `lock_for_subscription` return [`PromiseOrValue`] on the WASM ABI; in-crate
+/// unit tests use the `#[cfg(test)]` synchronous path and always get [`PromiseOrValue::Value`].
+pub fn unwrap_sync_lock_id(r: PromiseOrValue<LockId>) -> LockId {
+    match r {
+        PromiseOrValue::Value(id) => id,
+        PromiseOrValue::Promise(_) => {
+            panic!("unit tests expect synchronous lock (PromiseOrValue::Value)")
+        }
+    }
 }
 
 /// Baseline config; override fields in tests as needed.
@@ -40,7 +51,6 @@ pub fn base_config() -> Config {
         owner_account_id: acct(OWNER),
         proposed_new_owner_account_id: None,
         guardians: vec![],
-        operators: vec![],
         min_lock_duration_ns: U64(1),
         max_lock_duration_ns: U64(u64::MAX / 8),
         epoch_unstake_settle_epochs: 4,

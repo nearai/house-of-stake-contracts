@@ -28,7 +28,6 @@ fn staking_new_args(owner: &near_workspaces::AccountId) -> serde_json::Value {
             "owner_account_id": owner,
             "proposed_new_owner_account_id": null,
             "guardians": [],
-            "operators": [],
             "min_lock_duration_ns": "1",
             "max_lock_duration_ns": "10000000000000000000",
             "epoch_unstake_settle_epochs": 4,

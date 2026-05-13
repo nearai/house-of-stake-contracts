@@ -32,13 +32,6 @@ impl Contract {
     }
 
     #[payable]
-    pub fn set_operators(&mut self, operators: Vec<AccountId>) {
-        assert_one_yocto();
-        self.assert_owner();
-        self.config.operators = operators;
-    }
-
-    #[payable]
     pub fn set_per_lock_storage_stake(&mut self, per_lock_storage_stake: NearToken) {
         assert_one_yocto();
         self.assert_owner();
@@ -84,22 +77,10 @@ impl Contract {
     }
 
     pub fn assert_guardian(&self) {
-        let p = env::predecessor_account_id();
+        let caller_id = env::predecessor_account_id();
         require!(
-            self.config.guardians.contains(&p) || p == self.config.owner_account_id,
+            self.config.guardians.contains(&caller_id) || caller_id == self.config.owner_account_id,
             "Only a guardian or the contract owner can call this method"
-        );
-    }
-
-    pub fn assert_operator(&self) {
-        if self.config.operators.is_empty() {
-            return;
-        }
-        require!(
-            self.config
-                .operators
-                .contains(&env::predecessor_account_id()),
-            "Only an operator can call this method"
         );
     }
 }

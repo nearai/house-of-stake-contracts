@@ -1,5 +1,6 @@
 //! `EVENT_JSON` logs for indexers (NEP-297-style payload; standard `stake.dao`).
 
+use crate::ValidatorId;
 use near_sdk::AccountId;
 use near_sdk::log;
 
@@ -13,16 +14,16 @@ fn emit(event: &str, data: serde_json::Value) {
     log!("EVENT_JSON:{}", payload);
 }
 
-pub fn log_validator_added(pool: &AccountId) {
+pub fn log_validator_added(validator_id: &ValidatorId) {
     emit(
         "validator_add",
         serde_json::json!({
-            "pool": pool.to_string(),
+            "validator_id": validator_id.to_string(),
         }),
     );
 }
 
-pub fn log_product_created(product_id: &str, validator_id: &AccountId) {
+pub fn log_product_created(product_id: &str, validator_id: &ValidatorId) {
     emit(
         "product_create",
         serde_json::json!({
@@ -93,18 +94,18 @@ pub fn log_lock(lock_id: &str, account: &AccountId) {
     );
 }
 
-pub fn log_unlock(lock_id: &str, account: &AccountId, validator: &AccountId) {
+pub fn log_unlock(lock_id: &str, account: &AccountId, validator_id: &ValidatorId) {
     emit(
         "unlock",
         serde_json::json!({
             "lock_id": lock_id,
             "account_id": account.to_string(),
-            "validator_id": validator.to_string(),
+            "validator_id": validator_id.to_string(),
         }),
     );
 }
 
-pub fn log_claim_unlocked(account: &AccountId, validator_id: &AccountId) {
+pub fn log_claim_unlocked(account: &AccountId, validator_id: &ValidatorId) {
     emit(
         "claim_unlocked",
         serde_json::json!({
@@ -124,7 +125,7 @@ pub fn log_withdraw(account: &AccountId, amount_yocto: u128) {
     );
 }
 
-pub fn log_epoch_operation(epoch_action: &str, validator_id: &AccountId) {
+pub fn log_epoch_operation(epoch_action: &str, validator_id: &ValidatorId) {
     emit(
         epoch_action,
         serde_json::json!({
@@ -134,7 +135,7 @@ pub fn log_epoch_operation(epoch_action: &str, validator_id: &AccountId) {
     );
 }
 
-pub fn log_pool_withdraw_in(amount_yocto: u128, validator_id: &AccountId) {
+pub fn log_pool_withdraw_in(amount_yocto: u128, validator_id: &ValidatorId) {
     emit(
         "pool_withdraw_in",
         serde_json::json!({

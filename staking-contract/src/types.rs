@@ -9,6 +9,9 @@ pub type PriceId = String;
 pub type SubscriptionId = String;
 pub type LockId = String;
 
+/// Staking pool contract account id (allowlist key, catalog scope, lock pool).
+pub type ValidatorId = AccountId;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[near(serializers = [borsh, json])]
 pub enum PriceType {
@@ -91,7 +94,7 @@ pub enum OrderRef {
 #[near(serializers = [borsh, json])]
 pub struct Product {
     pub product_id: ProductId,
-    pub validator_id: AccountId,
+    pub validator_id: ValidatorId,
     pub name: String,
     pub description: String,
     pub status: CatalogStatus,
@@ -143,11 +146,34 @@ pub struct Subscription {
 pub struct Lock {
     pub lock_id: LockId,
     pub account_id: AccountId,
-    pub validator_id: AccountId,
+    pub validator_id: ValidatorId,
     pub amount_near: NearToken,
     pub shares: U128,
     pub start_ns: U64,
     pub end_ns: U64,
     pub order: OrderRef,
     pub status: LockStatus,
+}
+
+/// Payload chained after [`Contract::promise_validator_per_epoch_settlement_then`] for catalog lock vs
+/// unlock: either the full pre-user pipeline ran (balance sync → withdraw-if-ready →
+/// [`crate::epoch::Contract::try_epoch_settle`]), or the pool had **already** settled this NEAR epoch and
+/// the contract skipped that pipeline and jumped straight here (cached **`total_staked_balance`**).
+#[derive(Clone)]
+#[near(serializers = [borsh, json])]
+pub enum PerEpochContinue {
+    CatalogLockMint {
+        validator_id: ValidatorId,
+        buyer: AccountId,
+        locked: NearToken,
+        duration_ns: u128,
+        order: OrderRef,
+        subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
+    },
+    UnlockQueueUnstake {
+        validator_id: ValidatorId,
+        lock_id: LockId,
+        account_id: AccountId,
+        shares_remove: u128,
+    },
 }

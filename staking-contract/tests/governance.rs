@@ -2,10 +2,7 @@
 
 mod common;
 
-use common::{
-    BUYER, GUARDIAN, NEW_OWNER, OPERATOR, OWNER, POOL, acct, ctx, deploy, deploy_with_config,
-    one_yocto,
-};
+use common::{BUYER, GUARDIAN, NEW_OWNER, OWNER, acct, ctx, deploy, one_yocto};
 use near_sdk::json_types::U64;
 use near_sdk::{NearToken, testing_env};
 
@@ -110,32 +107,4 @@ fn random_account_cannot_pause() {
 
     testing_env!(ctx(acct(BUYER), one_yocto()));
     c.pause();
-}
-
-#[test]
-#[should_panic(expected = "Only an operator can call this method")]
-fn non_operator_cannot_epoch_stake_when_operators_configured() {
-    let mut cfg = common::base_config();
-    cfg.operators = vec![acct(OPERATOR)];
-    let mut c = deploy_with_config(cfg);
-    common::add_validator_allowlisted(&mut c);
-
-    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
-    let _ = c.epoch_stake(acct(POOL));
-}
-
-#[test]
-fn operator_can_call_epoch_stake_when_configured() {
-    let mut cfg = common::base_config();
-    cfg.operators = vec![acct(OPERATOR)];
-    let mut c = deploy_with_config(cfg);
-    let (_pid, price_id) = common::setup_catalog_near_oneoff(&mut c);
-    common::register_buyer(&mut c);
-
-    let dur = c.config.min_lock_duration_ns.0.saturating_add(10_000);
-    testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    let _ = c.lock_for_product(Some(price_id), U64(dur), None);
-
-    testing_env!(ctx(acct(OPERATOR), NearToken::from_yoctonear(1)));
-    let _ = c.epoch_stake(acct(POOL));
 }

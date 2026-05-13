@@ -1,17 +1,20 @@
 use crate::internal::{effective_stake_for_share_exit, near_from_shares};
 use crate::*;
 use near_sdk::json_types::U128;
-use near_sdk::{NearToken, env, near, require};
+use near_sdk::{NearToken, Promise, env, near, require};
 
 #[near]
 impl Contract {
-    /// User-driven unlock: only the lock owner, after `lock.end_ns`; shares convert to NEAR at unlock time.
+    /// User-driven unlock: only the lock owner, after `lock.end_ns`. Runs the same per-epoch validator
+    /// pipeline as catalog **`lock`** (balance sync / withdraw / settle when due, or fast path when this
+    /// pool already settled the current NEAR epoch), then sets the pool row **`Busy`**, queues your unstake,
+    /// and continues the withdraw-first / **`unstake`** pipeline.
     #[payable]
-    pub fn unlock(&mut self, lock_id: LockId) {
+    pub fn unlock(&mut self, lock_id: LockId) -> Promise {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
 
-        let mut lock = self
+        let lock = self
             .locks
             .get(&lock_id)
             .cloned()
@@ -27,14 +30,21 @@ impl Contract {
         );
 
         let validator_id = lock.validator_id.clone();
-        let account_log = lock.account_id.clone();
-        let validator_log = lock.validator_id.clone();
-        let sh = lock.shares.0;
-        self.queue_shares_unstake(lock.account_id.clone(), validator_id, sh);
-        lock.status = LockStatus::UnlockRequested;
-        self.locks.insert(lock_id.clone(), lock);
+        let validator = self.require_validator(&validator_id);
+        require!(
+            validator.tx_status == TransactionStatus::Idle,
+            "Validator pool is busy; wait for the in-flight pool call to finish"
+        );
 
-        crate::events::log_unlock(lock_id.as_str(), &account_log, &validator_log);
+        self.promise_validator_per_epoch_settlement_then(
+            validator_id.clone(),
+            PerEpochContinue::UnlockQueueUnstake {
+                validator_id,
+                lock_id,
+                account_id: lock.account_id.clone(),
+                shares_remove: lock.shares.0,
+            },
+        )
     }
 }
 
@@ -49,74 +59,88 @@ impl Contract {
     pub(crate) fn queue_shares_unstake(
         &mut self,
         account_id: AccountId,
-        validator_id: AccountId,
+        validator_id: ValidatorId,
         shares_remove: u128,
     ) -> u128 {
         require!(
             shares_remove > 0,
             "Cannot queue unstake: share amount must be greater than zero"
         );
-        let mut v = self.require_validator(&validator_id);
+        let mut validator = self.require_validator(&validator_id);
 
-        let ts = v.total_shares.0;
+        let validator_total_shares = validator.total_shares.0;
         require!(
-            ts > 0 && ts >= shares_remove,
+            validator_total_shares > 0 && validator_total_shares >= shares_remove,
             "Cannot queue unstake: validator pool has no shares or amount exceeds pool total"
         );
 
-        let eff = effective_stake_for_share_exit(
-            v.total_staked_balance,
-            v.pending_to_stake,
-            v.pending_user_unstake_total,
+        let effective_stake_yocto = effective_stake_for_share_exit(
+            validator.total_staked_balance,
+            validator.pending_to_stake,
+            validator.pending_user_unstake_total,
         );
         require!(
-            eff > 0,
-            "Cannot price this exit: no effective stake left for remaining shares. Ask the operator to run refresh_validator_balance, or wait for stake or withdraw steps to finish"
+            effective_stake_yocto > 0,
+            "Cannot price this exit: no effective stake left for remaining shares; wait for stake or withdraw steps to finish, then retry"
         );
 
-        let near_amt = near_from_shares(shares_remove, eff, ts);
+        let near_amt =
+            near_from_shares(shares_remove, effective_stake_yocto, validator_total_shares);
         let near_token = NearToken::from_yoctonear(near_amt);
 
-        v.total_shares = U128(ts - shares_remove);
-        v.pending_to_unstake = v
+        validator.total_shares = U128(validator_total_shares - shares_remove);
+        validator.pending_to_unstake = validator
             .pending_to_unstake
             .checked_add(near_token)
             .expect("pending_to_unstake overflow");
-        v.pending_user_unstake_total = v
+        validator.pending_user_unstake_total = validator
             .pending_user_unstake_total
             .checked_add(near_token)
             .expect("pending_user_unstake_total overflow");
 
-        let ukey = (account_id.clone(), validator_id.clone());
-        let us = self.user_validator_shares.get(&ukey).copied().unwrap_or(0);
+        let account_validator_shares_key = (account_id.clone(), validator_id.clone());
+        let user_shares_on_validator = self
+            .user_validator_shares
+            .get(&account_validator_shares_key)
+            .copied()
+            .unwrap_or(0);
         require!(
-            us >= shares_remove,
+            user_shares_on_validator >= shares_remove,
             "Cannot queue unstake: account does not hold enough shares on this validator"
         );
-        if us == shares_remove {
-            self.user_validator_shares.remove(&ukey);
-        } else {
+        if user_shares_on_validator == shares_remove {
             self.user_validator_shares
-                .insert(ukey.clone(), us - shares_remove);
+                .remove(&account_validator_shares_key);
+        } else {
+            self.user_validator_shares.insert(
+                account_validator_shares_key.clone(),
+                user_shares_on_validator - shares_remove,
+            );
         }
 
-        let min_b = v.withdraw_batches.len() as u32;
-        let mut tranches = self
+        let next_withdraw_batch_index = validator.withdraw_batches.len() as u32;
+        let mut pending_unstake_tranches = self
             .user_pending_unstake
-            .get(&ukey)
+            .get(&account_validator_shares_key)
             .cloned()
             .unwrap_or_default();
-        tranches.push(PendingUnstakeTranche {
+        pending_unstake_tranches.push(PendingUnstakeTranche {
             amount: near_token,
-            min_withdraw_batch_index: min_b,
+            min_withdraw_batch_index: next_withdraw_batch_index,
         });
-        self.user_pending_unstake.insert(ukey, tranches);
+        self.user_pending_unstake
+            .insert(account_validator_shares_key, pending_unstake_tranches);
 
-        if !v.accounts_with_pending_unstake.contains(&account_id) {
-            v.accounts_with_pending_unstake.push(account_id.clone());
+        if !validator
+            .accounts_with_pending_unstake
+            .contains(&account_id)
+        {
+            validator
+                .accounts_with_pending_unstake
+                .push(account_id.clone());
         }
 
-        self.validators.insert(validator_id, v);
+        self.validators.insert(validator_id, validator);
         near_amt
     }
 }

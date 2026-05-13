@@ -30,14 +30,14 @@ pub fn withdraw_batch_credit_yocto(
     }
     let credit_raw = (U256::from(batch_remaining_yocto) * U256::from(user_eligible_yocto))
         / U256::from(liability_at_fund_yocto);
-    let mut c_y = credit_raw
+    let mut credit_yocto = credit_raw
         .as_u128()
         .min(user_eligible_yocto)
         .min(batch_remaining_yocto);
-    if c_y == 0 {
-        c_y = 1.min(user_eligible_yocto).min(batch_remaining_yocto);
+    if credit_yocto == 0 {
+        credit_yocto = 1.min(user_eligible_yocto).min(batch_remaining_yocto);
     }
-    c_y
+    credit_yocto
 }
 
 pub fn effective_stake_yocto(total_staked_balance: NearToken, pending_to_stake: NearToken) -> u128 {
@@ -103,14 +103,14 @@ pub fn min_locked_yocto_for_duration(price: &Price, duration_ns: u128) -> u128 {
         .saturating_mul(price.lock_factor_near_months.0)
         / LOCK_FACTOR_DENOM;
     let rhs = U256::from(required_nm) * U256::from(AVG_MONTH_NS);
-    let d = U256::from(duration_ns);
-    let q = rhs / d;
-    let r = rhs % d;
-    let mut out = q.as_u128();
-    if !r.is_zero() {
-        out = out.saturating_add(1);
+    let duration_u256 = U256::from(duration_ns);
+    let quotient = rhs / duration_u256;
+    let remainder = rhs % duration_u256;
+    let mut min_locked_yocto = quotient.as_u128();
+    if !remainder.is_zero() {
+        min_locked_yocto = min_locked_yocto.saturating_add(1);
     }
-    out
+    min_locked_yocto
 }
 
 pub fn check_near_price_lock(

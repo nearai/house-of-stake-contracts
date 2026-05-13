@@ -42,18 +42,13 @@ pub fn mock_pool_wasm_bytes() -> Result<Vec<u8>, std::io::Error> {
     ])
 }
 
-/// `operators`: empty means any account may call `epoch_*`. Non-empty restricts to listed accounts.
-/// `epoch_unstake_settle_epochs: 1` shortens waits.
-pub fn staking_new_args_e2e(
-    owner: &near_workspaces::AccountId,
-    operators: &[near_workspaces::AccountId],
-) -> serde_json::Value {
+/// Args for `staking-contract` `new` in sandbox (no public `epoch_*`; pool work follows user actions).
+pub fn staking_new_args_e2e(owner: &near_workspaces::AccountId) -> serde_json::Value {
     json!({
         "config": {
             "owner_account_id": owner,
             "proposed_new_owner_account_id": null,
             "guardians": [],
-            "operators": operators,
             "min_lock_duration_ns": "1",
             "max_lock_duration_ns": "10000000000000000000",
             "epoch_unstake_settle_epochs": 1,
@@ -124,14 +119,13 @@ pub async fn deploy_staking_and_mock_pool(
     validator_owner: &near_workspaces::AccountId,
     staking_wasm: &[u8],
     pool_wasm: &[u8],
-    operators: &[near_workspaces::AccountId],
 ) -> Result<(), Box<dyn std::error::Error>> {
     staking
         .batch(staking.id())
         .deploy(staking_wasm)
         .call(
             Function::new("new")
-                .args_json(staking_new_args_e2e(staking.id(), operators))
+                .args_json(staking_new_args_e2e(staking.id()))
                 .gas(WsGas::from_tgas(50)),
         )
         .transact()

@@ -4,7 +4,7 @@ mod common;
 
 use common::{
     BUYER, OWNER, acct, ctx, deploy, register_buyer, setup_catalog_near_oneoff,
-    setup_catalog_near_subscription,
+    setup_catalog_near_subscription, unwrap_sync_lock_id,
 };
 use near_sdk::json_types::U64;
 use near_sdk::{NearToken, testing_env};
@@ -18,7 +18,7 @@ fn lock_for_product_happy_path_records_lock_and_usage() {
 
     let dur = c.config.min_lock_duration_ns.0.saturating_add(10_000);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    let lock_id = c.lock_for_product(Some(price_id.clone()), U64(dur), None);
+    let lock_id = unwrap_sync_lock_id(c.lock_for_product(Some(price_id.clone()), U64(dur), None));
 
     let lock = c.get_lock(lock_id.clone()).expect("lock");
     assert_eq!(lock.account_id, acct(BUYER));
@@ -66,7 +66,7 @@ fn lock_for_subscription_creates_subscription_row() {
     register_buyer(&mut c);
 
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    let lock_id = c.lock_for_subscription(Some(price_id.clone()), None);
+    let lock_id = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_id.clone()), None));
 
     let sub = c
         .get_subscription_for_price(acct(BUYER), price_id)
@@ -113,7 +113,7 @@ fn unpause_allows_lock_again() {
 
     let dur = c.config.min_lock_duration_ns.0.saturating_add(1);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    let _ = c.lock_for_product(Some(price_id), U64(dur), None);
+    let _ = unwrap_sync_lock_id(c.lock_for_product(Some(price_id), U64(dur), None));
 }
 
 #[test]
@@ -124,7 +124,7 @@ fn user_lock_count_increments_on_lock() {
 
     let dur = c.config.min_lock_duration_ns.0.saturating_add(1);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    c.lock_for_product(Some(price_id), U64(dur), None);
+    let _ = unwrap_sync_lock_id(c.lock_for_product(Some(price_id), U64(dur), None));
 
     let n = c.user_lock_count.get(&acct(BUYER)).copied().expect("count");
     assert_eq!(n, 1);

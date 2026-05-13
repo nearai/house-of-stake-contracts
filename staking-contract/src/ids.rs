@@ -28,12 +28,12 @@ pub fn next_lock_id(nonce: &mut u64) -> String {
 /// Collision probability with existing IDs is negligible (SHA-256 → base62). Product/price creation retries
 /// if a generated id already exists in storage (see `products` callbacks).
 fn next_id(prefix: &str, suffix_len: usize, nonce: &mut u64) -> String {
-    let n = *nonce;
+    let nonce_word_for_entropy = *nonce;
     *nonce = nonce.saturating_add(1);
 
     let mut buf = Vec::new();
     buf.extend_from_slice(prefix.as_bytes());
-    buf.extend_from_slice(&n.to_be_bytes());
+    buf.extend_from_slice(&nonce_word_for_entropy.to_be_bytes());
     buf.extend_from_slice(&env::block_height().to_be_bytes());
     buf.extend_from_slice(&env::block_timestamp().to_be_bytes());
     buf.extend_from_slice(env::predecessor_account_id().as_bytes());
