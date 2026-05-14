@@ -1,4 +1,5 @@
 //! Sandbox tests for **`staking-contract`** using [`mock-staking-pool-contract`] as the pool implementation.
+//! Flows follow the **lazy epoch pipeline** (`lock` / `unlock` / `withdraw(validator_id)` / `epoch_settle`); there are no public `epoch_stake` / `epoch_unstake` / `epoch_withdraw` RPCs.
 //! Requires built WASMs (repo root): `make staking-contract`, `make mock-staking-pool-contract`.
 
 mod mock_pool;
@@ -11,8 +12,21 @@ use mock_pool::{
 use near_workspaces::types::{Gas as WsGas, NearToken};
 use serde_json::json;
 
+/// Manual pool advance: public `epoch_settle` (lazy pipeline retry).
+async fn call_epoch_settle(
+    caller: &near_workspaces::Account,
+    staking: &near_workspaces::Account,
+    pool_id: &near_workspaces::AccountId,
+) -> Result<near_workspaces::result::ExecutionFinalResult, near_workspaces::error::Error> {
+    caller
+        .call(staking.id(), "epoch_settle")
+        .args_json(json!({ "validator_id": pool_id }))
+        .gas(WsGas::from_tgas(300))
+        .transact()
+        .await
+}
+
 #[tokio::test]
-#[ignore = "sandbox: epoch_* removed; update flows in LAZY_EPOCH_PIPELINE follow-up"]
 async fn staking_get_validators_includes_allowlisted_pool() -> Result<(), Box<dyn std::error::Error>>
 {
     let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
@@ -50,8 +64,7 @@ async fn staking_get_validators_includes_allowlisted_pool() -> Result<(), Box<dy
 }
 
 #[tokio::test]
-#[ignore = "sandbox: epoch_* removed; update flows in LAZY_EPOCH_PIPELINE follow-up"]
-async fn staking_epoch_stake_fails_when_nothing_pending_after_successful_stake()
+async fn staking_epoch_settle_fails_when_pool_already_settled_this_epoch()
 -> Result<(), Box<dyn std::error::Error>> {
     let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
     let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
@@ -96,32 +109,19 @@ async fn staking_epoch_stake_fails_when_nothing_pending_after_successful_stake()
         .await?
         .into_result()?;
 
-    buyer
-        .call(staking.id(), "epoch_stake")
-        .args_json(json!({ "validator_id": pool.id() }))
-        .gas(WsGas::from_tgas(200))
-        .transact()
-        .await?
-        .into_result()?;
-
-    let again = buyer
-        .call(staking.id(), "epoch_stake")
-        .args_json(json!({ "validator_id": pool.id() }))
-        .gas(WsGas::from_tgas(200))
-        .transact()
-        .await?;
+    // `lock_for_product` completes the per-epoch stake slot for this NEAR epoch when pending exists.
+    let again = call_epoch_settle(&buyer, &staking, pool.id()).await?;
 
     assert!(
         again.is_failure(),
-        "staking-contract should reject epoch_stake when pending_to_stake is zero"
+        "epoch_settle must fail once this pool already settled this NEAR epoch (second call same epoch)"
     );
 
     Ok(())
 }
 
 #[tokio::test]
-#[ignore = "sandbox: epoch_* removed; update flows in LAZY_EPOCH_PIPELINE follow-up"]
-async fn staking_two_locks_aggregate_then_single_epoch_stake_clears_pending()
+async fn staking_two_locks_aggregate_then_epoch_settle_next_epoch_clears_pending()
 -> Result<(), Box<dyn std::error::Error>> {
     let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
     let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
@@ -178,16 +178,13 @@ async fn staking_two_locks_aggregate_then_single_epoch_stake_clears_pending()
     let pending_mid = json_near_token_yocto(&v_mid["pending_to_stake"]).unwrap_or(0);
     assert!(
         pending_mid > 0,
-        "expected combined pending_to_stake from two locks"
+        "second lock in the same NEAR epoch should leave stake pending until a later epoch can settle"
     );
 
-    buyer_a
-        .call(staking.id(), "epoch_stake")
-        .args_json(json!({ "validator_id": pool.id() }))
-        .gas(WsGas::from_tgas(200))
-        .transact()
-        .await?
-        .into_result()?;
+    worker.fast_forward(100_000).await?;
+
+    let settle = call_epoch_settle(&buyer_a, &staking, pool.id()).await?;
+    settle.into_result()?;
 
     let v_after: serde_json::Value = worker
         .view(staking.id(), "get_validator")
@@ -197,7 +194,7 @@ async fn staking_two_locks_aggregate_then_single_epoch_stake_clears_pending()
     assert_eq!(
         json_near_token_yocto(&v_after["pending_to_stake"]).unwrap_or(0),
         0,
-        "single epoch_stake should clear all accumulated pending_to_stake"
+        "epoch_settle in a fresh NEAR epoch should clear accumulated pending_to_stake"
     );
 
     let bal_json: serde_json::Value = worker
@@ -214,7 +211,6 @@ async fn staking_two_locks_aggregate_then_single_epoch_stake_clears_pending()
 }
 
 #[tokio::test]
-#[ignore = "sandbox: epoch_* removed; update flows in LAZY_EPOCH_PIPELINE follow-up"]
 async fn staking_pause_validator_blocks_new_lock_for_product()
 -> Result<(), Box<dyn std::error::Error>> {
     let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
@@ -277,8 +273,7 @@ async fn staking_pause_validator_blocks_new_lock_for_product()
 }
 
 #[tokio::test]
-#[ignore = "sandbox: epoch_* removed; update flows in LAZY_EPOCH_PIPELINE follow-up"]
-async fn staking_contract_pause_blocks_epoch_stake() -> Result<(), Box<dyn std::error::Error>> {
+async fn staking_contract_pause_blocks_epoch_settle() -> Result<(), Box<dyn std::error::Error>> {
     let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
     let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
 
@@ -330,24 +325,18 @@ async fn staking_contract_pause_blocks_epoch_stake() -> Result<(), Box<dyn std::
         .await?
         .into_result()?;
 
-    let outcome = buyer
-        .call(staking.id(), "epoch_stake")
-        .args_json(json!({ "validator_id": pool.id() }))
-        .gas(WsGas::from_tgas(200))
-        .transact()
-        .await?;
+    let outcome = call_epoch_settle(&buyer, &staking, pool.id()).await?;
 
     assert!(
         outcome.is_failure(),
-        "epoch_stake should fail when staking-contract is globally paused"
+        "epoch_settle should fail when staking-contract is globally paused"
     );
 
     Ok(())
 }
 
 #[tokio::test]
-#[ignore = "sandbox: epoch_* removed; update flows in LAZY_EPOCH_PIPELINE follow-up"]
-async fn staking_withdraw_clears_withdrawable_after_claim_unlocked_near()
+async fn staking_withdraw_succeeds_after_unlock_and_epoch_gates()
 -> Result<(), Box<dyn std::error::Error>> {
     let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
     let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
@@ -395,14 +384,6 @@ async fn staking_withdraw_clears_withdrawable_after_claim_unlocked_near()
         .into_result()?
         .json()?;
 
-    buyer
-        .call(staking.id(), "epoch_stake")
-        .args_json(json!({ "validator_id": pool.id() }))
-        .gas(WsGas::from_tgas(200))
-        .transact()
-        .await?
-        .into_result()?;
-
     let lock: serde_json::Value = worker
         .view(staking.id(), "get_lock")
         .args_json(json!({ "lock_id": lock_id }))
@@ -420,23 +401,7 @@ async fn staking_withdraw_clears_withdrawable_after_claim_unlocked_near()
         .await?
         .into_result()?;
 
-    buyer
-        .call(staking.id(), "epoch_unstake")
-        .args_json(json!({ "validator_id": pool.id() }))
-        .gas(WsGas::from_tgas(200))
-        .transact()
-        .await?
-        .into_result()?;
-
     worker.fast_forward(8000).await?;
-
-    buyer
-        .call(staking.id(), "epoch_withdraw")
-        .args_json(json!({ "validator_id": pool.id() }))
-        .gas(WsGas::from_tgas(300))
-        .transact()
-        .await?
-        .into_result()?;
 
     buyer
         .call(staking.id(), "withdraw")
@@ -451,8 +416,7 @@ async fn staking_withdraw_clears_withdrawable_after_claim_unlocked_near()
 }
 
 #[tokio::test]
-#[ignore = "sandbox: epoch_* removed; update flows in LAZY_EPOCH_PIPELINE follow-up"]
-async fn staking_claim_unlocked_near_fails_before_epoch_withdraw()
+async fn staking_withdraw_fails_when_pool_withdraw_bucket_not_ready()
 -> Result<(), Box<dyn std::error::Error>> {
     let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
     let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
@@ -499,14 +463,6 @@ async fn staking_claim_unlocked_near_fails_before_epoch_withdraw()
         .into_result()?
         .json()?;
 
-    buyer
-        .call(staking.id(), "epoch_stake")
-        .args_json(json!({ "validator_id": pool.id() }))
-        .gas(WsGas::from_tgas(200))
-        .transact()
-        .await?
-        .into_result()?;
-
     let lock: serde_json::Value = worker
         .view(staking.id(), "get_lock")
         .args_json(json!({ "lock_id": lock_id }))
@@ -524,15 +480,8 @@ async fn staking_claim_unlocked_near_fails_before_epoch_withdraw()
         .await?
         .into_result()?;
 
-    buyer
-        .call(staking.id(), "epoch_unstake")
-        .args_json(json!({ "validator_id": pool.id() }))
-        .gas(WsGas::from_tgas(200))
-        .transact()
-        .await?
-        .into_result()?;
-
-    worker.fast_forward(8000).await?;
+    // Not enough NEAR epochs for `epoch_unstake_settle_epochs` / pool withdraw-from-pool prefetch gates.
+    worker.fast_forward(50).await?;
 
     let early_claim = buyer
         .call(staking.id(), "withdraw")
@@ -544,14 +493,13 @@ async fn staking_claim_unlocked_near_fails_before_epoch_withdraw()
 
     assert!(
         early_claim.is_failure(),
-        "withdraw should fail before epoch_withdraw fills the pool withdraw bucket"
+        "withdraw should fail while the in-contract withdraw bucket is still empty under settle gates"
     );
 
     Ok(())
 }
 
 #[tokio::test]
-#[ignore = "sandbox: epoch_* removed; update flows in LAZY_EPOCH_PIPELINE follow-up"]
 async fn staking_create_product_fails_if_signer_is_not_pool_owner()
 -> Result<(), Box<dyn std::error::Error>> {
     let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
@@ -594,8 +542,7 @@ async fn staking_create_product_fails_if_signer_is_not_pool_owner()
 }
 
 #[tokio::test]
-#[ignore = "sandbox: epoch_* removed; update flows in LAZY_EPOCH_PIPELINE follow-up"]
-async fn staking_refresh_validator_balance_matches_pool_total_balance()
+async fn staking_validator_total_staked_balance_matches_pool_after_lock()
 -> Result<(), Box<dyn std::error::Error>> {
     let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
     let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
@@ -640,23 +587,6 @@ async fn staking_refresh_validator_balance_matches_pool_total_balance()
         .await?
         .into_result()?;
 
-    buyer
-        .call(staking.id(), "epoch_stake")
-        .args_json(json!({ "validator_id": pool.id() }))
-        .gas(WsGas::from_tgas(200))
-        .transact()
-        .await?
-        .into_result()?;
-
-    // Historical test: used `epoch_stake` + `refresh_validator_balance` (removed). Rewrite using `epoch_settle` / user flows when re-enabling.
-    staking
-        .call(staking.id(), "refresh_validator_balance")
-        .args_json(json!({ "validator_id": pool.id() }))
-        .gas(WsGas::from_tgas(200))
-        .transact()
-        .await?
-        .into_result()?;
-
     let pool_total_json: serde_json::Value = worker
         .view(pool.id(), "get_account_total_balance")
         .args_json(json!({ "account_id": staking.id() }))
@@ -673,7 +603,7 @@ async fn staking_refresh_validator_balance_matches_pool_total_balance()
 
     assert_eq!(
         recorded, pool_total,
-        "refresh_validator_balance should set Validator.total_staked_balance from the pool view"
+        "after `lock_for_product`, lazy settlement should align Validator.total_staked_balance with the pool view"
     );
 
     Ok(())

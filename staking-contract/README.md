@@ -56,7 +56,7 @@ Implemented in code:
 Still to refine per [docs/PLAN.md](docs/PLAN.md) / [docs/ACTION_ITEMS.md](docs/ACTION_ITEMS.md):
 
 - **Calendar-accurate** subscription billing (average-month linear helper only in [`subscriptions.rs`](src/subscriptions.rs); **`lock_for_subscription`** exists but uses linear months)
-- Longer **sandbox E2E** (unlock → `epoch_unstake` → `epoch_withdraw` → `withdraw`) — see [`tests/sandbox_mock_pool.rs`](tests/sandbox_mock_pool.rs); extend as needed
+- Longer **sandbox E2E** (unlock → wait `epoch_unstake_settle_epochs` → optional `epoch_settle` → `withdraw(validator_id)`) — see [`tests/sandbox_mock_pool.rs`](tests/sandbox_mock_pool.rs); extend as needed
 
 ## Workspace
 
