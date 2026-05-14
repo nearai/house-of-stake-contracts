@@ -155,8 +155,8 @@ pub struct Lock {
     pub status: LockStatus,
 }
 
-/// Payload chained after [`Contract::promise_validator_per_epoch_settlement_then`] for catalog lock vs
-/// unlock: either the full pre-user pipeline ran (balance sync → withdraw-if-ready →
+/// Payload chained after [`Contract::promise_validator_per_epoch_settlement_then`] for catalog lock,
+/// unlock, or **user withdraw**: either the full pre-user pipeline ran (balance sync → withdraw-if-ready →
 /// [`crate::epoch::Contract::try_epoch_settle`]), or the pool had **already** settled this NEAR epoch and
 /// the contract skipped that pipeline and jumped straight here (cached **`total_staked_balance`**).
 #[derive(Clone)]
@@ -175,5 +175,10 @@ pub enum PerEpochContinue {
         lock_id: LockId,
         account_id: AccountId,
         shares_remove: u128,
+    },
+    /// After shared per-epoch settlement: batch claim + NEAR transfer for [`crate::Contract::withdraw`].
+    WithdrawUserTransfer {
+        validator_id: ValidatorId,
+        account_id: AccountId,
     },
 }

@@ -1,6 +1,7 @@
 //! User exit payouts: pull NEAR from the contract per-pool **withdraw bucket** (`pending_to_withdraw` /
 //! `withdraw_batches`) against this account `user_pending_unstake` tranches, then transfer to the user.
-//! When the bucket is empty but epochs allow, **`withdraw`** may prefetch from the staking pool first.
+//! **WASM:** [`crate::epoch::Contract::promise_validator_per_epoch_settlement_then`] runs first (same as
+//! `lock` / `unlock`). **Non-WASM:** the payout tail runs directly for `testing_env!` tests.
 
 use crate::gas::callbacks;
 use crate::internal::withdraw_batch_credit_yocto;
@@ -21,10 +22,16 @@ pub trait ExtSelfWithdraw {
 #[near]
 impl Contract {
     /// Claim pro-rata NEAR from withdraw batches for this account on `validator_id` and **transfer it
-    /// immediately** to the caller (same logic as the former `claim_unlocked_near` + `withdraw` pair).
+    /// immediately** to the caller.
     ///
-    /// When the contract withdraw bucket is empty but epochs allow pulling unstaked NEAR from the pool,
-    /// this may chain an internal pool withdraw first, then complete the transfer in the callback.
+    /// **WASM:** Uses [`crate::epoch::Contract::promise_validator_per_epoch_settlement_then`] so balance
+    /// refresh, withdraw-if-ready, and net settle run before the payout (same ordering as **`lock`** /
+    /// **`unlock`**).
+    ///
+    /// **Non-WASM:** Runs the payout tail only (host `testing_env!` does not execute pool promise chains;
+    /// see `lock.rs`).
+    ///
+    /// The payout tail may prefetch a pool `withdraw` when the in-contract bucket is empty (LAZY_EPOCH_PIPELINE §2b).
     #[payable]
     pub fn withdraw(&mut self, validator_id: ValidatorId) -> Promise {
         near_sdk::assert_one_yocto();
@@ -43,6 +50,10 @@ impl Contract {
         );
 
         let mut validator = self.require_validator(&validator_id);
+        require!(
+            validator.tx_status == TransactionStatus::Idle,
+            "Validator pool is busy; wait for the in-flight pool call to finish"
+        );
         // Keep this account on the validator’s worklist for settle/withdraw scheduling.
         if user_pending_tranches_yocto > 0
             && !validator
@@ -53,30 +64,22 @@ impl Contract {
                 .accounts_with_pending_unstake
                 .push(account_id.clone());
         }
-        let pending_withdraw_bucket_yocto = validator.pending_to_withdraw.as_yoctonear();
-
-        // LAZY_EPOCH_PIPELINE §2b: if the in-contract bucket is empty but an unstake is old enough to
-        // withdraw-from-pool, pull from the pool first so `withdraw_unlocked_near_finish` can price batches.
-        let may_prefetch_pool_withdraw = pending_withdraw_bucket_yocto == 0
-            && validator.last_unstake_epoch > 0
-            && env::epoch_height()
-                >= validator
-                    .last_unstake_epoch
-                    .saturating_add(self.config.epoch_unstake_settle_epochs)
-            && validator.tx_status == TransactionStatus::Idle;
-
-        if may_prefetch_pool_withdraw {
-            self.validators.insert(validator_id.clone(), validator);
-            return self.try_epoch_withdraw(validator_id.clone(), false).then(
-                ext_self_withdraw::ext(env::current_account_id())
-                    .with_static_gas(callbacks::ON_CLAIM_AFTER_POOL_WITHDRAW)
-                    .on_withdraw_after_pool_withdraw_for_user(account_id, validator_id),
-            );
-        }
-
         self.validators.insert(validator_id.clone(), validator);
-        let credit = self.withdraw_unlocked_near_finish(account_id.clone(), validator_id);
-        Promise::new(account_id).transfer(credit)
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            return self.withdraw_user_transfer_tail(account_id, validator_id);
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.promise_validator_per_epoch_settlement_then(
+                validator_id.clone(),
+                PerEpochContinue::WithdrawUserTransfer {
+                    validator_id,
+                    account_id,
+                },
+            )
+        }
     }
 
     #[private]
@@ -86,8 +89,7 @@ impl Contract {
         account_id: AccountId,
         validator_id: ValidatorId,
     ) -> Promise {
-        let credit = self.withdraw_unlocked_near_finish(account_id.clone(), validator_id);
-        Promise::new(account_id).transfer(credit)
+        self.withdraw_user_transfer_tail(account_id, validator_id)
     }
 
     /// When [`Validator::pending_user_unstake_total`] is zero but [`Validator::pending_to_withdraw`] is still
@@ -300,5 +302,37 @@ impl Contract {
 
         crate::events::log_withdraw(&account_id, &validator_id, credit.as_yoctonear());
         credit
+    }
+
+    /// After optional shared settlement (WASM): claim from withdraw batches and transfer, or prefetch pool
+    /// withdraw when the bucket is still empty (§2b). Used by `withdraw` and `on_withdraw_after_pool_withdraw_for_user`.
+    pub(crate) fn withdraw_user_transfer_tail(
+        &mut self,
+        account_id: AccountId,
+        validator_id: ValidatorId,
+    ) -> Promise {
+        let validator = self.require_validator(&validator_id);
+        let pending_withdraw_bucket_yocto = validator.pending_to_withdraw.as_yoctonear();
+
+        let may_prefetch_pool_withdraw = pending_withdraw_bucket_yocto == 0
+            && validator.last_unstake_epoch > 0
+            && env::epoch_height()
+                >= validator
+                    .last_unstake_epoch
+                    .saturating_add(self.config.epoch_unstake_settle_epochs)
+            && validator.tx_status == TransactionStatus::Idle;
+
+        if may_prefetch_pool_withdraw {
+            self.validators.insert(validator_id.clone(), validator);
+            return self.try_epoch_withdraw(validator_id.clone(), false).then(
+                ext_self_withdraw::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_CLAIM_AFTER_POOL_WITHDRAW)
+                    .on_withdraw_after_pool_withdraw_for_user(account_id, validator_id),
+            );
+        }
+
+        self.validators.insert(validator_id.clone(), validator);
+        let credit = self.withdraw_unlocked_near_finish(account_id.clone(), validator_id);
+        Promise::new(account_id).transfer(credit)
     }
 }

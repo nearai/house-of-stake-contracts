@@ -2,10 +2,11 @@
 //!
 //! Most pool work is **`pub(crate) try_*`** and user flows (`lock`, `unlock`, `withdraw`).
 //! **`epoch_settle`** is the public manual / retry entry for net settle on one pool.
-//! Catalog **`lock`** and **`unlock`** share [`Contract::promise_validator_per_epoch_settlement_then`]:
-//! when [`Validator::last_settlement_epoch`] is behind the current NEAR epoch, the contract runs balance
+//! Catalog **`lock`**, **`unlock`**, and (on **WASM**) user **`withdraw`** share
+//! [`Contract::promise_validator_per_epoch_settlement_then`] (see `withdraw.rs`). **When**
+//! [`Validator::last_settlement_epoch`] is behind the current NEAR epoch, the contract runs balance
 //! sync, withdraw-if-ready, then [`Contract::try_epoch_settle`] on existing pending; when the pool already
-//! settled this epoch, that pre-user pipeline is skipped and mint / unlock runs directly (cached
+//! settled this epoch, that pre-user pipeline is skipped and mint / unlock / withdraw payout runs directly (cached
 //! **`total_staked_balance`**).
 //! See `docs/LAZY_EPOCH_PIPELINE.md`.
 //!
@@ -104,6 +105,12 @@ pub trait ExtSelfEpoch {
         validator_id: ValidatorId,
         shares_remove: u128,
     ) -> Promise;
+    /// After shared settlement: user withdraw (batch claim + transfer; may prefetch pool withdraw).
+    fn on_withdraw_user_after_epoch_settlement(
+        &mut self,
+        account_id: AccountId,
+        validator_id: ValidatorId,
+    ) -> Promise;
     /// After querying unstaked balance: withdraw first if needed, else unstake.
     fn on_unstake_pipeline_unstaked_balance(
         &mut self,
@@ -133,12 +140,13 @@ impl Contract {
             .get_account_total_balance(env::current_account_id())
     }
 
-    /// Shared per-epoch pipeline for a validator row before catalog **`lock`** or **`unlock`**:
+    /// Shared per-epoch pipeline for a validator row before catalog **`lock`**, **`unlock`**, or user
+    /// **`withdraw`**:
     /// When [`Validator::last_settlement_epoch`] is **before** the current NEAR epoch: (1)
     /// `get_account_total_balance`, (2) withdraw ready unstaked NEAR from the pool if allowed, (3)
     /// [`Contract::try_epoch_settle`] on existing pending, then **`cont`**. When the pool **already**
     /// settled this epoch (`last_settlement_epoch` ≥ current height), **skip** that pre-user pipeline and
-    /// run **`cont`** immediately (mint / unlock uses cached **`total_staked_balance`**). Callers must
+    /// run **`cont`** immediately (mint / unlock / withdraw payout uses cached **`total_staked_balance`**). Callers must
     /// ensure the pool row is **`Idle`**.
     pub(crate) fn promise_validator_per_epoch_settlement_then(
         &self,
@@ -615,6 +623,12 @@ impl Contract {
                     validator_id,
                     shares_remove,
                 ),
+            PerEpochContinue::WithdrawUserTransfer {
+                account_id,
+                validator_id,
+            } => ext_self_epoch::ext(env::current_account_id())
+                .with_static_gas(callbacks::ON_WITHDRAW_USER_AFTER_EPOCH_SETTLEMENT)
+                .on_withdraw_user_after_epoch_settlement(account_id, validator_id),
         }
     }
 
@@ -691,6 +705,15 @@ impl Contract {
         crate::events::log_unlock(lock_id.as_str(), &account_log, &validator_log);
 
         self.promise_unstake_pipeline_after_unlock_queue(validator_id)
+    }
+
+    #[private]
+    pub fn on_withdraw_user_after_epoch_settlement(
+        &mut self,
+        account_id: AccountId,
+        validator_id: ValidatorId,
+    ) -> Promise {
+        self.withdraw_user_transfer_tail(account_id, validator_id)
     }
 
     #[private]
