@@ -72,6 +72,18 @@ See source files under [src/](../src/). Key modules: `config`, `types`, `ids`, `
 
 No HoS staking-pool whitelist cross-call — stake.dao allowlist is internal.
 
-## 7. Open items
+## 7. Withdraw bucket: stranded remainder (design only)
+
+Pro-rata claims use integer math ([`withdraw_batch_credit_yocto`](../src/internal.rs)): across users and batches, the sum of credits can be **strictly less** than the NEAR pulled from the pool into **`pending_to_withdraw`**, or a batch’s **`remaining`** can outlive the last **`user_pending_unstake`** tranche. In those edge cases **`Validator::pending_user_unstake_total`** can reach **zero** while **`pending_to_withdraw`** (and/or batch **`remaining`**) is still **positive**. Users cannot claim further because there is no eligible liability.
+
+**Intended future mitigation (not in the current contract):** an **owner-only** method such as **`sweep_stranded_withdraw_bucket(validator_id)`** that:
+
+- requires **`pending_user_unstake_total == 0`** and **`pending_to_withdraw > 0`** (and typically **not paused**, **1 yocto** attach),
+- zeros **`pending_to_withdraw`**, clears **`withdraw_batches`**,
+- transfers the remainder to **`config.owner_account_id`** (or another fixed sink agreed by governance).
+
+Until that exists, any microscopic remainder stays on the contract balance for that pool row; amounts should be dust-scale if they appear at all.
+
+## 8. Open items
 
 See [PLAN.md](PLAN.md) for `lock_factor_near_months` / `LOCK_FACTOR_DENOM` semantics, Stripe ID suffix lengths, and subscription duration-equivalent details. For prepaid gas and settlement semantics, prefer [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md) and [API.md](API.md).

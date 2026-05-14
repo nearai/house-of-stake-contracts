@@ -141,7 +141,8 @@ Public **`epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator
 | Method | Access | Deposit | Returns | Description |
 |--------|--------|---------|---------|-------------|
 | `withdraw` | User | **1 yocto** | **`Promise`** | JSON **`{ "validator_id": <AccountId> }`** — pro-rata claim from **`pending_to_withdraw`** / withdraw batches for your pending-unstake tranches on that pool, then **transfer** the NEAR to you in the same flow. May chain an internal pool withdraw when the bucket is empty but settlement allows (see `docs/LAZY_EPOCH_PIPELINE.md`). |
-| `sweep_stranded_withdraw_bucket` | **Owner** | **1 yocto** | `validator_id` — if user liability total is zero but **`pending_to_withdraw`** remains, send remainder to **`owner_account_id`**. |
+
+> **Note:** An owner-only **`sweep_stranded_withdraw_bucket`**-style cleanup (when **`pending_user_unstake_total == 0`** but **`pending_to_withdraw > 0`**) is described in [DESIGN.md](DESIGN.md) but **not** exposed in the current ABI.
 
 ---
 

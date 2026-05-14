@@ -102,37 +102,6 @@ impl Contract {
     ) -> Promise {
         self.withdraw_user_transfer_tail(account_id, validator_id)
     }
-
-    /// When [`Validator::pending_user_unstake_total`] is zero but [`Validator::pending_to_withdraw`] is still
-    /// positive (e.g. pool rounding so `w > t` after the last user claims), transfer that remainder to the
-    /// contract owner.
-    #[payable]
-    pub fn sweep_stranded_withdraw_bucket(&mut self, validator_id: ValidatorId) -> Promise {
-        near_sdk::assert_one_yocto();
-        self.assert_not_paused();
-        self.assert_owner();
-
-        let mut validator = self.require_validator(&validator_id);
-        let pending_withdraw_bucket_yocto = validator.pending_to_withdraw.as_yoctonear();
-        let pending_user_unstake_liability_yocto =
-            validator.pending_user_unstake_total.as_yoctonear();
-        require!(
-            pending_user_unstake_liability_yocto == 0,
-            "Cannot sweep: user liability for this pool must be zero first"
-        );
-        require!(
-            pending_withdraw_bucket_yocto > 0,
-            "Cannot sweep: there is no stranded balance in the withdraw bucket"
-        );
-
-        validator.pending_to_withdraw = NearToken::from_near(0);
-        validator.withdraw_batches.clear();
-        self.validators.insert(validator_id, validator);
-
-        // Owner-only escape hatch: remainder NEAR with no matching user liability (rounding / edge cases).
-        Promise::new(self.config.owner_account_id.clone())
-            .transfer(NearToken::from_yoctonear(pending_withdraw_bucket_yocto))
-    }
 }
 
 impl Contract {
@@ -239,7 +208,7 @@ impl Contract {
         );
         require!(
             validator.pending_user_unstake_total.as_yoctonear() > 0,
-            "Nothing to claim: total user liability for this pool is zero. If NEAR is still stuck after everyone has claimed, the owner can call sweep_stranded_withdraw_bucket"
+            "Nothing to claim: total user liability for this pool is zero (no tranches left to match the withdraw bucket)"
         );
 
         let mut total_credit_yocto = 0u128;
