@@ -1,6 +1,6 @@
 //! Pool pipeline: stake / unstake / withdraw-from-pool, plus promise callbacks (`on_*`).
 //!
-//! Most pool work is **`pub(crate) try_*`** and user flows (`lock`, `unlock`, `claim_unlocked_near`).
+//! Most pool work is **`pub(crate) try_*`** and user flows (`lock`, `unlock`, `withdraw`).
 //! **`epoch_settle`** is the public manual / retry entry for net settle on one pool.
 //! Catalog **`lock`** and **`unlock`** share [`Contract::promise_validator_per_epoch_settlement_then`]:
 //! when [`Validator::last_settlement_epoch`] is behind the current NEAR epoch, the contract runs balance
@@ -416,7 +416,8 @@ impl Contract {
             )
     }
 
-    /// After an unlock refresh: apply pool balance, queue unstake, then run withdraw-first unstake pipeline.
+    /// After an unlock refresh: apply pool balance, then run withdraw-first unstake pipeline (share exit
+    /// already committed by `commit_share_exit` in the unlock tail).
     pub(crate) fn promise_unstake_pipeline_after_unlock_queue(
         &mut self,
         validator_id: ValidatorId,
@@ -627,7 +628,7 @@ impl Contract {
         validator_id: ValidatorId,
         subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
     ) -> PromiseOrValue<()> {
-        let _lock_id = self.apply_lock_mint_after_pool_balance_refresh(
+        let _lock_id = self.commit_catalog_lock(
             buyer,
             locked,
             duration_ns,
@@ -683,7 +684,7 @@ impl Contract {
 
         let account_log = lock.account_id.clone();
         let validator_log = lock.validator_id.clone();
-        self.queue_shares_unstake(account_id.clone(), validator_id.clone(), shares_remove);
+        self.commit_share_exit(account_id.clone(), validator_id.clone(), shares_remove);
         lock.status = LockStatus::UnlockRequested;
         self.locks.insert(lock_id.clone(), lock);
 
@@ -901,7 +902,7 @@ impl Contract {
             }
             require!(
                 l_k > 0,
-                "Cannot record this withdraw: no user pending unstake matches this batch; try claim_unlocked_near to refresh accounting, then retry"
+                "Cannot record this withdraw: no user pending unstake matches this batch; try withdraw to refresh accounting, then retry"
             );
             let l_near = NearToken::from_yoctonear(l_k);
             validator.pending_to_withdraw = validator

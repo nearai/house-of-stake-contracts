@@ -8,7 +8,7 @@ On the **host** triple, `lock_for_*` uses a synchronous mint path (`not(target_a
 
 ## Sandbox (`near-workspaces`) + mock pool
 
-[`sandbox_mock_pool.rs`](sandbox_mock_pool.rs) deploys built **`staking_contract.wasm`** and **`mock_staking_pool_contract.wasm`** and exercises real cross-contract calls (catalog, `lock_for_product`, pool views, etc.). **Ignored** tests still reference removed `epoch_*` / `refresh_validator_balance`; update them to the lazy pipeline (`lock` / `unlock` / `claim_unlocked_near` / `epoch_settle`) before removing `#[ignore]`. Helpers live in [`mock_pool/mod.rs`](mock_pool/mod.rs).
+[`sandbox_mock_pool.rs`](sandbox_mock_pool.rs) deploys built **`staking_contract.wasm`** and **`mock_staking_pool_contract.wasm`** and exercises real cross-contract calls (catalog, `lock_for_product`, pool views, etc.). **Ignored** tests still reference removed `epoch_*` / `refresh_validator_balance`; update them to the lazy pipeline (`lock` / `unlock` / `withdraw` / `epoch_settle`) before removing `#[ignore]`. Helpers live in [`mock_pool/mod.rs`](mock_pool/mod.rs).
 
 Build WASMs from repo root (`house-of-stake-contracts/`):
 

@@ -6,7 +6,7 @@ This file tracks open work relative to the intended design ([PLAN.md](PLAN.md), 
 
 ## P0 — Core unlock → withdraw path (funds must not stick)
 
-**Done (v1):** Lazy pipeline in [`epoch.rs`](src/epoch.rs): pool `unstake` / withdraw-from-pool chains, `claim_unlocked_near` → tranche / `withdrawable_balance` / `withdraw`, plus [`unlock.rs`](src/unlock.rs) and [`withdraw.rs`](src/withdraw.rs). Public batch `epoch_unstake` / `epoch_withdraw` entrypoints are **not** exposed; see [`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md).
+**Done (v1):** Lazy pipeline in [`epoch.rs`](src/epoch.rs): pool `unstake` / withdraw-from-pool chains, user **`withdraw(validator_id)`** (pro-rata tranche claim + NEAR transfer), plus [`unlock.rs`](src/unlock.rs) and [`withdraw.rs`](src/withdraw.rs). Public batch `epoch_unstake` / `epoch_withdraw` entrypoints are **not** exposed; see [`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md).
 
 **Follow-ups:**
 
@@ -25,7 +25,7 @@ The contract is **NEAR-only**: no oracle, no USD catalog path, no `oracle-relay-
 - [x] **`lock_for_subscription`** — NEAR + monthly recurring catalog prices; persists [`Subscription`](src/types.rs) and index `(account_id, product_id)` → `subscription_id`.
 - [x] **Lifecycle** — [`cancel_subscription`](src/subscriptions.rs), [`upgrade_subscription`](src/subscriptions.rs), [`schedule_downgrade_subscription`](src/subscriptions.rs); events in [`events.rs`](src/events.rs).
 - [x] **Month stacking helper** — [`add_months_stripe_style`](src/subscriptions.rs); **calendar-accurate** end dates still future work (anchor_day recorded; linear months only).
-- [x] **Downgrade prorate (Phase B)** — at renewal when a scheduled downgrade applies, tier-gap NEAR (`min_locked(high)` − `min_locked(low)` for the completed billing window) is released via [`Contract::queue_shares_unstake`](src/unlock.rs) (same path as `unlock` → epoch → `claim_unlocked_near`). See [`apply_downgrade_prorate_at_renewal`](src/lock.rs).
+- [x] **Downgrade prorate (Phase B)** — at renewal when a scheduled downgrade applies, tier-gap NEAR (`min_locked(high)` − `min_locked(low)` for the completed billing window) is released via [`Contract::commit_share_exit`](src/unlock.rs) (same path as `unlock` → epoch → `withdraw`). See [`apply_downgrade_prorate_at_renewal`](src/lock.rs).
 
 ---
 

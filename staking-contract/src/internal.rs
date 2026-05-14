@@ -19,7 +19,7 @@ pub const AVG_MONTH_NS: u128 = NS_PER_DAY * 487 / 16;
 
 /// Pro-rata credit from one withdraw batch toward a user: `floor(remaining * eligible / liability)`
 /// capped by `eligible` and `remaining`, plus a **1 yocto** minimum when all inputs are positive but the
-/// floor rounds to zero (matches [`crate::withdraw::Contract::claim_unlocked_near`]).
+/// floor rounds to zero (matches [`crate::Contract::withdraw`] batch credit).
 pub fn withdraw_batch_credit_yocto(
     batch_remaining_yocto: u128,
     user_eligible_yocto: u128,

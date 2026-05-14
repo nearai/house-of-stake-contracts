@@ -5,14 +5,12 @@ use near_sdk::{NearToken, Promise, env, near, require};
 #[near(serializers = [borsh, json])]
 pub struct Account {
     pub storage_deposit: NearToken,
-    pub withdrawable_balance: NearToken,
 }
 
 impl Default for Account {
     fn default() -> Self {
         Self {
             storage_deposit: NearToken::from_near(0),
-            withdrawable_balance: NearToken::from_near(0),
         }
     }
 }

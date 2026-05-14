@@ -1,4 +1,4 @@
-//! `price_id` / `product_id` resolution for catalog locks (`resolve_price_id_for_catalog_lock`).
+//! `price_id` / `product_id` resolution for catalog locks (`resolve_price_id_for_lock`).
 
 mod common;
 

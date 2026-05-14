@@ -1,10 +1,18 @@
 use crate::*;
 use near_sdk::json_types::U64;
-use near_sdk::{AccountId, NearToken, near};
+use near_sdk::{AccountId, NearToken, near, require};
 
-/// Minimum attached NEAR for the first lock on a pool with [`crate::validators::Validator::total_shares`]
-/// zero (first on-chain delegation). **Hardcoded** (not in [`Config`]); matches a safe pool minimum (1 NEAR).
-pub const MIN_FIRST_VALIDATOR_DEPOSIT_NEAR_YOCTO: u128 = 1_000_000_000_000_000_000_000_000;
+/// Minimum allowed [`Config::min_lock_amount`] in yoctoNEAR (1 NEAR). Stake pools reject first
+/// delegations below this scale; the contract enforces the same floor for config and new deploys.
+pub const PROTOCOL_MIN_LOCK_AMOUNT_YOCTO: u128 = 1_000_000_000_000_000_000_000_000;
+
+/// Panics unless `min_lock_amount` is at least [`PROTOCOL_MIN_LOCK_AMOUNT_YOCTO`].
+pub fn require_min_lock_amount_at_protocol_floor(min_lock_amount: &NearToken) {
+    require!(
+        min_lock_amount.as_yoctonear() >= PROTOCOL_MIN_LOCK_AMOUNT_YOCTO,
+        "min_lock_amount must be at least 1 NEAR (stake pool delegation minimum)"
+    );
+}
 
 #[derive(Clone, Debug)]
 #[near(serializers = [borsh, json])]
@@ -19,6 +27,8 @@ pub struct Config {
     /// Per **lock ever created** (see [`crate::Contract::user_lock_count`]); zero disables the extra
     /// requirement beyond [`Self::min_storage_deposit`].
     pub per_lock_storage_stake: NearToken,
+    /// Minimum NEAR attached for locks and subscription payments. Governance cannot set this below
+    /// [`PROTOCOL_MIN_LOCK_AMOUNT_YOCTO`] (see [`require_min_lock_amount_at_protocol_floor`]).
     pub min_lock_amount: NearToken,
 }
 

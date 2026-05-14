@@ -78,10 +78,23 @@ fn owner_sets_epoch_unstake_and_config_round_trips() {
     assert_eq!(c.get_config().min_lock_amount, NearToken::from_near(2));
 
     testing_env!(ctx(acct(OWNER), one_yocto()));
+    c.set_min_lock_amount(NearToken::from_near(1));
+    assert_eq!(c.get_config().min_lock_amount, NearToken::from_near(1));
+
+    testing_env!(ctx(acct(OWNER), one_yocto()));
     c.set_lock_bounds(U64(10), U64(1_000_000_000_000_000));
 
     assert_eq!(c.get_config().min_lock_duration_ns.0, 10);
     assert_eq!(c.get_config().max_lock_duration_ns.0, 1_000_000_000_000_000);
+}
+
+#[test]
+#[should_panic(expected = "min_lock_amount must be at least 1 NEAR")]
+fn set_min_lock_amount_rejects_below_protocol_floor() {
+    let mut c = deploy();
+
+    testing_env!(ctx(acct(OWNER), one_yocto()));
+    c.set_min_lock_amount(NearToken::from_millinear(500));
 }
 
 /// Guardian (not owner) may pause when listed in `guardians`.

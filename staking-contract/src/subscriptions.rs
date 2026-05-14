@@ -382,7 +382,7 @@ impl Contract {
             return;
         }
 
-        let near_amt = self.queue_shares_unstake(buyer.clone(), validator_id, shares_remove);
+        let near_amt = self.commit_share_exit(buyer.clone(), validator_id, shares_remove);
         lock.shares = U128(lock.shares.0.saturating_sub(shares_remove));
         let new_amt = lock.amount_near.as_yoctonear().saturating_sub(near_amt);
         lock.amount_near = NearToken::from_yoctonear(new_amt);

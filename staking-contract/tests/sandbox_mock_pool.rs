@@ -439,45 +439,13 @@ async fn staking_withdraw_clears_withdrawable_after_claim_unlocked_near()
         .into_result()?;
 
     buyer
-        .call(staking.id(), "claim_unlocked_near")
+        .call(staking.id(), "withdraw")
         .args_json(json!({ "validator_id": pool.id() }))
         .deposit(NearToken::from_yoctonear(1))
         .gas(WsGas::from_tgas(200))
         .transact()
         .await?
         .into_result()?;
-
-    let acc_before: serde_json::Value = worker
-        .view(staking.id(), "get_account")
-        .args_json(json!({ "account_id": buyer.id() }))
-        .await?
-        .json()?;
-    let withdrawable_before =
-        json_near_token_yocto(&acc_before["withdrawable_balance"]).unwrap_or(0);
-    assert!(
-        withdrawable_before > 0,
-        "claim_unlocked_near should credit withdrawable_balance"
-    );
-
-    buyer
-        .call(staking.id(), "withdraw")
-        .args_json(json!({ "amount": null }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(WsGas::from_tgas(100))
-        .transact()
-        .await?
-        .into_result()?;
-
-    let acc_after: serde_json::Value = worker
-        .view(staking.id(), "get_account")
-        .args_json(json!({ "account_id": buyer.id() }))
-        .await?
-        .json()?;
-    let withdrawable_after = json_near_token_yocto(&acc_after["withdrawable_balance"]).unwrap_or(0);
-    assert_eq!(
-        withdrawable_after, 0,
-        "withdraw(None) should zero withdrawable_balance"
-    );
 
     Ok(())
 }
@@ -567,7 +535,7 @@ async fn staking_claim_unlocked_near_fails_before_epoch_withdraw()
     worker.fast_forward(8000).await?;
 
     let early_claim = buyer
-        .call(staking.id(), "claim_unlocked_near")
+        .call(staking.id(), "withdraw")
         .args_json(json!({ "validator_id": pool.id() }))
         .deposit(NearToken::from_yoctonear(1))
         .gas(WsGas::from_tgas(200))
@@ -576,7 +544,7 @@ async fn staking_claim_unlocked_near_fails_before_epoch_withdraw()
 
     assert!(
         early_claim.is_failure(),
-        "claim_unlocked_near should fail before epoch_withdraw fills the pool withdraw bucket"
+        "withdraw should fail before epoch_withdraw fills the pool withdraw bucket"
     );
 
     Ok(())

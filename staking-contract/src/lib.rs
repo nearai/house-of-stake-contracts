@@ -63,7 +63,7 @@ pub struct Contract {
     pub products: LookupMap<ProductId, Product>,
     /// Price lines (`price_*` ids); [`Price::product_id`](crate::types::Price::product_id) links to a product.
     pub prices: LookupMap<PriceId, Price>,
-    /// Per-user accounting: NEP-145-style registered storage and [`Account::withdrawable_balance`] after claims.
+    /// Per-user accounting: NEP-145-style registered storage (`storage_deposit`).
     pub accounts: LookupMap<AccountId, Account>,
     /// Subscription records keyed by [`Subscription::subscription_id`] (`sub_*`).
     pub subscriptions: LookupMap<SubscriptionId, Subscription>,
@@ -71,7 +71,7 @@ pub struct Contract {
     pub locks: LookupMap<LockId, Lock>,
     /// User stake position on a pool: `(AccountId, ValidatorId)` → outstanding share units (integer, same scale as [`Validator::total_shares`]). [`ValidatorId`](crate::types::ValidatorId) is the pool contract account.
     pub user_validator_shares: LookupMap<(AccountId, ValidatorId), u128>,
-    /// After unlock, NEAR value queued for this user on this pool until [`crate::withdraw::Contract::claim_unlocked_near`]
+    /// After unlock, NEAR value queued for this user on this pool until [`crate::Contract::withdraw`]
     /// (filled once funds are withdrawn from the pool into `pending_to_withdraw`).
     pub user_pending_unstake: LookupMap<(AccountId, ValidatorId), Vec<PendingUnstakeTranche>>,
     /// Monotonic count of locks created per account; multiplied by [`Config::per_lock_storage_stake`] for prepaid lock storage.
@@ -86,6 +86,7 @@ pub struct Contract {
 impl Contract {
     #[init]
     pub fn new(config: Config) -> Self {
+        crate::config::require_min_lock_amount_at_protocol_floor(&config.min_lock_amount);
         Self {
             config,
             paused: false,

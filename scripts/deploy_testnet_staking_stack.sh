@@ -25,7 +25,7 @@
 #   SKIP_ACCOUNT_CREATE=1         # skip subaccount creation (reuse existing accounts)
 #   FUND_OWNER_NEAR / FUND_VALIDATOR_OWNER_NEAR / FUND_STAKING_NEAR / FUND_POOL_NEAR
 #
-# Pool work on the staking contract is user-driven (lock / unlock / claim_unlocked_near / epoch_settle);
+# Pool work on the staking contract is user-driven (lock / unlock / withdraw / epoch_settle);
 # there is no operators list in Config — see staking-contract/docs/LAZY_EPOCH_PIPELINE.md.
 #
 set -euo pipefail

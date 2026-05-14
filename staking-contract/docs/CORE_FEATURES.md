@@ -9,7 +9,7 @@ Quick reference for reviewers: what the contract does on-chain, and which source
 3. **Locks** — Users **`lock_for_product`** / **`lock_for_subscription`**: mint internal shares, queue stake, enforce price vs locked amount × duration (`lock.rs`, `internal.rs`).
 4. **Subscriptions** — One subscription per `(account, product)`; cancel, upgrade, downgrade, getters (`subscriptions.rs`); **`lock_for_subscription`** and renewal prorate hook (`lock.rs`); unlock path (`unlock.rs`).
 5. **Lazy pool pipeline** — No operator role: **`deposit_and_stake` / `unstake` / withdraw** and balance refresh are driven from lock, unlock, claim, plus manual settle/retry as documented. **One** successful stake **or** unstake per pool per NEAR epoch; net settle on pending buckets (`epoch.rs`).
-6. **Unlock → claim → withdraw** — After lock end: unstake path, settle epochs, pull from pool when allowed, pro-rata claim to `withdrawable_balance`, user **`withdraw`** (`unlock.rs`, `withdraw.rs`).
+6. **Unlock → withdraw** — After lock end: unstake path, settle epochs, pull from pool when allowed, then user **`withdraw(validator_id)`** to receive NEAR (`unlock.rs`, `withdraw.rs`).
 7. **Accounts & storage** — NEP-145-style registration, per-lock storage stake, `storage_withdraw` (`accounts.rs`, `lib.rs` state).
 8. **Pause / upgrade** — Guardians pause; owner upgrades + migrate (`pause.rs`, `upgrade.rs`, `governance.rs`).
 9. **Events** — `EVENT_JSON` for indexing (`events.rs`).
@@ -20,7 +20,7 @@ Quick reference for reviewers: what the contract does on-chain, and which source
 |----------|---------|-----|
 | **1** | `staking-contract/src/epoch.rs` | Cross-contract promises, callbacks, `last_settlement_epoch`, net settle, withdraw-before-unstake; highest correctness risk. |
 | **2** | `staking-contract/src/internal.rs` | Share mint/burn math and NEAR price sufficiency checks. |
-| **3** | `staking-contract/src/lock.rs` | Product/subscription **locks**, renewal, `finalize_lock_common`; synchronous mint on **non-WASM** targets (`testing_env!` / integration tests on the host triple), promise chain on **WASM**. |
+| **3** | `staking-contract/src/lock.rs` | Product/subscription **locks**, renewal, `finalize_lock`; synchronous mint on **non-WASM** targets (`testing_env!` / integration tests on the host triple), promise chain on **WASM**. |
 | **3b** | `staking-contract/src/subscriptions.rs` | Subscription **lifecycle** RPCs, downgrade prorate at renewal, billing month helper. |
 | **4** | `staking-contract/src/withdraw.rs` | Claim batches, pool withdraw chaining, user liability vs pool state. |
 | **5** | `staking-contract/src/unlock.rs` | Unlock entry, Busy/Idle, interaction with epoch pipeline. |

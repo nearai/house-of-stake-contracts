@@ -50,6 +50,7 @@ impl Contract {
     pub fn set_min_lock_amount(&mut self, min_lock_amount: NearToken) {
         assert_one_yocto();
         self.assert_owner();
+        crate::config::require_min_lock_amount_at_protocol_floor(&min_lock_amount);
         self.config.min_lock_amount = min_lock_amount;
     }
 

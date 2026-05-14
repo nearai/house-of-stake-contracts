@@ -105,21 +105,12 @@ pub fn log_unlock(lock_id: &str, account: &AccountId, validator_id: &ValidatorId
     );
 }
 
-pub fn log_claim_unlocked(account: &AccountId, validator_id: &ValidatorId) {
-    emit(
-        "claim_unlocked",
-        serde_json::json!({
-            "account_id": account.to_string(),
-            "validator_id": validator_id.to_string(),
-        }),
-    );
-}
-
-pub fn log_withdraw(account: &AccountId, amount_yocto: u128) {
+pub fn log_withdraw(account: &AccountId, validator_id: &ValidatorId, amount_yocto: u128) {
     emit(
         "withdraw",
         serde_json::json!({
             "account_id": account.to_string(),
+            "validator_id": validator_id.to_string(),
             "amount_yocto": amount_yocto.to_string(),
         }),
     );

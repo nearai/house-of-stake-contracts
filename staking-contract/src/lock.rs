@@ -26,7 +26,7 @@ impl Contract {
         lock_duration_ns: U64,
         product_id: Option<ProductId>,
     ) -> PromiseOrValue<LockId> {
-        let resolved = self.resolve_price_id_for_catalog_lock(price_id, product_id);
+        let resolved = self.resolve_price_id_for_lock(price_id, product_id);
         self.lock_for_product_with_price_id(resolved, lock_duration_ns)
     }
 
@@ -52,7 +52,7 @@ impl Contract {
             "Lock duration is outside the allowed range for this contract"
         );
 
-        let (price, product) = self.load_active_catalog_price_product(&price_id);
+        let (price, product) = self.get_active_price_and_product(&price_id);
         require!(
             price.price_type == PriceType::OneOff,
             "Recurring prices: use lock_for_subscription with price_id or product_id"
@@ -80,13 +80,13 @@ impl Contract {
         );
         // WASM production: [`Contract::promise_validator_per_epoch_settlement_then`] then mint (`epoch.rs`).
         // Host targets (`tests/*.rs`, `cargo check` on the host triple): `near_sdk::testing_env!` does not run
-        // returned promise chains—use synchronous mint (`finalize_lock_common` → `apply_lock_mint_after_pool_balance_refresh`).
+        // returned promise chains—use synchronous commit (`finalize_lock` → `commit_catalog_lock`).
         // The library is built **without** `cfg(test)` for integration tests, so this split uses `target_arch`
         // (not `cfg(test)`): WASM builds always use the real promise path.
         #[cfg(not(target_arch = "wasm32"))]
         {
             return PromiseOrValue::Value(
-                self.finalize_lock_common(buyer, price, product, locked, dur_u128, order),
+                self.finalize_lock(buyer, price, product, locked, dur_u128, order),
             );
         }
         #[cfg(target_arch = "wasm32")]
@@ -114,7 +114,7 @@ impl Contract {
         price_id: Option<PriceId>,
         product_id: Option<ProductId>,
     ) -> PromiseOrValue<LockId> {
-        let resolved = self.resolve_price_id_for_catalog_lock(price_id, product_id);
+        let resolved = self.resolve_price_id_for_lock(price_id, product_id);
         self.lock_for_subscription_with_price_id(resolved)
     }
 
@@ -129,7 +129,7 @@ impl Contract {
             "Attached NEAR is below the contract minimum lock amount (min_lock_amount)"
         );
 
-        let (price, product) = self.load_active_catalog_price_product(&price_id);
+        let (price, product) = self.get_active_price_and_product(&price_id);
         require!(
             price.price_type == PriceType::Recurring,
             "This price is not a recurring subscription price"
@@ -268,7 +268,7 @@ impl Contract {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let mut subscription = subscription;
-            let lock_id = self.finalize_lock_common(
+            let lock_id = self.finalize_lock(
                 buyer.clone(),
                 price,
                 product,
@@ -304,7 +304,7 @@ impl Contract {
 }
 
 impl Contract {
-    fn load_active_catalog_price_product(&self, price_id: &PriceId) -> (Price, Product) {
+    fn get_active_price_and_product(&self, price_id: &PriceId) -> (Price, Product) {
         let price = self
             .prices
             .get(price_id)
@@ -326,14 +326,20 @@ impl Contract {
         (price, product)
     }
 
-    fn resolve_price_id_for_catalog_lock(
+    /// Picks the catalog price id for a lock from caller input.
+    ///
+    /// Exactly one of `price_id` or `product_id` must be `Some`. If only `product_id` is given,
+    /// the product's default catalog price is used; that price row must reference the same product.
+    fn resolve_price_id_for_lock(
         &self,
         price_id: Option<PriceId>,
         product_id: Option<ProductId>,
     ) -> PriceId {
         match (price_id, product_id) {
+            // Use the explicitly chosen price; active-catalog checks happen when the lock is applied.
             (Some(pid), None) => pid,
             (None, Some(prod_id)) => {
+                // Resolve via the product's default_price_id, then sanity-check the price row.
                 let pr_id = self
                     .products
                     .get(&prod_id)
@@ -350,14 +356,24 @@ impl Contract {
                 );
                 pr_id
             }
+            // Both `price_id` and `product_id` — caller must pick one.
             (Some(_), Some(_)) => env::panic_str("Provide only one of price_id or product_id"),
+            // Neither identifier given.
             (None, None) => env::panic_str("Provide price_id or product_id"),
         }
     }
 
-    /// Mint shares, persist lock and catalog usage, and optional subscription index — after a successful
-    /// pool `get_account_total_balance` refresh (production) or in unit tests without cross-contract calls.
-    pub(crate) fn apply_lock_mint_after_pool_balance_refresh(
+    /// Commits catalog-lock **state**: mints pool shares for `locked` NEAR, stores the lock row,
+    /// bumps catalog usage, updates validator pending stake and per-buyer share balance, then
+    /// optionally updates subscription storage (row + `(account, product)` index when new).
+    ///
+    /// **Inputs:** Re-reads active catalog price/product from `order` and requires
+    /// `product.validator_id == validator_id` so the mint matches the pool used on the lock path.
+    ///
+    /// **When to call:** Stake figures passed into [`mint_shares`] must match pool reality. Production
+    /// invokes this from [`crate::epoch::Contract::on_lock_finally_mint_and_maybe_post_settle`] after
+    /// a successful `get_account_total_balance` refresh on the lock promise chain.
+    pub(crate) fn commit_catalog_lock(
         &mut self,
         buyer: AccountId,
         locked: NearToken,
@@ -366,11 +382,12 @@ impl Contract {
         validator_id: ValidatorId,
         subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
     ) -> LockId {
+        // Catalog line item for this lock (one-off or subscription).
         let price_id = match &order {
             OrderRef::ProductPurchase { price_id, .. }
             | OrderRef::Subscription { price_id, .. } => price_id.clone(),
         };
-        let (mut price, mut product) = self.load_active_catalog_price_product(&price_id);
+        let (mut price, mut product) = self.get_active_price_and_product(&price_id);
         require!(
             product.validator_id == validator_id,
             "Catalog validator for this price does not match the pool used for this lock"
@@ -378,13 +395,8 @@ impl Contract {
 
         let mut validator = self.require_validator(&validator_id);
 
-        if validator.total_shares.0 == 0 {
-            require!(
-                locked.as_yoctonear() >= crate::config::MIN_FIRST_VALIDATOR_DEPOSIT_NEAR_YOCTO,
-                "The first stake on this validator must be at least 1 NEAR (protocol minimum)"
-            );
-        }
-
+        // Share price uses effective pool stake; skip the strict check when this is the first mint
+        // (`total_shares == 0`) so the first tranche can mint off `locked` alone.
         let effective_stake_yocto = effective_stake_for_share_exit(
             validator.total_staked_balance,
             validator.pending_to_stake,
@@ -403,12 +415,14 @@ impl Contract {
             locked.as_yoctonear(),
         );
 
+        // Validator pool aggregates: new shares and NEAR queued for the next `deposit_and_stake`.
         validator.total_shares = U128(validator_total_shares.saturating_add(new_shares));
         validator.pending_to_stake = validator
             .pending_to_stake
             .checked_add(locked)
             .expect("pending_to_stake overflow when recording this lock");
 
+        // This buyer's tranche on this pool (integer share units, same scale as `Validator::total_shares`).
         let user_validator_shares_key = (buyer.clone(), validator_id.clone());
         let user_shares_before_lock = self
             .user_validator_shares
@@ -420,6 +434,7 @@ impl Contract {
             user_shares_before_lock.saturating_add(new_shares),
         );
 
+        // Persist the lock (duration → `end_ns`); `order` ties billing/catalog to this stake.
         let lock_id = crate::ids::next_lock_id(&mut self.id_nonce);
         let lock = Lock {
             lock_id: lock_id.clone(),
@@ -435,16 +450,20 @@ impl Contract {
         };
         self.locks.insert(lock_id.clone(), lock);
 
+        // Catalog analytics + write-through updated rows and validator map.
         price.usage_count = price.usage_count.saturating_add(1);
         product.usage_count = product.usage_count.saturating_add(1);
+
         self.prices.insert(price.price_id.clone(), price);
         self.products.insert(product.product_id.clone(), product);
         self.validators.insert(validator_id, validator);
 
+        // Drives prepaid lock storage (`per_lock_storage_stake` × count) for this account.
         let user_lock_count_before = self.user_lock_count.get(&buyer).copied().unwrap_or(0);
         self.user_lock_count
             .insert(buyer.clone(), user_lock_count_before.saturating_add(1));
 
+        // Subscription path: caller already built/updated `Subscription`; we only persist + optional index.
         if let Some((mut subscription, sub_id, is_new_index)) = subscription_followup {
             subscription.last_lock_id = lock_id.clone();
             let sub_key = (
@@ -464,7 +483,7 @@ impl Contract {
 
     #[cfg(not(target_arch = "wasm32"))]
     /// Host-only: skips pool balance refresh and stake promises (see module comment on `lock_for_product`).
-    pub(crate) fn finalize_lock_common(
+    pub(crate) fn finalize_lock(
         &mut self,
         buyer: AccountId,
         _price: Price,
@@ -473,7 +492,7 @@ impl Contract {
         duration_ns: u128,
         order: OrderRef,
     ) -> LockId {
-        self.apply_lock_mint_after_pool_balance_refresh(
+        self.commit_catalog_lock(
             buyer,
             locked,
             duration_ns,

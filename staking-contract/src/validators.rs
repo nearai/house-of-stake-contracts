@@ -46,7 +46,7 @@ pub struct Validator {
     /// next NEAR epoch.
     pub last_settlement_epoch: u64,
     /// NEAR that has been **`withdraw`**n from the pool into this contract and sits in the claim bucket until
-    /// users call **`claim_unlocked_near`** (pro-rata against batches / tranches).
+    /// users call **`withdraw`** (pro-rata against batches / tranches).
     pub pending_to_withdraw: NearToken,
     /// Sum of all user **`user_pending_unstake`** tranche amounts for this pool; must stay consistent with
     /// claims and **`withdraw_batches`** liability snapshots.

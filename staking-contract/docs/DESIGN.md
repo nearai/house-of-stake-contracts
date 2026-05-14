@@ -13,7 +13,7 @@ Goals:
 - Be the single on-chain entrypoint for that billing model: products, prices, subscriptions, locks.
 - Price catalog amounts are **NEAR (yocto) only**; lock sufficiency is enforced on-chain via [`check_near_price_lock`](../src/internal.rs) (locked NEAR × duration vs catalog line item). There is **no** oracle and **no** USD conversion path.
 - Use a pooled meta-validator model: `stake.dao` is the only delegator on each whitelisted validator pool; per-user accounting is internal via shares.
-- **User-driven pool work:** there is no separate operator role and no public `epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator_balance` ABI. Pool calls (`deposit_and_stake`, `unstake`, withdraw-from-pool, balance refresh) are chained from **`lock`**, **`unlock`**, **`claim_unlocked_near`**, and optional manual **`epoch_settle(validator_id)`** for retry. See [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md).
+- **User-driven pool work:** there is no separate operator role and no public `epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator_balance` ABI. Pool calls (`deposit_and_stake`, `unstake`, withdraw-from-pool, balance refresh) are chained from **`lock`**, **`unlock`**, **`withdraw`**, and optional manual **`epoch_settle(validator_id)`** for retry. See [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md).
 - Be governed by HoS DAO (initially a security multisig), upgradable in the same pattern as the sibling contracts.
 - Share patterns/types with the existing workspace ([common/](../../common/), [lockup-contract/](../../lockup-contract/), [venear-contract/](../../venear-contract/)).
 
@@ -34,7 +34,7 @@ flowchart LR
     poolB[validator B pool]
     venearDao[venear.dao optional later]
 
-    user -- "lock / unlock / claim_unlocked_near" --> stakeDao
+    user -- "lock / unlock / withdraw" --> stakeDao
     stakeDao -- "deposit_and_stake / unstake / withdraw" --> poolA
     stakeDao -- "..." --> poolB
     stakeDao -- "listed?" --> allowlist

@@ -49,14 +49,20 @@ impl Contract {
 }
 
 impl Contract {
-    /// Release staking shares into the same unstake queue as [`Contract::unlock`] (epoch settlement → claim).
+    /// Commits a **share exit** for `account_id` on `validator_id`: burns `shares_remove` pool share units,
+    /// prices them into NEAR using the same effective backing as mints, updates validator pending
+    /// unstake buckets, and appends a [`PendingUnstakeTranche`] for later [`Contract::withdraw`](crate::Contract::withdraw).
+    ///
+    /// Same internal path as [`Contract::unlock`] after epoch preliminaries (settlement → claim).
     ///
     /// Pricing uses [`crate::internal::effective_stake_for_share_exit`]: **gross** backing minus the full
-    /// unsettled user exit liability [`Validator::pending_user_unstake_total`] (before this enqueue). That
+    /// unsettled user exit liability [`Validator::pending_user_unstake_total`] (before this commit). That
     /// keeps exits aligned with minting and prevents re-pricing after pool unstake clears
-    /// [`Validator::pending_to_unstake`] while claims are still outstanding. Returns NEAR yocto moved into
-    /// `user_pending_unstake` tranches.
-    pub(crate) fn queue_shares_unstake(
+    /// [`Validator::pending_to_unstake`] while claims are still outstanding.
+    ///
+    /// Returns the NEAR value in **yocto** that was appended as a [`PendingUnstakeTranche`] for `account_id`
+    /// on `validator_id` (same units as `near_amt` passed into `NearToken::from_yoctonear` for storage).
+    pub(crate) fn commit_share_exit(
         &mut self,
         account_id: AccountId,
         validator_id: ValidatorId,
@@ -64,16 +70,18 @@ impl Contract {
     ) -> u128 {
         require!(
             shares_remove > 0,
-            "Cannot queue unstake: share amount must be greater than zero"
+            "Cannot exit shares: amount must be greater than zero"
         );
         let mut validator = self.require_validator(&validator_id);
 
+        // Pool must have enough outstanding share units to burn.
         let validator_total_shares = validator.total_shares.0;
         require!(
             validator_total_shares > 0 && validator_total_shares >= shares_remove,
-            "Cannot queue unstake: validator pool has no shares or amount exceeds pool total"
+            "Cannot exit shares: validator pool has no shares or amount exceeds pool total"
         );
 
+        // Exit price: same effective backing as mint paths (`pending_user_unstake_total` in the divisor).
         let effective_stake_yocto = effective_stake_for_share_exit(
             validator.total_staked_balance,
             validator.pending_to_stake,
@@ -84,10 +92,13 @@ impl Contract {
             "Cannot price this exit: no effective stake left for remaining shares; wait for stake or withdraw steps to finish, then retry"
         );
 
+        // NEAR value of this exit when priced; also returned (yocto) for callers that log or chain.
         let near_amt =
             near_from_shares(shares_remove, effective_stake_yocto, validator_total_shares);
         let near_token = NearToken::from_yoctonear(near_amt);
 
+        // Validator: burn pool shares, queue NEAR for `try_epoch_settle` / pool `unstake`, and track
+        // gross user-exit liability until claims drain `user_pending_unstake`.
         validator.total_shares = U128(validator_total_shares - shares_remove);
         validator.pending_to_unstake = validator
             .pending_to_unstake
@@ -98,6 +109,7 @@ impl Contract {
             .checked_add(near_token)
             .expect("pending_user_unstake_total overflow");
 
+        // User position on this pool: decrement or drop the `(account, validator)` share row.
         let account_validator_shares_key = (account_id.clone(), validator_id.clone());
         let user_shares_on_validator = self
             .user_validator_shares
@@ -106,7 +118,7 @@ impl Contract {
             .unwrap_or(0);
         require!(
             user_shares_on_validator >= shares_remove,
-            "Cannot queue unstake: account does not hold enough shares on this validator"
+            "Cannot exit shares: account does not hold enough shares on this validator"
         );
         if user_shares_on_validator == shares_remove {
             self.user_validator_shares
@@ -118,6 +130,7 @@ impl Contract {
             );
         }
 
+        // Claimable tranche: `min_withdraw_batch_index` orders payouts after withdraw batches fill.
         let next_withdraw_batch_index = validator.withdraw_batches.len() as u32;
         let mut pending_unstake_tranches = self
             .user_pending_unstake
@@ -131,6 +144,7 @@ impl Contract {
         self.user_pending_unstake
             .insert(account_validator_shares_key, pending_unstake_tranches);
 
+        // Validator-level index of accounts that still have queued or claimable exit NEAR.
         if !validator
             .accounts_with_pending_unstake
             .contains(&account_id)

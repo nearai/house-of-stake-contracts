@@ -26,7 +26,7 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 | `get_config` | — | `Config` | Full governance & economics config. |
 | `get_version` | — | `string` | Crate package version string. |
 | `is_paused` | — | `bool` | Global pause flag. |
-| `get_account` | `account_id: AccountId` | `Account \| null` | NEP-style storage + `withdrawable_balance`. |
+| `get_account` | `account_id: AccountId` | `Account \| null` | NEP-style prepaid **`storage_deposit`** only. |
 | `get_validator` | `validator_id: AccountId` | `Validator \| null` | Validator row for one staking pool contract account. |
 | `get_validators` | `from_index: u64`, `limit: u64` | `Validator[]` | Paginated allowlist (stable ordering); each row’s **`validator_id`** is that pool’s account id. |
 | `get_product` | `product_id: string` | `Product \| null` | Catalog product (`prod_*`). |
@@ -106,7 +106,7 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 
 ## Pool pipeline (`epoch.rs` — internal scheduling + user helpers)
 
-Public **`epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator_balance`** are **not** exposed. Pool work is scheduled from **`lock`**, **`unlock`**, **`claim_unlocked_near`**, and may be advanced manually via **`epoch_settle`** (`validator_id`).
+Public **`epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator_balance`** are **not** exposed. Pool work is scheduled from **`lock`**, **`unlock`**, **`withdraw`**, and may be advanced manually via **`epoch_settle`** (`validator_id`).
 
 **Per allowlisted pool (`validator_id` = staking pool contract account):**
 
@@ -140,8 +140,7 @@ Public **`epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator
 
 | Method | Access | Deposit | Returns | Description |
 |--------|--------|---------|---------|-------------|
-| `claim_unlocked_near` | User | **1 yocto** | **`PromiseOrValue<()>`** | `validator_id` — pro-rata claim from **`pending_to_withdraw`** into **`withdrawable_balance`**. May chain an internal pool withdraw when the bucket is empty but settlement allows (see `docs/LAZY_EPOCH_PIPELINE.md`). |
-| `withdraw` | User | **1 yocto** | JSON args are **`{ "amount": <NearToken> }`**; use **`"amount": null`** to withdraw the full **`withdrawable_balance`**. A bare JSON **`null`** body does not deserialize (near-sdk wraps args in a struct keyed by parameter names). |
+| `withdraw` | User | **1 yocto** | **`Promise`** | JSON **`{ "validator_id": <AccountId> }`** — pro-rata claim from **`pending_to_withdraw`** / withdraw batches for your pending-unstake tranches on that pool, then **transfer** the NEAR to you in the same flow. May chain an internal pool withdraw when the bucket is empty but settlement allows (see `docs/LAZY_EPOCH_PIPELINE.md`). |
 | `sweep_stranded_withdraw_bucket` | **Owner** | **1 yocto** | `validator_id` — if user liability total is zero but **`pending_to_withdraw`** remains, send remainder to **`owner_account_id`**. |
 
 ---
@@ -157,7 +156,7 @@ Public **`epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator
 | `set_guardians` | Replace **`guardians`** list. |
 | `set_per_lock_storage_stake` | Per-lock storage surcharge config. |
 | `set_lock_bounds` | `min_lock_duration_ns`, `max_lock_duration_ns` (`U64`). |
-| `set_min_lock_amount` | Minimum attach for locks. |
+| `set_min_lock_amount` | Minimum attach for locks; must be **≥ 1 NEAR** (`PROTOCOL_MIN_LOCK_AMOUNT_YOCTO` in `config.rs`). |
 | `set_min_storage_deposit` | Minimum prepaid storage. |
 | `set_epoch_unstake_settle_epochs` | Epochs to wait between unstake rounds / withdraw gates. |
 
@@ -191,9 +190,9 @@ Public **`epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator
 
 ## Main types (contract JSON views)
 
-- **`Config`** — [`../src/config.rs`](../src/config.rs): `owner_account_id`, `guardians`, lock/storage economics, `epoch_unstake_settle_epochs`, … First delegation to an empty pool uses hardcoded **`MIN_FIRST_VALIDATOR_DEPOSIT_NEAR_YOCTO`** (1 NEAR), not a config field.
+- **`Config`** — [`../src/config.rs`](../src/config.rs): `owner_account_id`, `guardians`, lock/storage economics, `epoch_unstake_settle_epochs`, … **`min_lock_amount`** is the minimum attach for locks (including first delegation to an empty pool); governance may raise it but not below **`PROTOCOL_MIN_LOCK_AMOUNT_YOCTO`** (1 NEAR), enforced in `new` and `set_min_lock_amount`.
 - **`Validator`** — [`../src/validators.rs`](../src/validators.rs): **`validator_id`** (pool contract account), accounting fields, pending buckets, **`tx_status`** (`Idle` \| `Busy`).
-- **`Product`**, **`Price`**, **`Subscription`**, **`Lock`**, **`Account`** — [`../src/types.rs`](../src/types.rs), [`../src/accounts.rs`](../src/accounts.rs).
+- **`Product`**, **`Price`**, **`Subscription`**, **`Lock`**, **`Account`** — [`../src/types.rs`](../src/types.rs), [`../src/accounts.rs`](../src/accounts.rs). **`Account`** is prepaid **`storage_deposit`** only (unlocked stake exits transfer directly to the user via **`withdraw`**).
 
 For EVENT_JSON shapes and naming, see [`../src/events.rs`](../src/events.rs).
 

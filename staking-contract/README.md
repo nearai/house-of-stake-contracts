@@ -32,8 +32,7 @@ Typical sequence after locks exist (no public `epoch_*`; the contract schedules 
 1. **`lock_for_product` / `lock_for_subscription`** — Mints shares, queues `pending_to_stake`, then [`try_epoch_settle_pool`](src/epoch.rs) runs after balance refresh (one pool **`deposit_and_stake`** or **`unstake`** per NEAR epoch, net of pending buckets).
 2. User **`unlock`** — After lock period; refresh balance, queue unstake, then **`unstake`** / withdraw-from-pool as needed.
 3. Wait **`epoch_unstake_settle_epochs`** (config) after each successful pool **`unstake`**.
-4. User **`claim_unlocked_near`** — May pull unstaked NEAR from the pool into `pending_to_withdraw` when allowed, then pro-rata claim into `withdrawable_balance`.
-5. User **`withdraw`** — Transfer `withdrawable_balance` out.
+4. User **`withdraw(validator_id)`** — May pull unstaked NEAR from the pool into `pending_to_withdraw` when allowed, then pro-rata claim and **transfer** that NEAR to the caller in one flow.
 
 **Per pool and NEAR epoch (matches the staking pool contract):** the pool accepts **at most one** successful **`deposit_and_stake`** **or** **`unstake`** per `epoch_height` for that pool account. The contract records the epoch of the last such success in **`Validator.last_stake_epoch`**, so a second success in the **same** epoch is rejected.
 
@@ -49,7 +48,7 @@ Implemented in code:
 - Stripe-like deterministic IDs (`prod_*`, `price_*`, `lock_*`, `sub_*`)
 - Share minting helpers (`internal.rs`) and NEAR-denominated `lock_for_product` / `lock_for_subscription`
 - Subscriptions keyed by `(account_id, product_id)` with tier = [`Subscription::price_id`](src/types.rs): **`cancel_subscription`**, **`upgrade_subscription`**, **`schedule_downgrade_subscription`** ([`subscriptions.rs`](src/subscriptions.rs)). On renewal with a scheduled downgrade, **Phase B prorate** releases catalog tier-gap stake into the normal unstake queue ([`subscriptions.rs`](src/subscriptions.rs) / [`lock.rs`](src/lock.rs) / [`unlock.rs`](src/unlock.rs)).
-- `unlock` (user-driven pool unstake path); **`lock_for_*`** schedules refresh + net pool settle; **`claim_unlocked_near`** may chain pool withdraw then claim; **`commit_pending_pool_stake`** / **`settle_validator_pool`** retry settle; user **`withdraw`** from **`withdrawable_balance`**
+- `unlock` (user-driven pool unstake path); **`lock_for_*`** schedules refresh + net pool settle; **`withdraw`** may chain pool withdraw then pro-rata payout; **`commit_pending_pool_stake`** / **`settle_validator_pool`** retry settle
 - Pool callbacks in [`epoch.rs`](src/epoch.rs); **`storage_withdraw`**
 - **EVENT_JSON** for lock/unlock, catalog, validators, epoch ops, claim/withdraw, pool withdraw-in ([`events.rs`](src/events.rs)) — `standard: "stake.dao"`, `version: "1.0.0"`, nested `data`
 - **`get_products`**, **`get_product_default_price`**, catalog **`unarchive_*`**, **`set_product_default_price`**; **`lock_for_product`** / **`lock_for_subscription`** accept explicit **`price_id`** or **`product_id`** (uses **`Product.default_price_id`**) ([`products.rs`](src/products.rs), [`lock.rs`](src/lock.rs))
@@ -57,7 +56,7 @@ Implemented in code:
 Still to refine per [docs/PLAN.md](docs/PLAN.md) / [docs/ACTION_ITEMS.md](docs/ACTION_ITEMS.md):
 
 - **Calendar-accurate** subscription billing (average-month linear helper only in [`subscriptions.rs`](src/subscriptions.rs); **`lock_for_subscription`** exists but uses linear months)
-- Longer **sandbox E2E** (unlock → `epoch_unstake` → `epoch_withdraw` → `claim_unlocked_near` → `withdraw`) — see [`tests/sandbox_mock_pool.rs`](tests/sandbox_mock_pool.rs); extend as needed
+- Longer **sandbox E2E** (unlock → `epoch_unstake` → `epoch_withdraw` → `withdraw`) — see [`tests/sandbox_mock_pool.rs`](tests/sandbox_mock_pool.rs); extend as needed
 
 ## Workspace
 
