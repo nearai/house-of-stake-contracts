@@ -502,3 +502,42 @@ impl Contract {
         )
     }
 }
+
+// =============================================================================
+// Epoch pipeline: catalog mint tail (callback from `epoch::on_epoch_settlement_dispatch_continue`)
+// =============================================================================
+
+#[near]
+impl Contract {
+    #[private]
+    pub fn on_lock_finally_mint_and_maybe_post_settle(
+        &mut self,
+        buyer: AccountId,
+        locked: NearToken,
+        duration_ns: u128,
+        order: OrderRef,
+        validator_id: ValidatorId,
+        subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
+    ) -> PromiseOrValue<()> {
+        let _lock_id = self.commit_catalog_lock(
+            buyer,
+            locked,
+            duration_ns,
+            order,
+            validator_id.clone(),
+            subscription_followup,
+        );
+        let validator = self.require_validator(&validator_id);
+        require!(
+            validator.tx_status == TransactionStatus::Idle,
+            "Validator pool is busy; wait for the in-flight pool call to finish"
+        );
+        let has_p = validator.pending_to_stake.as_yoctonear() > 0
+            || validator.pending_to_unstake.as_yoctonear() > 0;
+        if has_p && validator.last_settlement_epoch < env::epoch_height() {
+            PromiseOrValue::Promise(self.try_epoch_settle(validator_id, false))
+        } else {
+            PromiseOrValue::Value(())
+        }
+    }
+}

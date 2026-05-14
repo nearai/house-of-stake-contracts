@@ -2,6 +2,7 @@
 //! `withdraw_batches`) against this account `user_pending_unstake` tranches, then transfer to the user.
 //! **WASM:** [`crate::epoch::Contract::promise_validator_per_epoch_settlement_then`] runs first (same as
 //! `lock` / `unlock`). **Non-WASM:** the payout tail runs directly for `testing_env!` tests.
+//! Private callback **`on_withdraw_user_after_epoch_settlement`** (epoch dispatch) lives in this module.
 
 use crate::gas::callbacks;
 use crate::internal::withdraw_batch_credit_yocto;
@@ -85,6 +86,16 @@ impl Contract {
     #[private]
     /// Continuation after `try_epoch_withdraw`: bucket should now hold NEAR for batch claims + transfer.
     pub fn on_withdraw_after_pool_withdraw_for_user(
+        &mut self,
+        account_id: AccountId,
+        validator_id: ValidatorId,
+    ) -> Promise {
+        self.withdraw_user_transfer_tail(account_id, validator_id)
+    }
+
+    #[private]
+    /// After shared per-epoch settlement (`epoch.rs`): user withdraw (batch claim + transfer; may prefetch pool withdraw).
+    pub fn on_withdraw_user_after_epoch_settlement(
         &mut self,
         account_id: AccountId,
         validator_id: ValidatorId,

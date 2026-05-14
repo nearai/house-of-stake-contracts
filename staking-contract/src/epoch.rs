@@ -17,6 +17,14 @@
 //! **`deposit_and_stake`** or **`unstake`** per `epoch_height` per pool (see [`crate::validators::Validator::last_settlement_epoch`]).
 //! Pending stake and unstake are compared in yocto: stake the excess, unstake the deficit, or clear both
 //! without a pool call when equal. Anyone may call [`Contract::epoch_settle`] to run or retry net settle for one pool (same per-epoch rules).
+//!
+//! ## File layout
+//! - **This module:** `ExtSelfEpoch` / `ExtStakingPool`, public **`epoch_settle`**, internal orchestration,
+//!   and **epoch-only** `#[private]` callbacks (settlement chain, deposit/unstake tails, pool withdraw).
+//! - **`lock.rs`:** `on_lock_finally_mint_and_maybe_post_settle`.
+//! - **`unlock.rs`:** `on_unlock_tail_after_pre_user_settle`, `on_unstake_pipeline_unstaked_balance`,
+//!   `on_after_withdraw_then_unstake`.
+//! - **`withdraw.rs`:** `on_withdraw_user_after_epoch_settlement`.
 
 use crate::events;
 use crate::gas::{callbacks, staking_pool};
@@ -26,6 +34,10 @@ use near_sdk::json_types::{U64, U128};
 use near_sdk::{
     AccountId, NearToken, Promise, PromiseOrValue, env, is_promise_success, near, require,
 };
+
+// =============================================================================
+// External interfaces (cross-contract)
+// =============================================================================
 
 #[ext_contract(ext_self_epoch)]
 pub trait ExtSelfEpoch {
@@ -131,6 +143,24 @@ pub trait ExtStakingPool {
     fn withdraw(&mut self, amount: NearToken);
     fn get_account_total_balance(&self, account_id: AccountId) -> NearToken;
 }
+
+// =============================================================================
+// Public epoch API
+// =============================================================================
+
+#[near]
+impl Contract {
+    /// Public entry: run [`Contract::try_epoch_settle`] for one allowlisted pool (manual retry or advance
+    /// pending stake/unstake when automatic promises did not complete). Same per-epoch mutex as automatic flows.
+    pub fn epoch_settle(&mut self, validator_id: ValidatorId) -> Promise {
+        self.assert_not_paused();
+        self.try_epoch_settle(validator_id, false)
+    }
+}
+
+// =============================================================================
+// Internal epoch orchestration (`pub(crate)`)
+// =============================================================================
 
 impl Contract {
     /// Starts `get_account_total_balance` for `validator_id` (read-only; unlock sets `Busy` before calling).
@@ -505,6 +535,10 @@ impl Contract {
     }
 }
 
+// =============================================================================
+// Private epoch promise callbacks (settlement + pool stake/unstake/withdraw)
+// =============================================================================
+
 #[near]
 impl Contract {
     #[private]
@@ -630,146 +664,6 @@ impl Contract {
                 .with_static_gas(callbacks::ON_WITHDRAW_USER_AFTER_EPOCH_SETTLEMENT)
                 .on_withdraw_user_after_epoch_settlement(account_id, validator_id),
         }
-    }
-
-    #[private]
-    pub fn on_lock_finally_mint_and_maybe_post_settle(
-        &mut self,
-        buyer: AccountId,
-        locked: NearToken,
-        duration_ns: u128,
-        order: OrderRef,
-        validator_id: ValidatorId,
-        subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
-    ) -> PromiseOrValue<()> {
-        let _lock_id = self.commit_catalog_lock(
-            buyer,
-            locked,
-            duration_ns,
-            order,
-            validator_id.clone(),
-            subscription_followup,
-        );
-        let validator = self.require_validator(&validator_id);
-        require!(
-            validator.tx_status == TransactionStatus::Idle,
-            "Validator pool is busy; wait for the in-flight pool call to finish"
-        );
-        let has_p = validator.pending_to_stake.as_yoctonear() > 0
-            || validator.pending_to_unstake.as_yoctonear() > 0;
-        if has_p && validator.last_settlement_epoch < env::epoch_height() {
-            PromiseOrValue::Promise(self.try_epoch_settle(validator_id, false))
-        } else {
-            PromiseOrValue::Value(())
-        }
-    }
-
-    #[private]
-    pub fn on_unlock_tail_after_pre_user_settle(
-        &mut self,
-        lock_id: LockId,
-        account_id: AccountId,
-        validator_id: ValidatorId,
-        shares_remove: u128,
-    ) -> Promise {
-        let mut validator = self.require_validator(&validator_id);
-        require!(
-            validator.tx_status == TransactionStatus::Idle,
-            "Validator pool is busy; wait for the in-flight pool call to finish"
-        );
-        validator.tx_status = TransactionStatus::Busy;
-        self.validators.insert(validator_id.clone(), validator);
-
-        let mut lock = self
-            .locks
-            .get(&lock_id)
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("Lock not found"));
-        require!(
-            lock.account_id == account_id,
-            "Unlock no longer matches the lock owner; retry"
-        );
-        require!(
-            lock.status == LockStatus::Active,
-            "Lock is no longer active; nothing to unlock"
-        );
-        require!(lock.validator_id == validator_id, "Lock validator mismatch");
-        require!(lock.shares.0 == shares_remove, "Lock shares changed; retry");
-
-        let account_log = lock.account_id.clone();
-        let validator_log = lock.validator_id.clone();
-        self.commit_share_exit(account_id.clone(), validator_id.clone(), shares_remove);
-        lock.status = LockStatus::UnlockRequested;
-        self.locks.insert(lock_id.clone(), lock);
-
-        crate::events::log_unlock(lock_id.as_str(), &account_log, &validator_log);
-
-        self.promise_unstake_pipeline_after_unlock_queue(validator_id)
-    }
-
-    #[private]
-    pub fn on_withdraw_user_after_epoch_settlement(
-        &mut self,
-        account_id: AccountId,
-        validator_id: ValidatorId,
-    ) -> Promise {
-        self.withdraw_user_transfer_tail(account_id, validator_id)
-    }
-
-    #[private]
-    pub fn on_unstake_pipeline_unstaked_balance(
-        &mut self,
-        #[callback] unstaked_balance: NearToken,
-        validator_id: ValidatorId,
-    ) -> PromiseOrValue<bool> {
-        if !is_promise_success() {
-            let mut validator = self.require_validator_pool_callback(&validator_id);
-            validator.tx_status = TransactionStatus::Idle;
-            self.validators.insert(validator_id, validator);
-            env::panic_str("Could not read unstaked balance from the pool; retry in a few blocks");
-        }
-
-        let validator = self.require_validator(&validator_id);
-        let can_withdraw = validator.last_unstake_epoch > 0
-            && env::epoch_height()
-                >= validator
-                    .last_unstake_epoch
-                    .saturating_add(self.config.epoch_unstake_settle_epochs);
-
-        if unstaked_balance.as_yoctonear() > 0 && can_withdraw {
-            return self
-                .try_epoch_withdraw(validator_id.clone(), true)
-                .then(
-                    ext_self_epoch::ext(env::current_account_id())
-                        .with_static_gas(callbacks::ON_GET_UNSTAKED_FOR_WITHDRAW)
-                        .on_after_withdraw_then_unstake(validator_id),
-                )
-                .into();
-        }
-
-        let validator = self.require_validator(&validator_id);
-        if validator.last_settlement_epoch < env::epoch_height() {
-            return self.try_epoch_settle(validator_id, true).into();
-        }
-        PromiseOrValue::Value(true)
-    }
-
-    #[private]
-    pub fn on_after_withdraw_then_unstake(
-        &mut self,
-        validator_id: ValidatorId,
-    ) -> PromiseOrValue<bool> {
-        let validator = self.require_validator(&validator_id);
-        require!(
-            validator.tx_status == TransactionStatus::Idle,
-            "Validator pool is busy; wait for the in-flight pool call to finish"
-        );
-        if validator.pending_to_stake.as_yoctonear() == 0
-            && validator.pending_to_unstake.as_yoctonear() == 0
-        {
-            return PromiseOrValue::Value(true);
-        }
-        self.try_epoch_settle(validator_id, false).into()
     }
 
     #[private]
@@ -940,12 +834,5 @@ impl Contract {
         }
         self.validators.insert(validator_id, validator);
         PromiseOrValue::Value(ok)
-    }
-
-    /// Public entry: run [`Contract::try_epoch_settle`] for one allowlisted pool (manual retry or advance
-    /// pending stake/unstake when automatic promises did not complete). Same per-epoch mutex as automatic flows.
-    pub fn epoch_settle(&mut self, validator_id: ValidatorId) -> Promise {
-        self.assert_not_paused();
-        self.try_epoch_settle(validator_id, false)
     }
 }

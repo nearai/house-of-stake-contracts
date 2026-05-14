@@ -1,7 +1,9 @@
+use crate::epoch::ext_self_epoch;
+use crate::gas::callbacks;
 use crate::internal::{effective_stake_for_share_exit, near_from_shares};
 use crate::*;
 use near_sdk::json_types::U128;
-use near_sdk::{NearToken, Promise, env, near, require};
+use near_sdk::{NearToken, Promise, PromiseOrValue, env, is_promise_success, near, require};
 
 #[near]
 impl Contract {
@@ -45,6 +47,112 @@ impl Contract {
                 shares_remove: lock.shares.0,
             },
         )
+    }
+}
+
+// =============================================================================
+// Epoch pipeline: unlock / unstake tail (callbacks from `epoch` settlement dispatch)
+// =============================================================================
+
+#[near]
+impl Contract {
+    #[private]
+    pub fn on_unlock_tail_after_pre_user_settle(
+        &mut self,
+        lock_id: LockId,
+        account_id: AccountId,
+        validator_id: ValidatorId,
+        shares_remove: u128,
+    ) -> Promise {
+        let mut validator = self.require_validator(&validator_id);
+        require!(
+            validator.tx_status == TransactionStatus::Idle,
+            "Validator pool is busy; wait for the in-flight pool call to finish"
+        );
+        validator.tx_status = TransactionStatus::Busy;
+        self.validators.insert(validator_id.clone(), validator);
+
+        let mut lock = self
+            .locks
+            .get(&lock_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("Lock not found"));
+        require!(
+            lock.account_id == account_id,
+            "Unlock no longer matches the lock owner; retry"
+        );
+        require!(
+            lock.status == LockStatus::Active,
+            "Lock is no longer active; nothing to unlock"
+        );
+        require!(lock.validator_id == validator_id, "Lock validator mismatch");
+        require!(lock.shares.0 == shares_remove, "Lock shares changed; retry");
+
+        let account_log = lock.account_id.clone();
+        let validator_log = lock.validator_id.clone();
+        self.commit_share_exit(account_id.clone(), validator_id.clone(), shares_remove);
+        lock.status = LockStatus::UnlockRequested;
+        self.locks.insert(lock_id.clone(), lock);
+
+        crate::events::log_unlock(lock_id.as_str(), &account_log, &validator_log);
+
+        self.promise_unstake_pipeline_after_unlock_queue(validator_id)
+    }
+
+    #[private]
+    pub fn on_unstake_pipeline_unstaked_balance(
+        &mut self,
+        #[callback] unstaked_balance: NearToken,
+        validator_id: ValidatorId,
+    ) -> PromiseOrValue<bool> {
+        if !is_promise_success() {
+            let mut validator = self.require_validator_pool_callback(&validator_id);
+            validator.tx_status = TransactionStatus::Idle;
+            self.validators.insert(validator_id, validator);
+            env::panic_str("Could not read unstaked balance from the pool; retry in a few blocks");
+        }
+
+        let validator = self.require_validator(&validator_id);
+        let can_withdraw = validator.last_unstake_epoch > 0
+            && env::epoch_height()
+                >= validator
+                    .last_unstake_epoch
+                    .saturating_add(self.config.epoch_unstake_settle_epochs);
+
+        if unstaked_balance.as_yoctonear() > 0 && can_withdraw {
+            return self
+                .try_epoch_withdraw(validator_id.clone(), true)
+                .then(
+                    ext_self_epoch::ext(env::current_account_id())
+                        .with_static_gas(callbacks::ON_GET_UNSTAKED_FOR_WITHDRAW)
+                        .on_after_withdraw_then_unstake(validator_id),
+                )
+                .into();
+        }
+
+        let validator = self.require_validator(&validator_id);
+        if validator.last_settlement_epoch < env::epoch_height() {
+            return self.try_epoch_settle(validator_id, true).into();
+        }
+        PromiseOrValue::Value(true)
+    }
+
+    #[private]
+    pub fn on_after_withdraw_then_unstake(
+        &mut self,
+        validator_id: ValidatorId,
+    ) -> PromiseOrValue<bool> {
+        let validator = self.require_validator(&validator_id);
+        require!(
+            validator.tx_status == TransactionStatus::Idle,
+            "Validator pool is busy; wait for the in-flight pool call to finish"
+        );
+        if validator.pending_to_stake.as_yoctonear() == 0
+            && validator.pending_to_unstake.as_yoctonear() == 0
+        {
+            return PromiseOrValue::Value(true);
+        }
+        self.try_epoch_settle(validator_id, false).into()
     }
 }
 
