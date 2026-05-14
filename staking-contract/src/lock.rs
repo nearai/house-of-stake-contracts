@@ -78,17 +78,18 @@ impl Contract {
             validator.tx_status == TransactionStatus::Idle,
             "Validator pool is busy; wait for the in-flight pool call to finish"
         );
-        // Production: [`Contract::promise_validator_per_epoch_settlement_then`] then mint (see `epoch.rs`).
-        // Host `tests/*.rs` use `near_sdk::testing_env!`, which does not run returned promise chains like
-        // the real runtime; the `#[cfg(test)]` path runs the same mint/persist logic synchronously without
-        // a pool round-trip (see `finalize_lock_common` → `apply_lock_mint_after_pool_balance_refresh`).
-        #[cfg(test)]
+        // WASM production: [`Contract::promise_validator_per_epoch_settlement_then`] then mint (`epoch.rs`).
+        // Host targets (`tests/*.rs`, `cargo check` on the host triple): `near_sdk::testing_env!` does not run
+        // returned promise chains—use synchronous mint (`finalize_lock_common` → `apply_lock_mint_after_pool_balance_refresh`).
+        // The library is built **without** `cfg(test)` for integration tests, so this split uses `target_arch`
+        // (not `cfg(test)`): WASM builds always use the real promise path.
+        #[cfg(not(target_arch = "wasm32"))]
         {
             return PromiseOrValue::Value(
                 self.finalize_lock_common(buyer, price, product, locked, dur_u128, order),
             );
         }
-        #[cfg(not(test))]
+        #[cfg(target_arch = "wasm32")]
         {
             return self
                 .promise_lock_refresh_then_finalize(
@@ -263,9 +264,8 @@ impl Contract {
             validator.tx_status == TransactionStatus::Idle,
             "Validator pool is busy; wait for the in-flight pool call to finish"
         );
-        // Same `#[cfg(test)]` rationale as `lock_for_product_with_price_id`: sync finish for host tests
-        // without executing the pool refresh promise chain.
-        #[cfg(test)]
+        // Same host synchronous path as `lock_for_product_with_price_id` (see comment there).
+        #[cfg(not(target_arch = "wasm32"))]
         {
             let mut subscription = subscription;
             let lock_id = self.finalize_lock_common(
@@ -283,7 +283,7 @@ impl Contract {
             }
             return PromiseOrValue::Value(lock_id);
         }
-        #[cfg(not(test))]
+        #[cfg(target_arch = "wasm32")]
         {
             return self
                 .promise_lock_refresh_then_finalize(
@@ -462,8 +462,8 @@ impl Contract {
         lock_id
     }
 
-    #[cfg(test)]
-    /// Used only by the `#[cfg(test)]` lock paths above: skips pool balance refresh and stake promises.
+    #[cfg(not(target_arch = "wasm32"))]
+    /// Host-only: skips pool balance refresh and stake promises (see module comment on `lock_for_product`).
     pub(crate) fn finalize_lock_common(
         &mut self,
         buyer: AccountId,

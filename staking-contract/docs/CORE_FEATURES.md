@@ -20,7 +20,7 @@ Quick reference for reviewers: what the contract does on-chain, and which source
 |----------|---------|-----|
 | **1** | `staking-contract/src/epoch.rs` | Cross-contract promises, callbacks, `last_settlement_epoch`, net settle, withdraw-before-unstake; highest correctness risk. |
 | **2** | `staking-contract/src/internal.rs` | Share mint/burn math and NEAR price sufficiency checks. |
-| **3** | `staking-contract/src/lock.rs` | Product/subscription **locks**, renewal window, `finalize_lock_common`; sync vs async (`PromiseOrValue`) test branches. |
+| **3** | `staking-contract/src/lock.rs` | Product/subscription **locks**, renewal, `finalize_lock_common`; synchronous mint on **non-WASM** targets (`testing_env!` / integration tests on the host triple), promise chain on **WASM**. |
 | **3b** | `staking-contract/src/subscriptions.rs` | Subscription **lifecycle** RPCs, downgrade prorate at renewal, billing month helper. |
 | **4** | `staking-contract/src/withdraw.rs` | Claim batches, pool withdraw chaining, user liability vs pool state. |
 | **5** | `staking-contract/src/unlock.rs` | Unlock entry, Busy/Idle, interaction with epoch pipeline. |

@@ -432,6 +432,8 @@ impl Contract {
     }
 
     /// Catalog lock: shared per-epoch settlement then mint (see [`Contract::promise_validator_per_epoch_settlement_then`]).
+    /// WASM-only: the host triple uses synchronous mint in [`crate::lock`] instead of this promise entrypoint.
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn promise_lock_refresh_then_finalize(
         &self,
         buyer: AccountId,
