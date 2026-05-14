@@ -96,7 +96,7 @@ impl Contract {
 
         crate::events::log_unlock(lock_id.as_str(), &account_log, &validator_log);
 
-        self.promise_unstake_pipeline_after_unlock_queue(validator_id)
+        self.promise_post_unlock_unstaked_pipeline(validator_id)
     }
 
     #[private]
@@ -170,11 +170,8 @@ impl Contract {
     ) -> u64 {
         let current_epoch_height = env::epoch_height();
         let settle = self.config.epoch_unstake_settle_epochs;
-        let unstake_start_epoch = current_epoch_height.max(
-            validator
-                .last_unstake_epoch
-                .saturating_add(settle),
-        );
+        let unstake_start_epoch =
+            current_epoch_height.max(validator.last_unstake_epoch.saturating_add(settle));
         unstake_start_epoch.saturating_add(settle)
     }
 

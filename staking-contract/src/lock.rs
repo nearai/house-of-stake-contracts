@@ -92,13 +92,16 @@ impl Contract {
         #[cfg(target_arch = "wasm32")]
         {
             return self
-                .promise_lock_refresh_then_finalize(
-                    buyer,
-                    locked,
-                    dur_u128,
-                    order,
-                    validator_id,
-                    None,
+                .promise_validator_per_epoch_settlement_then(
+                    validator_id.clone(),
+                    PerEpochContinue::CatalogLockMint {
+                        validator_id,
+                        buyer,
+                        locked,
+                        duration_ns: dur_u128,
+                        order,
+                        subscription_followup: None,
+                    },
                 )
                 .into();
         }
@@ -286,13 +289,16 @@ impl Contract {
         #[cfg(target_arch = "wasm32")]
         {
             return self
-                .promise_lock_refresh_then_finalize(
-                    buyer,
-                    locked,
-                    duration_ns,
-                    order,
-                    validator_id,
-                    Some((subscription, sub_id, is_new_index)),
+                .promise_validator_per_epoch_settlement_then(
+                    validator_id.clone(),
+                    PerEpochContinue::CatalogLockMint {
+                        validator_id,
+                        buyer,
+                        locked,
+                        duration_ns,
+                        order,
+                        subscription_followup: Some((subscription, sub_id, is_new_index)),
+                    },
                 )
                 .into();
         }

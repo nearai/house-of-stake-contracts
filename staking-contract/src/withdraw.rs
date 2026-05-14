@@ -1,23 +1,22 @@
-//! User exit payouts: pull NEAR from the contract per-pool **withdraw bucket** (`pending_to_withdraw`)
-//! against this account `user_pending_unstake` tranches (epoch-gated), then transfer to the user.
-//! **WASM:** [`crate::epoch::Contract::promise_validator_per_epoch_settlement_then`] runs first (same as
-//! `lock` / `unlock`). **Non-WASM:** the payout tail runs directly for `testing_env!` tests.
-//! Private callback **`on_withdraw_user_after_epoch_settlement`** (epoch dispatch) lives in this module.
+//! User exit payouts: NEAR sitting in the pool-scoped **withdraw bucket** ([`Validator::pending_to_withdraw`])
+//! is matched against this account’s `user_pending_unstake` tranches
+//! (epoch-gated), then sent to the user.
+//!
+//! **Flow (WASM):** `withdraw` → shared per-epoch settlement ([`crate::epoch::Contract::promise_validator_per_epoch_settlement_then`],
+//! same ordering as `lock` / `unlock`) → [`Contract::on_user_withdraw_payout_continue`] → [`Contract::payout_user_withdraw`].
+//! That payout step may attach one pool `withdraw` prefetch when the bucket is still empty (`LAZY_EPOCH_PIPELINE` section 2b),
+//! then [`Contract::claim_from_withdraw_bucket`] + `Promise::transfer`.
+//!
+//! **Non-WASM:** `testing_env!` skips promise chains; [`Contract::payout_user_withdraw`] runs directly from [`Contract::withdraw`].
 
+use crate::epoch::ext_self_epoch;
 use crate::gas::callbacks;
 use crate::*;
-use near_sdk::ext_contract;
 use near_sdk::{AccountId, NearToken, Promise, env, near, require};
 
-#[ext_contract(ext_self_withdraw)]
-/// Self-call after an optional pool `withdraw` prefetched funds into `pending_to_withdraw`.
-pub trait ExtSelfWithdraw {
-    fn on_withdraw_after_pool_withdraw_for_user(
-        &mut self,
-        account_id: AccountId,
-        validator_id: ValidatorId,
-    ) -> Promise;
-}
+// ---------------------------------------------------------------------------
+// Public `withdraw` + private promise callback (WASM continuation)
+// ---------------------------------------------------------------------------
 
 #[near]
 impl Contract {
@@ -28,10 +27,10 @@ impl Contract {
     /// refresh, withdraw-if-ready, and net settle run before the payout (same ordering as **`lock`** /
     /// **`unlock`**).
     ///
-    /// **Non-WASM:** Runs the payout tail only (host `testing_env!` does not execute pool promise chains;
+    /// **Non-WASM:** Runs [`Contract::payout_user_withdraw`] only (host `testing_env!` does not execute pool promise chains;
     /// see `lock.rs`).
     ///
-    /// The payout tail may prefetch a pool `withdraw` when the in-contract bucket is empty (LAZY_EPOCH_PIPELINE §2b).
+    /// [`Contract::payout_user_withdraw`] may prefetch a pool `withdraw` when the in-contract bucket is empty (`LAZY_EPOCH_PIPELINE` section 2b).
     #[payable]
     pub fn withdraw(&mut self, validator_id: ValidatorId) -> Promise {
         near_sdk::assert_one_yocto();
@@ -43,7 +42,7 @@ impl Contract {
         let account_validator_key = (account_id.clone(), validator_id.clone());
         // Must have tranches from a prior `commit_share_exit` / unlock on this pool.
         let user_pending_tranches_yocto =
-            self.user_pending_tranches_total_yocto(&account_validator_key);
+            self.sum_user_unstake_tranches_yocto(&account_validator_key);
         require!(
             user_pending_tranches_yocto > 0,
             "You have no unlocked NEAR waiting to claim for this validator"
@@ -54,11 +53,11 @@ impl Contract {
             validator.tx_status == TransactionStatus::Idle,
             "Validator pool is busy; wait for the in-flight pool call to finish"
         );
-        // Keep this account on the validator’s worklist for settle/withdraw scheduling.
-        if user_pending_tranches_yocto > 0
-            && !validator
-                .accounts_with_pending_unstake
-                .contains(&account_id)
+        // `accounts_with_pending_unstake` is the validator-side index used by epoch / withdraw scheduling;
+        // ensure this account is listed whenever they still carry tranches (idempotent if already present).
+        if !validator
+            .accounts_with_pending_unstake
+            .contains(&account_id)
         {
             validator
                 .accounts_with_pending_unstake
@@ -68,7 +67,7 @@ impl Contract {
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            return self.withdraw_user_transfer_tail(account_id, validator_id);
+            return self.payout_user_withdraw(account_id, validator_id);
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -83,29 +82,25 @@ impl Contract {
     }
 
     #[private]
-    /// Continuation after `try_epoch_withdraw`: bucket should now hold NEAR for claims + transfer.
-    pub fn on_withdraw_after_pool_withdraw_for_user(
+    /// Single continuation for user-withdraw payout: invoked after per-epoch settlement **or** after an
+    /// optional `try_epoch_withdraw` hop prefetched the pool → contract bucket. Always resumes
+    /// [`Contract::payout_user_withdraw`] (which may chain **another** pool withdraw if the bucket is still empty).
+    pub fn on_user_withdraw_payout_continue(
         &mut self,
         account_id: AccountId,
         validator_id: ValidatorId,
     ) -> Promise {
-        self.withdraw_user_transfer_tail(account_id, validator_id)
-    }
-
-    #[private]
-    /// After shared per-epoch settlement (`epoch.rs`): user withdraw (claim + transfer; may prefetch pool withdraw).
-    pub fn on_withdraw_user_after_epoch_settlement(
-        &mut self,
-        account_id: AccountId,
-        validator_id: ValidatorId,
-    ) -> Promise {
-        self.withdraw_user_transfer_tail(account_id, validator_id)
+        self.payout_user_withdraw(account_id, validator_id)
     }
 }
 
+// ---------------------------------------------------------------------------
+// Tranche math, bucket claim (no transfer), and payout orchestration
+// ---------------------------------------------------------------------------
+
 impl Contract {
-    /// Sum of all `PendingUnstakeTranche.amount` for this `(account, validator)`.
-    fn user_pending_tranches_total_yocto(
+    /// Total yocto across **all** tranches for `(account, validator)` (includes not-yet-claimable epochs).
+    fn sum_user_unstake_tranches_yocto(
         &self,
         account_validator_key: &(AccountId, ValidatorId),
     ) -> u128 {
@@ -120,30 +115,32 @@ impl Contract {
             .unwrap_or(0)
     }
 
-    /// Sum of tranche NEAR with `epoch_height >= tranche.available_epoch_height`.
-    fn sum_user_tranches_eligible_by_epoch_yocto(
+    /// Yocto the user may claim at `at_epoch`: tranches with `available_epoch_height <= at_epoch`.
+    fn sum_claimable_user_tranches_yocto(
         &self,
         account_validator_key: &(AccountId, ValidatorId),
-        epoch_height: u64,
+        at_epoch: u64,
     ) -> u128 {
         self.user_pending_unstake
             .get(account_validator_key)
             .map(|tranches| {
                 tranches
                     .iter()
-                    .filter(|tranche| epoch_height >= tranche.available_epoch_height)
+                    .filter(|tranche| at_epoch >= tranche.available_epoch_height)
                     .map(|tranche| tranche.amount.as_yoctonear())
                     .fold(0u128, |sum, yocto| sum.saturating_add(yocto))
             })
             .unwrap_or(0)
     }
 
-    /// Deducts `deduct_yocto` from epoch-eligible tranches in FIFO order. Returns true when
-    /// `user_pending_unstake` for this key is now empty.
-    fn reduce_user_tranches_after_claim(
+    /// Applies `deduct_yocto` against **claimable-at-`at_epoch`** tranches in vector order (FIFO among
+    /// eligible rows). Panics if eligible tranches cannot cover `deduct_yocto` (caller must size the claim).
+    ///
+    /// Returns `true` when the `(account, validator)` tranche list is now empty (remove from worklists).
+    fn deduct_claim_from_user_tranches_fifo(
         &mut self,
         account_validator_key: &(AccountId, ValidatorId),
-        epoch_height: u64,
+        at_epoch: u64,
         mut deduct_yocto: u128,
     ) -> bool {
         if deduct_yocto == 0 {
@@ -158,7 +155,7 @@ impl Contract {
             .cloned()
             .unwrap_or_default();
         for tranche in pending_unstake_tranches.iter_mut() {
-            if epoch_height < tranche.available_epoch_height {
+            if at_epoch < tranche.available_epoch_height {
                 continue;
             }
             if deduct_yocto == 0 {
@@ -188,10 +185,11 @@ impl Contract {
         }
     }
 
-    /// Claim from `pending_to_withdraw` after tranche epoch and bucket preconditions.
-    /// Credits `min(eligible_tranche_yocto, pending_to_withdraw)` for this user, then reduces tranches
-    /// and validator totals. Returns NEAR for the caller to transfer (this fn does not send tokens).
-    pub(crate) fn withdraw_unlocked_near_finish(
+    /// Moves up to `min(claimable user tranches at current epoch, pool withdraw bucket)` from
+    /// [`Validator::pending_to_withdraw`] into this user’s hands **as a [`NearToken`] return value**:
+    /// updates tranches, `pending_user_unstake_total`, and emits `log_withdraw`. Does **not** attach
+    /// `Promise::transfer` — use [`Contract::payout_user_withdraw`] for the full user-facing payout.
+    pub(crate) fn claim_from_withdraw_bucket(
         &mut self,
         account_id: AccountId,
         validator_id: ValidatorId,
@@ -209,8 +207,7 @@ impl Contract {
         );
 
         let eh = env::epoch_height();
-        let eligible_yocto =
-            self.sum_user_tranches_eligible_by_epoch_yocto(&account_validator_key, eh);
+        let eligible_yocto = self.sum_claimable_user_tranches_yocto(&account_validator_key, eh);
         require!(
             eligible_yocto > 0,
             "Nothing to claim yet: wait until `epoch_height >=` your tranche's available epoch height"
@@ -225,21 +222,24 @@ impl Contract {
         validator.pending_to_withdraw = validator
             .pending_to_withdraw
             .checked_sub(NearToken::from_yoctonear(credit_yocto))
-            .expect(
-                "pending_to_withdraw accounting mismatch; contact the contract maintainers",
-            );
+            .expect("pending_to_withdraw accounting mismatch; contact the contract maintainers");
         validator.pending_user_unstake_total = validator
             .pending_user_unstake_total
             .checked_sub(NearToken::from_yoctonear(credit_yocto))
-            .expect("pending_user_unstake_total accounting mismatch; contact the contract maintainers");
+            .expect(
+                "pending_user_unstake_total accounting mismatch; contact the contract maintainers",
+            );
 
-        let user_done = self.reduce_user_tranches_after_claim(&account_validator_key, eh, credit_yocto);
+        let user_done =
+            self.deduct_claim_from_user_tranches_fifo(&account_validator_key, eh, credit_yocto);
         if user_done {
             validator
                 .accounts_with_pending_unstake
                 .retain(|a| *a != account_id);
         }
 
+        // Defensive second check: FIFO path should already clear the worklist when tranches vanish,
+        // but retain here if storage was cleared without `user_done` (should not happen in normal flows).
         if self
             .user_pending_unstake
             .get(&account_validator_key)
@@ -258,9 +258,13 @@ impl Contract {
         credit
     }
 
-    /// After optional shared settlement (WASM): claim from withdraw bucket and transfer, or prefetch pool
-    /// withdraw when the bucket is still empty (§2b). Used by `withdraw` and `on_withdraw_after_pool_withdraw_for_user`.
-    pub(crate) fn withdraw_user_transfer_tail(
+    /// End-to-end user withdraw payout on this pool: either pull NEAR already in `pending_to_withdraw`
+    /// through [`Contract::claim_from_withdraw_bucket`] and `Promise::transfer`, **or** (bucket empty
+    /// but unstake is old enough and the pool is idle) enqueue [`Contract::try_epoch_withdraw`] and resume
+    /// on [`Contract::on_user_withdraw_payout_continue`] (`LAZY_EPOCH_PIPELINE` section 2b).
+    ///
+    /// Called from [`Contract::withdraw`] (non-WASM / tests) and from [`Contract::on_user_withdraw_payout_continue`] on WASM.
+    pub(crate) fn payout_user_withdraw(
         &mut self,
         account_id: AccountId,
         validator_id: ValidatorId,
@@ -268,6 +272,8 @@ impl Contract {
         let validator = self.require_validator(&validator_id);
         let pending_withdraw_bucket_yocto = validator.pending_to_withdraw.as_yoctonear();
 
+        // Prefetch only when: nothing in-bucket yet, we have seen an unstake epoch, the configured settle
+        // delay has passed (pool-side funds should be withdrawable), and no other pool tx is in flight.
         let may_prefetch_pool_withdraw = pending_withdraw_bucket_yocto == 0
             && validator.last_unstake_epoch > 0
             && env::epoch_height()
@@ -279,14 +285,14 @@ impl Contract {
         if may_prefetch_pool_withdraw {
             self.validators.insert(validator_id.clone(), validator);
             return self.try_epoch_withdraw(validator_id.clone(), false).then(
-                ext_self_withdraw::ext(env::current_account_id())
+                ext_self_epoch::ext(env::current_account_id())
                     .with_static_gas(callbacks::ON_CLAIM_AFTER_POOL_WITHDRAW)
-                    .on_withdraw_after_pool_withdraw_for_user(account_id, validator_id),
+                    .on_user_withdraw_payout_continue(account_id, validator_id),
             );
         }
 
         self.validators.insert(validator_id.clone(), validator);
-        let credit = self.withdraw_unlocked_near_finish(account_id.clone(), validator_id);
+        let credit = self.claim_from_withdraw_bucket(account_id.clone(), validator_id);
         Promise::new(account_id).transfer(credit)
     }
 }
