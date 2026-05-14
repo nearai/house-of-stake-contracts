@@ -157,6 +157,27 @@ impl Contract {
 }
 
 impl Contract {
+    /// NEAR `epoch_height` from which a new [`PendingUnstakeTranche`] may participate in
+    /// [`crate::Contract::withdraw`] (when `env::epoch_height() >=` this value).
+    ///
+    /// 1. `unstake_start_epoch = max(current_epoch_height, last_unstake_epoch + epoch_unstake_settle_epochs)`
+    /// 2. `available_epoch_height = unstake_start_epoch + epoch_unstake_settle_epochs`
+    ///
+    /// Uses [`crate::config::Config::epoch_unstake_settle_epochs`].
+    pub(crate) fn pending_unstake_tranche_available_epoch_height(
+        &self,
+        validator: &Validator,
+    ) -> u64 {
+        let current_epoch_height = env::epoch_height();
+        let settle = self.config.epoch_unstake_settle_epochs;
+        let unstake_start_epoch = current_epoch_height.max(
+            validator
+                .last_unstake_epoch
+                .saturating_add(settle),
+        );
+        unstake_start_epoch.saturating_add(settle)
+    }
+
     /// Commits a **share exit** for `account_id` on `validator_id`: burns `shares_remove` pool share units,
     /// prices them into NEAR using the same effective backing as mints, updates validator pending
     /// unstake buckets, and appends a [`PendingUnstakeTranche`] for later [`Contract::withdraw`](crate::Contract::withdraw).
@@ -238,8 +259,9 @@ impl Contract {
             );
         }
 
-        // Claimable tranche: `min_withdraw_batch_index` orders payouts after withdraw batches fill.
-        let next_withdraw_batch_index = validator.withdraw_batches.len() as u32;
+        // Epoch gate for `withdraw`: see [`Contract::pending_unstake_tranche_available_epoch_height`].
+        let available_epoch_height =
+            self.pending_unstake_tranche_available_epoch_height(&validator);
         let mut pending_unstake_tranches = self
             .user_pending_unstake
             .get(&account_validator_shares_key)
@@ -247,7 +269,7 @@ impl Contract {
             .unwrap_or_default();
         pending_unstake_tranches.push(PendingUnstakeTranche {
             amount: near_token,
-            min_withdraw_batch_index: next_withdraw_batch_index,
+            available_epoch_height,
         });
         self.user_pending_unstake
             .insert(account_validator_shares_key, pending_unstake_tranches);

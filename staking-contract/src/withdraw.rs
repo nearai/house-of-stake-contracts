@@ -1,11 +1,10 @@
-//! User exit payouts: pull NEAR from the contract per-pool **withdraw bucket** (`pending_to_withdraw` /
-//! `withdraw_batches`) against this account `user_pending_unstake` tranches, then transfer to the user.
+//! User exit payouts: pull NEAR from the contract per-pool **withdraw bucket** (`pending_to_withdraw`)
+//! against this account `user_pending_unstake` tranches (epoch-gated), then transfer to the user.
 //! **WASM:** [`crate::epoch::Contract::promise_validator_per_epoch_settlement_then`] runs first (same as
 //! `lock` / `unlock`). **Non-WASM:** the payout tail runs directly for `testing_env!` tests.
 //! Private callback **`on_withdraw_user_after_epoch_settlement`** (epoch dispatch) lives in this module.
 
 use crate::gas::callbacks;
-use crate::internal::withdraw_batch_credit_yocto;
 use crate::*;
 use near_sdk::ext_contract;
 use near_sdk::{AccountId, NearToken, Promise, env, near, require};
@@ -22,8 +21,8 @@ pub trait ExtSelfWithdraw {
 
 #[near]
 impl Contract {
-    /// Claim pro-rata NEAR from withdraw batches for this account on `validator_id` and **transfer it
-    /// immediately** to the caller.
+    /// Claim NEAR from `pending_to_withdraw` for this account on `validator_id` (epoch-eligible tranches)
+    /// and **transfer it immediately** to the caller.
     ///
     /// **WASM:** Uses [`crate::epoch::Contract::promise_validator_per_epoch_settlement_then`] so balance
     /// refresh, withdraw-if-ready, and net settle run before the payout (same ordering as **`lock`** /
@@ -84,7 +83,7 @@ impl Contract {
     }
 
     #[private]
-    /// Continuation after `try_epoch_withdraw`: bucket should now hold NEAR for batch claims + transfer.
+    /// Continuation after `try_epoch_withdraw`: bucket should now hold NEAR for claims + transfer.
     pub fn on_withdraw_after_pool_withdraw_for_user(
         &mut self,
         account_id: AccountId,
@@ -94,7 +93,7 @@ impl Contract {
     }
 
     #[private]
-    /// After shared per-epoch settlement (`epoch.rs`): user withdraw (batch claim + transfer; may prefetch pool withdraw).
+    /// After shared per-epoch settlement (`epoch.rs`): user withdraw (claim + transfer; may prefetch pool withdraw).
     pub fn on_withdraw_user_after_epoch_settlement(
         &mut self,
         account_id: AccountId,
@@ -105,7 +104,7 @@ impl Contract {
 }
 
 impl Contract {
-    /// Sum of all `PendingUnstakeTranche.amount` for this `(account, validator)` (any batch index).
+    /// Sum of all `PendingUnstakeTranche.amount` for this `(account, validator)`.
     fn user_pending_tranches_total_yocto(
         &self,
         account_validator_key: &(AccountId, ValidatorId),
@@ -121,30 +120,30 @@ impl Contract {
             .unwrap_or(0)
     }
 
-    /// Subset of tranche NEAR whose `min_withdraw_batch_index` allows claiming against `withdraw_batches[batch_idx]`.
-    fn sum_user_tranches_eligible_yocto(
+    /// Sum of tranche NEAR with `epoch_height >= tranche.available_epoch_height`.
+    fn sum_user_tranches_eligible_by_epoch_yocto(
         &self,
         account_validator_key: &(AccountId, ValidatorId),
-        batch_idx: u32,
+        epoch_height: u64,
     ) -> u128 {
         self.user_pending_unstake
             .get(account_validator_key)
             .map(|tranches| {
                 tranches
                     .iter()
-                    .filter(|tranche| tranche.min_withdraw_batch_index <= batch_idx)
+                    .filter(|tranche| epoch_height >= tranche.available_epoch_height)
                     .map(|tranche| tranche.amount.as_yoctonear())
                     .fold(0u128, |sum, yocto| sum.saturating_add(yocto))
             })
             .unwrap_or(0)
     }
 
-    /// Deducts `deduct_yocto` from tranches tied to `batch_idx` or earlier batches; preserves tranche order.
-    /// Returns true when `user_pending_unstake` for this key is now empty (caller may drop index rows).
-    fn reduce_user_tranches_after_batch_claim(
+    /// Deducts `deduct_yocto` from epoch-eligible tranches in FIFO order. Returns true when
+    /// `user_pending_unstake` for this key is now empty.
+    fn reduce_user_tranches_after_claim(
         &mut self,
         account_validator_key: &(AccountId, ValidatorId),
-        batch_idx: u32,
+        epoch_height: u64,
         mut deduct_yocto: u128,
     ) -> bool {
         if deduct_yocto == 0 {
@@ -159,7 +158,7 @@ impl Contract {
             .cloned()
             .unwrap_or_default();
         for tranche in pending_unstake_tranches.iter_mut() {
-            if tranche.min_withdraw_batch_index > batch_idx {
+            if epoch_height < tranche.available_epoch_height {
                 continue;
             }
             if deduct_yocto == 0 {
@@ -176,7 +175,7 @@ impl Contract {
         }
         require!(
             deduct_yocto == 0,
-            "Claim does not match your pending unstake for this batch (contract accounting error)"
+            "Claim does not match your pending unstake for this withdraw (contract accounting error)"
         );
         pending_unstake_tranches.retain(|tranche| tranche.amount.as_yoctonear() > 0);
         if pending_unstake_tranches.is_empty() {
@@ -189,11 +188,9 @@ impl Contract {
         }
     }
 
-    /// Pro-rata claim from `pending_to_withdraw` / `withdraw_batches` after tranche and bucket preconditions.
-    ///
-    /// For each batch with `remaining > 0`, credits this user a share of `remaining` proportional to their
-    /// eligible tranche liability vs `batch.liability_at_fund`, then reduces tranches and validator totals.
-    /// Returns NEAR for the caller to transfer (this fn does not send tokens).
+    /// Claim from `pending_to_withdraw` after tranche epoch and bucket preconditions.
+    /// Credits `min(eligible_tranche_yocto, pending_to_withdraw)` for this user, then reduces tranches
+    /// and validator totals. Returns NEAR for the caller to transfer (this fn does not send tokens).
     pub(crate) fn withdraw_unlocked_near_finish(
         &mut self,
         account_id: AccountId,
@@ -211,56 +208,38 @@ impl Contract {
             "Nothing to claim: total user liability for this pool is zero (no tranches left to match the withdraw bucket)"
         );
 
-        let mut total_credit_yocto = 0u128;
+        let eh = env::epoch_height();
+        let eligible_yocto =
+            self.sum_user_tranches_eligible_by_epoch_yocto(&account_validator_key, eh);
+        require!(
+            eligible_yocto > 0,
+            "Nothing to claim yet: wait until `epoch_height >=` your tranche's available epoch height"
+        );
 
-        // Walk batches in order: tranche `min_withdraw_batch_index` gates which batch a tranche can hit.
-        for (batch_idx, batch) in validator.withdraw_batches.iter_mut().enumerate() {
-            let batch_remaining_yocto = batch.remaining.as_yoctonear();
-            if batch_remaining_yocto == 0 {
-                continue;
-            }
-            let eligible_user_unstake_yocto =
-                self.sum_user_tranches_eligible_yocto(&account_validator_key, batch_idx as u32);
-            if eligible_user_unstake_yocto == 0 {
-                continue;
-            }
-            let batch_liability_yocto = batch.liability_at_fund.as_yoctonear();
-            // How much of this batch’s remaining NEAR this user’s eligible tranches can absorb (see `internal`).
-            let claim_credit_yocto = withdraw_batch_credit_yocto(
-                batch_remaining_yocto,
-                eligible_user_unstake_yocto,
-                batch_liability_yocto,
+        let credit_yocto = eligible_yocto.min(pending_withdraw_bucket_yocto);
+        require!(
+            credit_yocto > 0,
+            "Nothing to claim for this call (zero credit after bucket cap)"
+        );
+
+        validator.pending_to_withdraw = validator
+            .pending_to_withdraw
+            .checked_sub(NearToken::from_yoctonear(credit_yocto))
+            .expect(
+                "pending_to_withdraw accounting mismatch; contact the contract maintainers",
             );
-            if claim_credit_yocto == 0 {
-                continue;
-            }
+        validator.pending_user_unstake_total = validator
+            .pending_user_unstake_total
+            .checked_sub(NearToken::from_yoctonear(credit_yocto))
+            .expect("pending_user_unstake_total accounting mismatch; contact the contract maintainers");
 
-            batch.remaining = NearToken::from_yoctonear(batch_remaining_yocto - claim_credit_yocto);
-            validator.pending_to_withdraw = validator
-                .pending_to_withdraw
-                .checked_sub(NearToken::from_yoctonear(claim_credit_yocto))
-                .expect(
-                    "pending_to_withdraw accounting mismatch; contact the contract maintainers",
-                );
-            validator.pending_user_unstake_total = validator
-                .pending_user_unstake_total
-                .checked_sub(NearToken::from_yoctonear(claim_credit_yocto))
-                .expect("pending_user_unstake_total accounting mismatch; contact the contract maintainers");
-
-            let user_done = self.reduce_user_tranches_after_batch_claim(
-                &account_validator_key,
-                batch_idx as u32,
-                claim_credit_yocto,
-            );
-            if user_done {
-                validator
-                    .accounts_with_pending_unstake
-                    .retain(|a| *a != account_id);
-            }
-            total_credit_yocto = total_credit_yocto.saturating_add(claim_credit_yocto);
+        let user_done = self.reduce_user_tranches_after_claim(&account_validator_key, eh, credit_yocto);
+        if user_done {
+            validator
+                .accounts_with_pending_unstake
+                .retain(|a| *a != account_id);
         }
 
-        // If tranches were fully cleared mid-loop, ensure the validator index does not keep this account.
         if self
             .user_pending_unstake
             .get(&account_validator_key)
@@ -271,12 +250,7 @@ impl Contract {
                 .retain(|a| *a != account_id);
         }
 
-        require!(
-            total_credit_yocto > 0,
-            "Nothing to claim for this call (rounding produced zero across all withdraw batches)"
-        );
-
-        let credit = NearToken::from_yoctonear(total_credit_yocto);
+        let credit = NearToken::from_yoctonear(credit_yocto);
 
         self.validators.insert(validator_id.clone(), validator);
 
@@ -284,7 +258,7 @@ impl Contract {
         credit
     }
 
-    /// After optional shared settlement (WASM): claim from withdraw batches and transfer, or prefetch pool
+    /// After optional shared settlement (WASM): claim from withdraw bucket and transfer, or prefetch pool
     /// withdraw when the bucket is still empty (§2b). Used by `withdraw` and `on_withdraw_after_pool_withdraw_for_user`.
     pub(crate) fn withdraw_user_transfer_tail(
         &mut self,

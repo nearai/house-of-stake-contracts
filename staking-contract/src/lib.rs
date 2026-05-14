@@ -22,7 +22,7 @@ pub mod withdraw;
 pub use accounts::Account;
 pub use config::Config;
 pub use types::*;
-pub use validators::{Validator, WithdrawBatch};
+pub use validators::Validator;
 
 use near_sdk::store::{LookupMap, Vector};
 use near_sdk::{AccountId, BorshStorageKey, PanicOnDefault, near};
@@ -71,8 +71,8 @@ pub struct Contract {
     pub locks: LookupMap<LockId, Lock>,
     /// User stake position on a pool: `(AccountId, ValidatorId)` → outstanding share units (integer, same scale as [`Validator::total_shares`]). [`ValidatorId`](crate::types::ValidatorId) is the pool contract account.
     pub user_validator_shares: LookupMap<(AccountId, ValidatorId), u128>,
-    /// After unlock, NEAR value queued for this user on this pool until [`crate::Contract::withdraw`]
-    /// (filled once funds are withdrawn from the pool into `pending_to_withdraw`).
+    /// After unlock, NEAR liability slices for this user on this pool until [`crate::Contract::withdraw`]
+    /// (epoch-gated; paid from `pending_to_withdraw` once pool funds are in the bucket).
     pub user_pending_unstake: LookupMap<(AccountId, ValidatorId), Vec<PendingUnstakeTranche>>,
     /// Monotonic count of locks created per account; multiplied by [`Config::per_lock_storage_stake`] for prepaid lock storage.
     pub user_lock_count: LookupMap<AccountId, u32>,

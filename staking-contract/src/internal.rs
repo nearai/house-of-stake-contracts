@@ -17,29 +17,6 @@ pub const NS_PER_DAY_TIMESTAMP: u64 = 86_400_000_000_000;
 /// Average Gregorian month length in nanoseconds: `30.4375` days = `(487 / 16) * NS_PER_DAY`.
 pub const AVG_MONTH_NS: u128 = NS_PER_DAY * 487 / 16;
 
-/// Pro-rata credit from one withdraw batch toward a user: `floor(remaining * eligible / liability)`
-/// capped by `eligible` and `remaining`, plus a **1 yocto** minimum when all inputs are positive but the
-/// floor rounds to zero (matches [`crate::Contract::withdraw`] batch credit).
-pub fn withdraw_batch_credit_yocto(
-    batch_remaining_yocto: u128,
-    user_eligible_yocto: u128,
-    liability_at_fund_yocto: u128,
-) -> u128 {
-    if batch_remaining_yocto == 0 || user_eligible_yocto == 0 || liability_at_fund_yocto == 0 {
-        return 0;
-    }
-    let credit_raw = (U256::from(batch_remaining_yocto) * U256::from(user_eligible_yocto))
-        / U256::from(liability_at_fund_yocto);
-    let mut credit_yocto = credit_raw
-        .as_u128()
-        .min(user_eligible_yocto)
-        .min(batch_remaining_yocto);
-    if credit_yocto == 0 {
-        credit_yocto = 1.min(user_eligible_yocto).min(batch_remaining_yocto);
-    }
-    credit_yocto
-}
-
 pub fn effective_stake_yocto(total_staked_balance: NearToken, pending_to_stake: NearToken) -> u128 {
     total_staked_balance
         .as_yoctonear()
@@ -189,34 +166,5 @@ mod tests {
         if m > 1 {
             assert!(check_near_price_lock(&price, m - 1, d).is_err());
         }
-    }
-
-    #[test]
-    fn withdraw_batch_credit_pro_rata_rounding() {
-        assert_eq!(withdraw_batch_credit_yocto(100, 30, 100), 30);
-    }
-
-    #[test]
-    fn withdraw_batch_credit_tiny_bucket_dust_minimum() {
-        assert_eq!(withdraw_batch_credit_yocto(1, 1, 2), 1);
-    }
-
-    #[test]
-    fn withdraw_batch_credit_large_product_uses_u256() {
-        let w_y: u128 = 1u128 << 64;
-        let o_y: u128 = 1u128 << 64;
-        let t_y: u128 = 1u128 << 64;
-        assert!(
-            w_y.checked_mul(o_y).is_none(),
-            "sanity: product overflows u128; math must use U256"
-        );
-        assert_eq!(withdraw_batch_credit_yocto(w_y, o_y, t_y), 1u128 << 64);
-    }
-
-    #[test]
-    fn withdraw_batch_credit_zero_when_any_operand_zero() {
-        assert_eq!(withdraw_batch_credit_yocto(0, 1, 1), 0);
-        assert_eq!(withdraw_batch_credit_yocto(1, 0, 1), 0);
-        assert_eq!(withdraw_batch_credit_yocto(1, 1, 0), 0);
     }
 }

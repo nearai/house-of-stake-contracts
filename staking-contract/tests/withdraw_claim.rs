@@ -1,4 +1,4 @@
-//! `withdraw(validator_id)` edge cases (VM state): pro-rata exit from pool withdraw batches.
+//! `withdraw(validator_id)` edge cases (VM state): withdraw bucket and epoch-gated tranches.
 
 mod common;
 
@@ -18,7 +18,7 @@ fn withdraw_fails_when_pool_withdraw_bucket_empty() {
         ukey.clone(),
         vec![PendingUnstakeTranche {
             amount: NearToken::from_near(1),
-            min_withdraw_batch_index: 0,
+            available_epoch_height: 0,
         }],
     );
 

@@ -56,15 +56,15 @@ pub enum TransactionStatus {
     Busy,
 }
 
-/// One slice of a user's post-unlock NEAR liability and which withdraw batches it may draw from.
+/// One slice of a user's post-unlock NEAR liability; claims from `pending_to_withdraw` are allowed
+/// when `env::epoch_height() >= available_epoch_height` (see [`crate::Contract::pending_unstake_tranche_available_epoch_height`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[near(serializers = [borsh, json])]
 pub struct PendingUnstakeTranche {
     pub amount: NearToken,
-    /// A batch at index `b` may pay this tranche iff `min_withdraw_batch_index <= b` (see
-    /// [`crate::validators::WithdrawBatch`]). `min_withdraw_batch_index` is set to the pool's
-    /// `withdraw_batches.len()` at enqueue time.
-    pub min_withdraw_batch_index: u32,
+    /// Earliest `epoch_height` (inclusive) for [`crate::Contract::withdraw`]; set at unlock via
+    /// [`crate::Contract::pending_unstake_tranche_available_epoch_height`].
+    pub available_epoch_height: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

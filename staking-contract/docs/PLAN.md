@@ -358,7 +358,7 @@ After unlock, the user receives liquid NEAR via **`withdraw(validator_id)`** (an
 
 ### 5.4 Claims and withdraw
 
-- **`withdraw(validator_id)`** — user receives cleared NEAR for their unlock tranches on that pool (pro-rata against withdraw batches); may chain internal pool withdraw when batches need prefetched funds ([`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md) §2b), then **transfers** the credited amount to the caller.
+- **`withdraw(validator_id)`** — user receives cleared NEAR for their unlock tranches on that pool once `epoch_height >=` each tranche’s `available_epoch_height`, capped by `pending_to_withdraw`; may chain internal pool withdraw when the bucket is empty ([`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md) §2b), then **transfers** the credited amount to the caller.
 
 ### 5.5 Pool settlement (lazy, `epoch.rs`)
 

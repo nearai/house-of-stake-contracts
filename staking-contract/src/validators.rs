@@ -2,16 +2,6 @@ use crate::*;
 use near_sdk::json_types::{U64, U128};
 use near_sdk::{AccountId, NearToken, env, near, require};
 
-/// One `epoch_withdraw` transfer into the contract: users with tranches eligible for this index
-/// share `remaining` pro-rata against the frozen `liability_at_fund` snapshot (so later unlocks
-/// cannot dilute an older bucket).
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[near(serializers = [borsh, json])]
-pub struct WithdrawBatch {
-    pub remaining: NearToken,
-    pub liability_at_fund: NearToken,
-}
-
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
 pub struct Validator {
@@ -46,16 +36,12 @@ pub struct Validator {
     /// next NEAR epoch.
     pub last_settlement_epoch: u64,
     /// NEAR that has been **`withdraw`**n from the pool into this contract and sits in the claim bucket until
-    /// users call **`withdraw`** (pro-rata against batches / tranches).
+    /// users call **`withdraw`** (epoch-gated tranches).
     pub pending_to_withdraw: NearToken,
     /// Sum of all user **`user_pending_unstake`** tranche amounts for this pool; must stay consistent with
-    /// claims and **`withdraw_batches`** liability snapshots.
+    /// claims and **`pending_to_withdraw`**.
     pub pending_user_unstake_total: NearToken,
-    /// FIFO withdraw buckets funded from the pool; each batch’s index is frozen into user tranches as
-    /// `min_withdraw_batch_index` for pro-rata claims.
-    pub withdraw_batches: Vec<WithdrawBatch>,
-    /// Accounts that currently have at least one non-empty tranche in **`user_pending_unstake`** for this pool
-    /// (used when funding a batch to snapshot cohort liability).
+    /// Accounts that currently have at least one non-empty tranche in **`user_pending_unstake`** for this pool.
     pub accounts_with_pending_unstake: Vec<AccountId>,
 
     /// At most one in-flight cross-contract **mutating** pool pipeline for this row (`Idle` vs `Busy`).
@@ -87,7 +73,6 @@ impl Contract {
             last_settlement_epoch: 0,
             pending_to_withdraw: NearToken::from_near(0),
             pending_user_unstake_total: NearToken::from_near(0),
-            withdraw_batches: Vec::new(),
             accounts_with_pending_unstake: Vec::new(),
             tx_status: TransactionStatus::Idle,
         };

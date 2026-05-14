@@ -216,73 +216,6 @@ impl Contract {
             )
     }
 
-    /// Removes `yocto` from [`Validator::pending_user_unstake_total`] and matching `user_pending_unstake`
-    /// tranches (FIFO over [`Validator::accounts_with_pending_unstake`]). Caller must keep
-    /// `pending_to_unstake` consistent with the same reduction.
-    pub(crate) fn absorb_unstake_liability_yocto_from_users(
-        &mut self,
-        validator: &mut Validator,
-        validator_id: &ValidatorId,
-        mut remaining: u128,
-    ) {
-        if remaining == 0 {
-            return;
-        }
-        let pending_user_unstake_total_yocto = validator.pending_user_unstake_total.as_yoctonear();
-        require!(
-            remaining <= pending_user_unstake_total_yocto,
-            "Net settle: absorb exceeds pending user unstake liability"
-        );
-        validator.pending_user_unstake_total =
-            NearToken::from_yoctonear(pending_user_unstake_total_yocto.saturating_sub(remaining));
-
-        for account_id in validator.accounts_with_pending_unstake.clone() {
-            if remaining == 0 {
-                break;
-            }
-            let account_validator_key = (account_id.clone(), validator_id.clone());
-            let Some(mut pending_tranches) = self
-                .user_pending_unstake
-                .get(&account_validator_key)
-                .cloned()
-            else {
-                continue;
-            };
-            for tranche in pending_tranches.iter_mut() {
-                if remaining == 0 {
-                    break;
-                }
-                let tranche_amount_yocto = tranche.amount.as_yoctonear();
-                if tranche_amount_yocto == 0 {
-                    continue;
-                }
-                let take_yocto = tranche_amount_yocto.min(remaining);
-                tranche.amount = NearToken::from_yoctonear(tranche_amount_yocto - take_yocto);
-                remaining = remaining.saturating_sub(take_yocto);
-            }
-            pending_tranches.retain(|tranche| tranche.amount.as_yoctonear() > 0);
-            if pending_tranches.is_empty() {
-                self.user_pending_unstake.remove(&account_validator_key);
-            } else {
-                self.user_pending_unstake
-                    .insert(account_validator_key, pending_tranches);
-            }
-        }
-        require!(
-            remaining == 0,
-            "Net settle: absorb could not be mapped to user unstake tranches (accounting mismatch)"
-        );
-        validator
-            .accounts_with_pending_unstake
-            .retain(|account_id| {
-                let account_validator_key = (account_id.clone(), validator_id.clone());
-                self.user_pending_unstake
-                    .get(&account_validator_key)
-                    .map(|tranches| !tranches.is_empty())
-                    .unwrap_or(false)
-            });
-    }
-
     /// Net-zero pending clear (no pool `deposit` / `unstake`): shared by [`Contract::on_settle_net_zero_done`]
     /// and the catalog-lock pre-user inline path.
     pub(crate) fn apply_validator_net_zero_settle_internal(
@@ -296,13 +229,9 @@ impl Contract {
                 && validator.pending_to_unstake.as_yoctonear() == matched_pending_yocto,
             "Net zero settle state changed before callback; retry next epoch"
         );
-        self.absorb_unstake_liability_yocto_from_users(
-            &mut validator,
-            validator_id,
-            matched_pending_yocto,
-        );
         validator.pending_to_stake = NearToken::from_near(0);
-        validator.pending_to_unstake = NearToken::from_near(0);
+        // User tranches are unchanged; re-queue pool unstake for remaining user exit liability.
+        validator.pending_to_unstake = validator.pending_user_unstake_total;
         validator.last_settlement_epoch = env::epoch_height();
         validator.tx_status = TransactionStatus::Idle;
         self.validators.insert(validator_id.clone(), validator);
@@ -704,12 +633,10 @@ impl Contract {
             validator.pending_to_stake =
                 NearToken::from_yoctonear(pend.saturating_sub(stake_y).saturating_sub(absorb_y));
             validator.pending_to_unstake = NearToken::from_yoctonear(pu.saturating_sub(absorb_y));
-            if absorb_y > 0 {
-                self.absorb_unstake_liability_yocto_from_users(
-                    &mut validator,
-                    &validator_id,
-                    absorb_y,
-                );
+            if validator.pending_to_unstake.as_yoctonear() == 0
+                && validator.pending_user_unstake_total.as_yoctonear() > 0
+            {
+                validator.pending_to_unstake = validator.pending_user_unstake_total;
             }
             validator.total_staked_balance = validator
                 .total_staked_balance
@@ -804,32 +731,14 @@ impl Contract {
                 "Recorded pool balance is less than the withdrawn amount; retry after the next successful balance refresh from the pool"
             );
             validator.total_staked_balance = NearToken::from_yoctonear(bal_y - credited_yocto);
-            let k = validator.withdraw_batches.len() as u32;
-            let accounts_snapshot = validator.accounts_with_pending_unstake.clone();
-            let mut l_k = 0u128;
-            for uid in &accounts_snapshot {
-                let ukey = (uid.clone(), validator_id.clone());
-                if let Some(trs) = self.user_pending_unstake.get(&ukey) {
-                    for t in trs {
-                        if t.min_withdraw_batch_index <= k {
-                            l_k = l_k.saturating_add(t.amount.as_yoctonear());
-                        }
-                    }
-                }
-            }
             require!(
-                l_k > 0,
-                "Cannot record this withdraw: no user pending unstake matches this batch; try withdraw to refresh accounting, then retry"
+                validator.pending_user_unstake_total.as_yoctonear() > 0,
+                "Cannot record this withdraw: no user pending unstake for this pool; try withdraw to refresh accounting, then retry"
             );
-            let l_near = NearToken::from_yoctonear(l_k);
             validator.pending_to_withdraw = validator
                 .pending_to_withdraw
                 .checked_add(add)
                 .expect("pending_to_withdraw overflow after pool transfer");
-            validator.withdraw_batches.push(WithdrawBatch {
-                remaining: add,
-                liability_at_fund: l_near,
-            });
             events::log_pool_withdraw_in(credited_yocto, &validator_id);
         }
         self.validators.insert(validator_id, validator);
