@@ -23,7 +23,7 @@ The contract is **NEAR-only**: no oracle, no USD catalog path, no `oracle-relay-
 ## P1 — Subscriptions
 
 - [x] **`lock_for_subscription`** — NEAR + monthly recurring catalog prices; persists [`Subscription`](src/types.rs) and index `(account_id, product_id)` → `subscription_id`.
-- [x] **Lifecycle** — [`cancel_subscription`](src/lock.rs), [`upgrade_subscription`](src/lock.rs), [`schedule_downgrade_subscription`](src/lock.rs); events in [`events.rs`](src/events.rs).
+- [x] **Lifecycle** — [`cancel_subscription`](src/subscriptions.rs), [`upgrade_subscription`](src/subscriptions.rs), [`schedule_downgrade_subscription`](src/subscriptions.rs); events in [`events.rs`](src/events.rs).
 - [x] **Month stacking helper** — [`add_months_stripe_style`](src/subscriptions.rs); **calendar-accurate** end dates still future work (anchor_day recorded; linear months only).
 - [x] **Downgrade prorate (Phase B)** — at renewal when a scheduled downgrade applies, tier-gap NEAR (`min_locked(high)` − `min_locked(low)` for the completed billing window) is released via [`Contract::queue_shares_unstake`](src/unlock.rs) (same path as `unlock` → epoch → `claim_unlocked_near`). See [`apply_downgrade_prorate_at_renewal`](src/lock.rs).
 

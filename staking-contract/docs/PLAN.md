@@ -113,7 +113,7 @@ Add a new crate inside the workspace mirroring sibling crates. Suggested files (
 - `upgrade.rs` — `upgrade()` extern + `migrate_state` (port [venear-contract/src/upgrade.rs](house-of-stake-contracts/venear-contract/src/upgrade.rs)).
 - `validators.rs` — `Validator` model and the on-contract validator allowlist (the `validators` map itself); `add_validator`/`pause_validator`/`remove_validator`/`get_validators`; share-pool math per validator. Validator **ownership for catalog operations** is always the staking pool’s `get_owner_id()` (see `products.rs`), not a field on `Validator`.
 - `products.rs` — `Product`, `Price`, lifecycle (`create_product`, `edit_product`, `archive_product`, `delete_product`, plus parallel `*_price` methods). All gated by `assert_validator_owner` for the product's validator.
-- `subscriptions.rs` — `Subscription` model and lookup helpers.
+- `subscriptions.rs` — `Subscription` lifecycle RPCs, Phase B prorate at renewal, calendar-month extension helper (`add_months_stripe_style`).
 - `internal.rs` — share pool math, `check_near_price_lock` (NEAR-only duration-weighted sufficiency vs catalog line item).
 - `accounts.rs` — `Account` (storage + withdrawable balance), NEP-145-style `storage_deposit` / `storage_withdraw`.
 - `ids.rs` — Stripe-style identifier wrappers (`ProductId`, `PriceId`, `SubscriptionId`, `LockId`) plus deterministic on-chain ID generator.
