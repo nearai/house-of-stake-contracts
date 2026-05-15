@@ -42,13 +42,14 @@ pub(crate) trait ExtSelf {
 }
 
 #[derive(BorshStorageKey)]
-#[near]
+#[near(serializers=[borsh(use_discriminant = true)])]
 enum StorageKeys {
-    Proposal,
-    ProposalMetadata,
-    Votes,
-    PendingQueue,
-    ActiveProposals,
+    Proposal = 0,
+    ProposalMetadata = 1,
+    Votes = 2,
+    // ApprovedProposals = 3,
+    PendingQueue = 4,
+    ActiveProposals = 5,
 }
 
 #[derive(PanicOnDefault)]
