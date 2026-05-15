@@ -82,7 +82,7 @@ impl Contract {
         );
         require!(!account_balance.is_zero(), "Account has no veNEAR balance");
 
-        let vote_index = vote as u8;
+        let vote_index = u8::from(vote);
         let previous_vote = self.votes.get(&(account_id.clone(), proposal_id)).cloned();
         require!(
             previous_vote != Some(vote_index),
@@ -90,7 +90,7 @@ impl Contract {
         );
         let mut storage_added = self.config.vote_storage_fee;
         if let Some(previous_vote) = previous_vote {
-            proposal.votes[previous_vote as usize].remove_vote(account_balance);
+            proposal.votes[usize::from(previous_vote)].remove_vote(account_balance);
             proposal.total_votes.remove_vote(account_balance);
             storage_added = NearToken::from_yoctonear(0);
 
@@ -102,7 +102,7 @@ impl Contract {
                 &account_balance,
             );
         }
-        proposal.votes[vote_index as usize].add_vote(account_balance);
+        proposal.votes[usize::from(vote_index)].add_vote(account_balance);
         proposal.total_votes.add_vote(account_balance);
 
         require!(

@@ -31,7 +31,7 @@ impl Contract {
         assert_one_yocto();
         self.assert_owner();
         self.config.classic_voting_duration_ns =
-            (voting_duration_sec as u64 * 10u64.pow(9)).into();
+            (u64::from(voting_duration_sec) * 10u64.pow(9)).into();
     }
 
     /// Updates the FastTrack-flow voting duration in seconds.
@@ -42,7 +42,7 @@ impl Contract {
         assert_one_yocto();
         self.assert_owner();
         self.config.fast_track_voting_duration_ns =
-            (voting_duration_sec as u64 * 10u64.pow(9)).into();
+            (u64::from(voting_duration_sec) * 10u64.pow(9)).into();
     }
 
     /// Updates the base fee required to create a proposal.
@@ -107,7 +107,7 @@ impl Contract {
     pub fn set_timelock_duration(&mut self, timelock_duration_sec: u32) {
         assert_one_yocto();
         self.assert_owner();
-        self.config.timelock_duration_ns = (timelock_duration_sec as u64 * 10u64.pow(9)).into();
+        self.config.timelock_duration_ns = (u64::from(timelock_duration_sec) * 10u64.pow(9)).into();
     }
 
     /// Updates the Classic proposal expiration duration in seconds.
@@ -118,7 +118,7 @@ impl Contract {
     pub fn set_proposal_expiration(&mut self, proposal_expiration_sec: u32) {
         assert_one_yocto();
         self.assert_owner();
-        self.config.proposal_expiration_ns = (proposal_expiration_sec as u64 * 10u64.pow(9)).into();
+        self.config.proposal_expiration_ns = (u64::from(proposal_expiration_sec) * 10u64.pow(9)).into();
     }
 
     /// Updates the FastTrack proposal expiration duration in seconds.
@@ -130,7 +130,7 @@ impl Contract {
         assert_one_yocto();
         self.assert_owner();
         self.config.fast_track_proposal_expiration_ns =
-            (proposal_expiration_sec as u64 * 10u64.pow(9)).into();
+            (u64::from(proposal_expiration_sec) * 10u64.pow(9)).into();
     }
 
     /// Updates the quorum threshold in basis points (e.g. 3500 = 35%).
@@ -227,7 +227,7 @@ impl Contract {
     pub fn set_sandbox_duration(&mut self, sandbox_duration_sec: u32) {
         assert_one_yocto();
         self.assert_owner();
-        self.config.sandbox_duration_ns = (sandbox_duration_sec as u64 * 10u64.pow(9)).into();
+        self.config.sandbox_duration_ns = (u64::from(sandbox_duration_sec) * 10u64.pow(9)).into();
     }
 
     /// Updates the FastTrack sandbox threshold in basis points (e.g. 3000 = 30%).

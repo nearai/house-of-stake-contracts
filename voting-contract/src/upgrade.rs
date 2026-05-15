@@ -203,7 +203,7 @@ impl Contract {
                 _ => {}
             }
             if is_active_status(proposal.status) {
-                active_proposals.insert(idx as ProposalId);
+                active_proposals.insert(ProposalId::try_from(idx).unwrap());
             }
             proposals.push(VProposal::Current(proposal));
         }

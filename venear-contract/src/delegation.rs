@@ -8,7 +8,7 @@ fn validate_delegations(
     owner: &AccountId,
     max_delegations: u32,
 ) -> Result<u16, &'static str> {
-    if entries.len() as u64 > max_delegations as u64 {
+    if u64::try_from(entries.len()).unwrap() > u64::from(max_delegations) {
         return Err("Too many delegations");
     }
     let mut sum_bps: u32 = 0;
@@ -22,12 +22,12 @@ fn validate_delegations(
         if i > 0 && entry.account_id <= entries[i - 1].account_id {
             return Err("Entries must be sorted ascending by account_id with no duplicates");
         }
-        sum_bps += entry.bps as u32;
+        sum_bps += u32::from(entry.bps);
     }
     if sum_bps > 10_000 {
         return Err("Total bps exceeds 10000");
     }
-    Ok(sum_bps as u16)
+    Ok(u16::try_from(sum_bps).unwrap())
 }
 
 #[near]

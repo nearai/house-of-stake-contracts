@@ -120,7 +120,7 @@ impl Contract {
         let outcome = self.compute_queue_advance();
 
         self.pending_queue
-            .drain(0..outcome.queue_promotions.len() as u32);
+            .drain(0..u32::try_from(outcome.queue_promotions.len()).unwrap());
 
         for proposal in outcome.queue_promotions {
             self.internal_set_proposal(proposal);

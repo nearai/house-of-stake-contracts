@@ -206,7 +206,7 @@ impl Proposal {
             .first()
             .map(|v| v.total_venear.as_yoctonear())
             .unwrap_or(0);
-        let threshold = total_supply * (self.sandbox_threshold_bps as u128) / 10_000;
+        let threshold = total_supply * u128::from(self.sandbox_threshold_bps) / 10_000;
         for_power >= threshold
     }
 
@@ -315,7 +315,7 @@ impl Proposal {
         };
         // Quorum check
         let total_supply = snapshot.total_venear.as_yoctonear();
-        let bps_quorum = total_supply * (self.quorum_threshold_bps as u128) / 10_000;
+        let bps_quorum = total_supply * u128::from(self.quorum_threshold_bps) / 10_000;
         let quorum_required = std::cmp::max(bps_quorum, self.quorum_floor.as_yoctonear());
         let quorum_met = self.total_votes.total_venear.as_yoctonear() >= quorum_required;
 
@@ -333,7 +333,7 @@ impl Proposal {
         let denominator = for_power + against_power;
         // Cross-multiply to avoid division: for * 10000 >= threshold * (for + against)
         let approval_met = denominator > 0
-            && for_power * 10_000 >= (self.approval_threshold_bps as u128) * denominator;
+            && for_power * 10_000 >= u128::from(self.approval_threshold_bps) * denominator;
 
         if quorum_met && approval_met {
             ProposalStatus::Succeeded
@@ -421,7 +421,7 @@ impl Contract {
         let updated_storage_usage = env::storage_usage() + SNAPSHOT_STORAGE_RESERVE_BYTES;
         let storage_added = updated_storage_usage.saturating_sub(storage_usage);
         let storage_added_cost = env::storage_byte_cost()
-            .checked_mul(storage_added as _)
+            .checked_mul(u128::from(storage_added))
             .unwrap();
         let required_deposit = near_add(
             near_add(bond_amount, self.config.base_proposal_fee),
@@ -525,14 +525,17 @@ mod tests {
     /// Returns y-m-d 00:00 CET (fixed UTC+1) as UTC nanoseconds.
     fn date_ns(year: i32, month: u32, day: u32) -> u64 {
         let cet = FixedOffset::east_opt(3600).unwrap();
-        NaiveDate::from_ymd_opt(year, month, day)
-            .unwrap()
-            .and_hms_opt(0, 0, 0)
-            .unwrap()
-            .and_local_timezone(cet)
-            .unwrap()
-            .timestamp_nanos_opt()
-            .unwrap() as u64
+        u64::try_from(
+            NaiveDate::from_ymd_opt(year, month, day)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_local_timezone(cet)
+                .unwrap()
+                .timestamp_nanos_opt()
+                .unwrap(),
+        )
+        .unwrap()
     }
 
     #[test]

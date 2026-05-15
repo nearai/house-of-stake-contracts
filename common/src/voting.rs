@@ -11,6 +11,16 @@ pub enum VoteOption {
     Abstain,
 }
 
+impl From<VoteOption> for u8 {
+    fn from(v: VoteOption) -> u8 {
+        match v {
+            VoteOption::For => 0,
+            VoteOption::Against => 1,
+            VoteOption::Abstain => 2,
+        }
+    }
+}
+
 /// The majority type required for a FastTrack proposal to pass.
 #[derive(Clone, Copy, PartialEq)]
 #[near(serializers=[borsh, json])]
