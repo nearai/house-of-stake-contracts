@@ -1,5 +1,6 @@
 use near_sdk::{near, AccountId, NearToken};
 
+mod bps;
 mod types;
 mod utils;
 
@@ -10,5 +11,6 @@ pub mod lockup_update;
 pub mod venear;
 pub mod voting;
 
+pub use bps::Bps;
 pub use types::*;
 pub use utils::*;

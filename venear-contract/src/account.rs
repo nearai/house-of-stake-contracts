@@ -1,5 +1,5 @@
 use crate::*;
-use common::{VenearBalance, Version, events, near_add, truncate_to_seconds};
+use common::{Bps, VenearBalance, Version, events, near_add, truncate_to_seconds};
 use near_sdk::json_types::U64;
 
 /// Full information about the account
@@ -166,8 +166,8 @@ impl Contract {
     /// Returns the "owned" voting power for an account — the portion that counts for ft_mint/ft_burn.
     fn account_owned_total(account: &Account) -> NearToken {
         let mut total = account.delegated_balance.total();
-        let self_bps = 10_000_u16.saturating_sub(account.delegated_bps());
-        if self_bps > 0 {
+        let self_bps = Bps::new(10_000_u16.saturating_sub(account.delegated_bps()));
+        if !self_bps.is_zero() {
             total = near_add(total, account.balance.scale_by_bps(self_bps).total());
         }
         total

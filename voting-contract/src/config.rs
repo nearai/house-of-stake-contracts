@@ -1,4 +1,5 @@
 use crate::*;
+use common::Bps;
 use near_sdk::json_types::U64;
 
 /// The configuration of the voting contract.
@@ -53,26 +54,26 @@ pub struct Config {
     pub proposed_new_owner_account_id: Option<AccountId>,
 
     /// Quorum threshold in basis points (e.g. 3500 = 35% of total veNEAR supply).
-    pub quorum_threshold_bps: u16,
+    pub quorum_threshold_bps: Bps,
 
     /// Absolute minimum veNEAR required for quorum, regardless of BPS calculation.
     pub quorum_floor: NearToken,
 
     /// Approval threshold in basis points for the classic flow (e.g. 5000 = 50%).
     /// Applied as: for_votes / (for_votes + against_votes) >= approval_threshold_bps / 10000.
-    pub approval_threshold_bps: u16,
+    pub approval_threshold_bps: Bps,
 
     /// Simple majority threshold in basis points for FastTrack proposals (e.g. 5000 = 50%).
-    pub simple_majority_threshold_bps: u16,
+    pub simple_majority_threshold_bps: Bps,
 
     /// Strong (super) majority threshold in basis points for FastTrack proposals (e.g. 6667 ≈ 66.67%).
-    pub strong_majority_threshold_bps: u16,
+    pub strong_majority_threshold_bps: Bps,
 
     /// The duration of the sandbox pre-voting period in nanoseconds for FastTrack proposals.
     pub sandbox_duration_ns: U64,
 
     /// The "For" votes threshold to graduate a FastTrack proposal from Sandbox to Scheduled.
-    pub sandbox_threshold_bps: u16,
+    pub sandbox_threshold_bps: Bps,
 
     /// Maximum number of proposals allowed in Sandbox/Scheduled/Voting/Timelock simultaneously.
     /// Extra approved proposals park in the pending queue until a slot frees.

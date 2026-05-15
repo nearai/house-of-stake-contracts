@@ -52,7 +52,7 @@ pub struct AccountDelegation {
 #[near(serializers=[borsh, json])]
 pub struct DelegationEntry {
     pub account_id: AccountId,
-    pub bps: u16,
+    pub bps: Bps,
 }
 
 #[derive(Clone)]
@@ -81,7 +81,7 @@ impl From<VAccount> for Account {
                     .into_iter()
                     .map(|delegation| DelegationEntry {
                         account_id: delegation.account_id,
-                        bps: 10_000,
+                        bps: Bps::FULL,
                     })
                     .collect(),
             },
@@ -91,6 +91,8 @@ impl From<VAccount> for Account {
 }
 
 impl Account {
+    /// Sum of `bps` across all delegation entries. Always `<= 10_000` for well-formed accounts
+    /// (enforced by `validate_delegations` at write time).
     pub fn delegated_bps(&self) -> u16 {
         self.delegations
             .iter()
@@ -118,8 +120,8 @@ impl Account {
             venear_growth_config,
         );
         let total = delegated_balance.total();
-        let self_bps = 10_000_u16.saturating_sub(self.delegated_bps());
-        if self_bps > 0 {
+        let self_bps = Bps::new(10_000_u16.saturating_sub(self.delegated_bps()));
+        if !self_bps.is_zero() {
             let mut balance = self.balance;
             balance.update(
                 self.update_timestamp,
@@ -213,7 +215,7 @@ mod tests {
             account.delegations[0].account_id,
             account_id("delegate.near")
         );
-        assert_eq!(account.delegations[0].bps, 10_000);
+        assert_eq!(account.delegations[0].bps, Bps::FULL);
     }
 
     #[test]
@@ -221,19 +223,19 @@ mod tests {
         let original = sample_account(vec![
             DelegationEntry {
                 account_id: account_id("a.near"),
-                bps: 2_500,
+                bps: Bps::new(2_500),
             },
             DelegationEntry {
                 account_id: account_id("b.near"),
-                bps: 7_500,
+                bps: Bps::new(7_500),
             },
         ]);
 
         let account: Account = VAccount::V1(original.clone()).into();
 
         assert_eq!(account.delegations.len(), 2);
-        assert_eq!(account.delegations[0].bps, 2_500);
-        assert_eq!(account.delegations[1].bps, 7_500);
+        assert_eq!(account.delegations[0].bps, Bps::new(2_500));
+        assert_eq!(account.delegations[1].bps, Bps::new(7_500));
     }
 
     #[test]
@@ -246,15 +248,15 @@ mod tests {
         let account = sample_account(vec![
             DelegationEntry {
                 account_id: account_id("a.near"),
-                bps: 1_234,
+                bps: Bps::new(1_234),
             },
             DelegationEntry {
                 account_id: account_id("b.near"),
-                bps: 2_000,
+                bps: Bps::new(2_000),
             },
             DelegationEntry {
                 account_id: account_id("c.near"),
-                bps: 766,
+                bps: Bps::new(766),
             },
         ]);
         assert_eq!(account.delegated_bps(), 4_000);
@@ -265,29 +267,13 @@ mod tests {
         let account = sample_account(vec![
             DelegationEntry {
                 account_id: account_id("a.near"),
-                bps: 6_000,
+                bps: Bps::new(6_000),
             },
             DelegationEntry {
                 account_id: account_id("b.near"),
-                bps: 4_000,
+                bps: Bps::new(4_000),
             },
         ]);
         assert_eq!(account.delegated_bps(), 10_000);
-    }
-
-    #[test]
-    #[should_panic(expected = "delegation bps sum must fit into u16")]
-    fn delegated_bps_overflow_panics() {
-        let account = sample_account(vec![
-            DelegationEntry {
-                account_id: account_id("a.near"),
-                bps: u16::MAX,
-            },
-            DelegationEntry {
-                account_id: account_id("b.near"),
-                bps: 1,
-            },
-        ]);
-        let _ = account.delegated_bps();
     }
 }

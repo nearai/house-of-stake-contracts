@@ -1,6 +1,6 @@
 use crate::metadata::ProposalMetadata;
 use crate::*;
-use common::{TimestampNs, events, near_add, near_sub};
+use common::{Bps, TimestampNs, events, near_add, near_sub};
 use near_sdk::json_types::{Base64VecU8, U64};
 use near_sdk::{Gas, Promise};
 
@@ -54,9 +54,9 @@ pub struct Proposal {
     pub votes: Vec<VoteStats>,
     pub total_votes: VoteStats,
     pub status: ProposalStatus,
-    pub quorum_threshold_bps: u16,
+    pub quorum_threshold_bps: Bps,
     pub quorum_floor: NearToken,
-    pub approval_threshold_bps: u16,
+    pub approval_threshold_bps: Bps,
     pub actions: Option<Vec<ProposalAction>>,
     pub flow: ProposalFlow,
     // Classic only
@@ -65,7 +65,7 @@ pub struct Proposal {
     pub sandbox_start_time_ns: Option<U64>,
     pub bond_amount: NearToken,
     pub sandbox_duration_ns: U64,
-    pub sandbox_threshold_bps: u16,
+    pub sandbox_threshold_bps: Bps,
 }
 
 /// Borsh-tagged proposal storage envelope. The single `Current` variant wraps `Proposal`; the
@@ -200,13 +200,12 @@ impl Proposal {
         let Some(snapshot) = self.snapshot_and_state.as_ref() else {
             return false;
         };
-        let total_supply = snapshot.total_venear.as_yoctonear();
         let for_power = self
             .votes
             .first()
-            .map(|v| v.total_venear.as_yoctonear())
-            .unwrap_or(0);
-        let threshold = total_supply * u128::from(self.sandbox_threshold_bps) / 10_000;
+            .map(|v| v.total_venear)
+            .unwrap_or(NearToken::from_yoctonear(0));
+        let threshold = self.sandbox_threshold_bps * snapshot.total_venear;
         for_power >= threshold
     }
 
@@ -314,10 +313,9 @@ impl Proposal {
             return ProposalStatus::Defeated;
         };
         // Quorum check
-        let total_supply = snapshot.total_venear.as_yoctonear();
-        let bps_quorum = total_supply * u128::from(self.quorum_threshold_bps) / 10_000;
-        let quorum_required = std::cmp::max(bps_quorum, self.quorum_floor.as_yoctonear());
-        let quorum_met = self.total_votes.total_venear.as_yoctonear() >= quorum_required;
+        let bps_quorum = self.quorum_threshold_bps * snapshot.total_venear;
+        let quorum_required = std::cmp::max(bps_quorum, self.quorum_floor);
+        let quorum_met = self.total_votes.total_venear >= quorum_required;
 
         // Approval threshold check: votes[0] = For, votes[1] = Against
         let for_power = self
@@ -401,9 +399,9 @@ impl Contract {
             votes: vec![VoteStats::default(); 3],
             total_votes: VoteStats::default(),
             status: ProposalStatus::Created,
-            quorum_threshold_bps: 0,
+            quorum_threshold_bps: Bps::ZERO,
             quorum_floor: NearToken::from_yoctonear(0),
-            approval_threshold_bps: 0,
+            approval_threshold_bps: Bps::ZERO,
             actions,
             flow,
             approval_time_ns: None,
@@ -411,7 +409,7 @@ impl Contract {
             sandbox_start_time_ns: None,
             bond_amount,
             sandbox_duration_ns: U64(0),
-            sandbox_threshold_bps: 0,
+            sandbox_threshold_bps: Bps::ZERO,
         };
         let storage_usage = env::storage_usage();
         self.proposals.push(proposal.into());

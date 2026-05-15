@@ -2,7 +2,9 @@ use crate::*;
 use common::events;
 use near_sdk::Promise;
 
-/// Validates a slice of DelegationEntry for use in set_delegations..
+/// Validates a slice of DelegationEntry for use in set_delegations.
+/// The `Bps` newtype already guarantees each entry's `bps <= 10_000` at deserialization, so this
+/// function only enforces the rules that go beyond a single entry's range.
 fn validate_delegations(
     entries: &[DelegationEntry],
     owner: &AccountId,
@@ -13,8 +15,8 @@ fn validate_delegations(
     }
     let mut sum_bps: u32 = 0;
     for (i, entry) in entries.iter().enumerate() {
-        if entry.bps == 0 || entry.bps > 10_000 {
-            return Err("Invalid bps (must be 1..=10000)");
+        if entry.bps.is_zero() {
+            return Err("Invalid bps (cannot be 0)");
         }
         if &entry.account_id == owner {
             return Err("Cannot delegate to self");

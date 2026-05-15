@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::proposal::{is_active_status, Proposal, ProposalFlow, ProposalStatus, VProposal};
 use crate::*;
+use common::Bps;
 use near_sdk::borsh::{self, BorshDeserialize};
 use near_sdk::json_types::U64;
 use near_sdk::store::{IterableSet, LookupMap, Vector};
@@ -16,10 +17,10 @@ const GET_CONFIG_GAS: Gas = Gas::from_tgas(5);
 const DEFAULT_BOND_AMOUNT_NEAR: u128 = 100;
 // TODO: change the migration default treasury once the real treasury account is set up.
 const DEFAULT_TREASURY_ACCOUNT_ID: &str = "norfolks.near";
-const DEFAULT_SIMPLE_MAJORITY_BPS: u16 = 5_000;
-const DEFAULT_STRONG_MAJORITY_BPS: u16 = 6_667;
+const DEFAULT_SIMPLE_MAJORITY_BPS: Bps = Bps::new(5_000);
+const DEFAULT_STRONG_MAJORITY_BPS: Bps = Bps::new(6_667);
 const DEFAULT_SANDBOX_DURATION_NS: u64 = 7 * 24 * 60 * 60 * 1_000_000_000; // 7 days
-const DEFAULT_SANDBOX_THRESHOLD_BPS: u16 = 3_000;
+const DEFAULT_SANDBOX_THRESHOLD_BPS: Bps = Bps::new(3_000);
 const DEFAULT_MAX_ACTIVE_PROPOSALS: u32 = 3;
 const DEFAULT_PROPOSAL_EXPIRATION_NS: u64 = 7 * 24 * 60 * 60 * 1_000_000_000; // 7 days
 const DEFAULT_FAST_TRACK_PROPOSAL_EXPIRATION_NS: u64 = 2 * 24 * 60 * 60 * 1_000_000_000; // 2 days
@@ -114,14 +115,14 @@ impl From<LegacyProposalClassic> for Proposal {
             votes: c.votes,
             total_votes: c.total_votes,
             status: c.status,
-            quorum_threshold_bps: c.quorum_threshold_bps,
+            quorum_threshold_bps: Bps::new(c.quorum_threshold_bps),
             quorum_floor: c.quorum_floor,
-            approval_threshold_bps: c.approval_threshold_bps,
+            approval_threshold_bps: Bps::new(c.approval_threshold_bps),
             actions: c.actions,
             sandbox_start_time_ns: None,
             bond_amount: NearToken::from_yoctonear(0),
             sandbox_duration_ns: U64(0),
-            sandbox_threshold_bps: 0,
+            sandbox_threshold_bps: Bps::ZERO,
             flow: ProposalFlow::Classic,
         }
     }
@@ -144,14 +145,14 @@ impl From<LegacyProposalV1> for Proposal {
             votes: v1.votes,
             total_votes: v1.total_votes,
             status: v1.status,
-            quorum_threshold_bps: 0,
+            quorum_threshold_bps: Bps::ZERO,
             quorum_floor: NearToken::from_yoctonear(0),
-            approval_threshold_bps: 0,
+            approval_threshold_bps: Bps::ZERO,
             actions: None,
             sandbox_start_time_ns: None,
             bond_amount: NearToken::from_yoctonear(0),
             sandbox_duration_ns: U64(0),
-            sandbox_threshold_bps: 0,
+            sandbox_threshold_bps: Bps::ZERO,
             flow: ProposalFlow::Classic,
         }
     }
@@ -228,9 +229,9 @@ impl Contract {
                 proposal_expiration_ns: U64(DEFAULT_PROPOSAL_EXPIRATION_NS),
                 fast_track_proposal_expiration_ns: U64(DEFAULT_FAST_TRACK_PROPOSAL_EXPIRATION_NS),
                 proposed_new_owner_account_id: old.config.proposed_new_owner_account_id,
-                quorum_threshold_bps: old.config.quorum_threshold_bps,
+                quorum_threshold_bps: Bps::new(old.config.quorum_threshold_bps),
                 quorum_floor: old.config.quorum_floor,
-                approval_threshold_bps: old.config.approval_threshold_bps,
+                approval_threshold_bps: Bps::new(old.config.approval_threshold_bps),
                 simple_majority_threshold_bps: DEFAULT_SIMPLE_MAJORITY_BPS,
                 strong_majority_threshold_bps: DEFAULT_STRONG_MAJORITY_BPS,
                 sandbox_duration_ns: U64(DEFAULT_SANDBOX_DURATION_NS),

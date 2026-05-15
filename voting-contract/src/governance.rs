@@ -1,4 +1,5 @@
 use crate::*;
+use common::Bps;
 use near_sdk::assert_one_yocto;
 
 #[near]
@@ -137,13 +138,9 @@ impl Contract {
     /// Can only be called by the owner.
     /// Requires 1 yocto NEAR.
     #[payable]
-    pub fn set_quorum_threshold_bps(&mut self, quorum_threshold_bps: u16) {
+    pub fn set_quorum_threshold_bps(&mut self, quorum_threshold_bps: Bps) {
         assert_one_yocto();
         self.assert_owner();
-        require!(
-            quorum_threshold_bps <= 10_000,
-            "Quorum threshold must be <= 10000 bps"
-        );
         self.config.quorum_threshold_bps = quorum_threshold_bps;
     }
 
@@ -162,13 +159,9 @@ impl Contract {
     /// Can only be called by the owner.
     /// Requires 1 yocto NEAR.
     #[payable]
-    pub fn set_approval_threshold_bps(&mut self, approval_threshold_bps: u16) {
+    pub fn set_approval_threshold_bps(&mut self, approval_threshold_bps: Bps) {
         assert_one_yocto();
         self.assert_owner();
-        require!(
-            approval_threshold_bps <= 10_000,
-            "Approval threshold must be <= 10000 bps"
-        );
         self.config.approval_threshold_bps = approval_threshold_bps;
     }
 
@@ -196,13 +189,9 @@ impl Contract {
     /// Can only be called by the owner.
     /// Requires 1 yocto NEAR.
     #[payable]
-    pub fn set_simple_majority_threshold_bps(&mut self, simple_majority_threshold_bps: u16) {
+    pub fn set_simple_majority_threshold_bps(&mut self, simple_majority_threshold_bps: Bps) {
         assert_one_yocto();
         self.assert_owner();
-        require!(
-            simple_majority_threshold_bps <= 10_000,
-            "Simple majority threshold must be <= 10000 bps"
-        );
         self.config.simple_majority_threshold_bps = simple_majority_threshold_bps;
     }
 
@@ -210,13 +199,9 @@ impl Contract {
     /// Can only be called by the owner.
     /// Requires 1 yocto NEAR.
     #[payable]
-    pub fn set_strong_majority_threshold_bps(&mut self, strong_majority_threshold_bps: u16) {
+    pub fn set_strong_majority_threshold_bps(&mut self, strong_majority_threshold_bps: Bps) {
         assert_one_yocto();
         self.assert_owner();
-        require!(
-            strong_majority_threshold_bps <= 10_000,
-            "Strong majority threshold must be <= 10000 bps"
-        );
         self.config.strong_majority_threshold_bps = strong_majority_threshold_bps;
     }
 
@@ -234,13 +219,9 @@ impl Contract {
     /// Can only be called by the owner.
     /// Requires 1 yocto NEAR.
     #[payable]
-    pub fn set_sandbox_threshold_bps(&mut self, sandbox_threshold_bps: u16) {
+    pub fn set_sandbox_threshold_bps(&mut self, sandbox_threshold_bps: Bps) {
         assert_one_yocto();
         self.assert_owner();
-        require!(
-            sandbox_threshold_bps <= 10_000,
-            "Sandbox threshold must be <= 10000 bps"
-        );
         self.config.sandbox_threshold_bps = sandbox_threshold_bps;
     }
 
