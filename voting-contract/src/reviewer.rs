@@ -37,11 +37,11 @@ impl Contract {
         proposal.quorum_threshold_bps = self.config.quorum_threshold_bps;
         proposal.quorum_floor = self.config.quorum_floor;
 
-        if proposal.bond_amount.as_yoctonear() > 0 {
+        if proposal.bond_amount > NearToken::ZERO {
             Promise::new(self.config.treasury_account_id.clone())
                 .transfer(proposal.bond_amount)
                 .detach();
-            proposal.bond_amount = NearToken::from_yoctonear(0);
+            proposal.bond_amount = NearToken::ZERO;
         }
         match proposal.flow {
             ProposalFlow::Classic => {
@@ -177,10 +177,10 @@ impl Contract {
 
         events::emit::slash_proposal_action(&env::predecessor_account_id(), proposal_id);
 
-        let result = if proposal.bond_amount.as_yoctonear() > 0 {
+        let result = if proposal.bond_amount > NearToken::ZERO {
             let promise = Promise::new(self.config.treasury_account_id.clone())
                 .transfer(proposal.bond_amount);
-            proposal.bond_amount = NearToken::from_yoctonear(0);
+            proposal.bond_amount = NearToken::ZERO;
             PromiseOrValue::Promise(promise)
         } else {
             PromiseOrValue::Value(())

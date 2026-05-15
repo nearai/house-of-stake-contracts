@@ -48,7 +48,7 @@ impl Contract {
     pub fn set_delegations(&mut self, entries: Vec<DelegationEntry>) {
         self.assert_not_paused();
         let attached = env::attached_deposit();
-        require!(attached.as_yoctonear() > 0, "Requires attached deposit");
+        require!(attached > NearToken::ZERO, "Requires attached deposit");
         let predecessor_id = env::predecessor_account_id();
 
         validate_delegations(&entries, &predecessor_id, self.config.max_delegations)

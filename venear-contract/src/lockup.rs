@@ -159,7 +159,7 @@ impl Contract {
         let mut global_state: GlobalState = self.internal_global_state_updated();
         // Decreasing the locked NEAR will result in dropped extra veNEAR rewards.
         if lockup_update.locked_near_balance < old_balance.near_balance {
-            account.balance.extra_venear_balance = NearToken::from_yoctonear(0);
+            account.balance.extra_venear_balance = NearToken::ZERO;
         }
         // Updating balance and also adding internal balance deposit.
         account.balance.near_balance =

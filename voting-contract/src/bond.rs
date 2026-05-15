@@ -16,7 +16,7 @@ impl Contract {
             proposal.proposer_id == env::predecessor_account_id(),
             "Only the proposer can claim the bond"
         );
-        require!(proposal.bond_amount.as_yoctonear() > 0, "No bond to claim");
+        require!(proposal.bond_amount > NearToken::ZERO, "No bond to claim");
         require!(
             matches!(
                 proposal.status,
@@ -27,7 +27,7 @@ impl Contract {
 
         let bond = proposal.bond_amount;
         let proposer_id = proposal.proposer_id.clone();
-        proposal.bond_amount = NearToken::from_yoctonear(0);
+        proposal.bond_amount = NearToken::ZERO;
         self.internal_set_proposal(proposal);
 
         Promise::new(proposer_id).transfer(bond)
