@@ -123,6 +123,7 @@ impl Contract {
         events::emit::veto_proposal_action(&env::predecessor_account_id(), proposal_id);
 
         self.internal_set_proposal(proposal);
+        self.internal_advance_queue();
     }
 
     /// Waives the veto right during the timelock period, ending the timelock immediately so the
