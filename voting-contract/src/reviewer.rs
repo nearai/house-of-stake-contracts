@@ -38,7 +38,9 @@ impl Contract {
         proposal.quorum_floor = self.config.quorum_floor;
 
         if proposal.bond_amount.as_yoctonear() > 0 {
-            Promise::new(self.config.treasury_account_id.clone()).transfer(proposal.bond_amount);
+            Promise::new(self.config.treasury_account_id.clone())
+                .transfer(proposal.bond_amount)
+                .detach();
             proposal.bond_amount = NearToken::from_yoctonear(0);
         }
         match proposal.flow {
@@ -157,7 +159,7 @@ impl Contract {
     /// Requires 1 yocto attached to the call.
     /// Can only be called by the reviewers.
     #[payable]
-    pub fn slash_proposal(&mut self, proposal_id: ProposalId) {
+    pub fn slash_proposal(&mut self, proposal_id: ProposalId) -> PromiseOrValue<()> {
         assert_one_yocto();
         self.assert_not_paused();
         self.assert_called_by_reviewer();
@@ -175,12 +177,17 @@ impl Contract {
 
         events::emit::slash_proposal_action(&env::predecessor_account_id(), proposal_id);
 
-        if proposal.bond_amount.as_yoctonear() > 0 {
-            Promise::new(self.config.treasury_account_id.clone()).transfer(proposal.bond_amount);
+        let result = if proposal.bond_amount.as_yoctonear() > 0 {
+            let promise = Promise::new(self.config.treasury_account_id.clone())
+                .transfer(proposal.bond_amount);
             proposal.bond_amount = NearToken::from_yoctonear(0);
-        }
+            PromiseOrValue::Promise(promise)
+        } else {
+            PromiseOrValue::Value(())
+        };
 
         self.internal_set_proposal(proposal);
+        result
     }
 
     /// Callback that stores the fetched veNEAR snapshot.

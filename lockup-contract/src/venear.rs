@@ -98,7 +98,7 @@ impl LockupContract {
             &Some(NearToken::from_yoctonear(amount)),
         );
 
-        self.venear_lockup_update();
+        self.venear_lockup_update().detach();
     }
 
     /// OWNER'S METHOD
@@ -125,7 +125,7 @@ impl LockupContract {
         self.venear_pending_balance += amount;
         self.set_venear_unlock_timestamp();
 
-        self.venear_lockup_update();
+        self.venear_lockup_update().detach();
     }
 
     /// OWNER'S METHOD
@@ -154,7 +154,7 @@ impl LockupContract {
 
         self.venear_pending_balance -= amount;
 
-        self.venear_lockup_update();
+        self.venear_lockup_update().detach();
     }
 
     /// OWNER'S METHOD
@@ -179,6 +179,6 @@ impl LockupContract {
         self.venear_pending_balance -= amount;
         self.venear_locked_balance += amount;
 
-        self.venear_lockup_update();
+        self.venear_lockup_update().detach();
     }
 }

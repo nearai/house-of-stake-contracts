@@ -125,7 +125,7 @@ impl Contract {
             Some(self.get_lockup_account_id(&account_id))
         } else {
             // Refunding the deposit if the lockup contract deployment failed.
-            Promise::new(account_id).transfer(lockup_deposit);
+            Promise::new(account_id).transfer(lockup_deposit).detach();
             None
         }
     }
@@ -360,7 +360,9 @@ pub extern "C" fn prepare_lockup_code() {
         "Not enough attached deposit"
     );
     if attached_deposit > storage_cost {
-        Promise::new(predecessor_id).transfer(near_sub(attached_deposit, storage_cost));
+        Promise::new(predecessor_id)
+            .transfer(near_sub(attached_deposit, storage_cost))
+            .detach();
     }
     let result = serde_json::to_vec(&Base58CryptoHash::from(contract_hash)).unwrap();
     unsafe {

@@ -5,7 +5,7 @@ use near_sdk::Promise;
 #[near]
 impl Contract {
     /// Refunds the bond to the proposer. Only valid for `Expired` or `Rejected` proposals.
-    pub fn claim_bond(&mut self, proposal_id: ProposalId) {
+    pub fn claim_bond(&mut self, proposal_id: ProposalId) -> Promise {
         let mut proposal = self.internal_expect_proposal_updated(proposal_id);
 
         require!(
@@ -30,6 +30,6 @@ impl Contract {
         proposal.bond_amount = NearToken::from_yoctonear(0);
         self.internal_set_proposal(proposal);
 
-        Promise::new(proposer_id).transfer(bond);
+        Promise::new(proposer_id).transfer(bond)
     }
 }

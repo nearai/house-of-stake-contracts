@@ -436,7 +436,9 @@ impl Contract {
         );
         if attached_deposit > required_deposit {
             let refund = near_sub(attached_deposit, required_deposit);
-            Promise::new(env::predecessor_account_id()).transfer(refund);
+            Promise::new(env::predecessor_account_id())
+                .transfer(refund)
+                .detach();
         }
         proposal_id
     }

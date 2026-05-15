@@ -115,7 +115,9 @@ impl Contract {
 
         if attached_deposit > near_add(storage_added, NearToken::from_yoctonear(1)) {
             let refund = near_sub(attached_deposit, storage_added);
-            Promise::new(env::signer_account_id()).transfer(refund);
+            Promise::new(env::signer_account_id())
+                .transfer(refund)
+                .detach();
         }
 
         events::emit::proposal_vote_action(

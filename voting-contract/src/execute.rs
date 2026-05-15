@@ -1,7 +1,7 @@
 use crate::proposal::{ProposalAction, ProposalId, ProposalStatus};
 use crate::*;
 use common::events;
-use near_sdk::{ext_contract, Gas, Promise, PromiseResult};
+use near_sdk::{Gas, Promise, PromiseError, ext_contract};
 
 const GAS_FOR_ON_EXECUTE_CALLBACK: Gas = Gas::from_tgas(10);
 
@@ -61,7 +61,7 @@ impl Contract {
         let mut proposal = self.internal_expect_proposal_updated(proposal_id);
 
         let all_succeeded = (0..env::promise_results_count())
-            .all(|i| !matches!(env::promise_result(i), PromiseResult::Failed));
+            .all(|i| !matches!(env::promise_result_checked(i, 0), Err(PromiseError::Failed)));
 
         proposal.status = if all_succeeded {
             ProposalStatus::Succeeded

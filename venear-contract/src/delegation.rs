@@ -90,7 +90,7 @@ impl Contract {
                 )
             );
             let refund = attached.checked_sub(storage_cost).unwrap();
-            Promise::new(predecessor_id).transfer(refund);
+            Promise::new(predecessor_id).transfer(refund).detach();
         }
     }
 }
