@@ -106,18 +106,14 @@ impl Contract {
         validator_id: ValidatorId,
     ) -> PromiseOrValue<bool> {
         if !is_promise_success() {
-            let mut validator = self.require_validator_pool_callback(&validator_id);
+            let mut validator = self.require_validator_callback(&validator_id);
             validator.tx_status = TransactionStatus::Idle;
             self.validators.insert(validator_id, validator);
             env::panic_str("Could not read unstaked balance from the pool; retry in a few blocks");
         }
 
         let validator = self.require_validator(&validator_id);
-        let can_withdraw = validator.last_unstake_epoch > 0
-            && env::epoch_height()
-                >= validator
-                    .last_unstake_epoch
-                    .saturating_add(self.config.epoch_unstake_settle_epochs);
+        let can_withdraw = self.validator_unstake_waiting_finished(&validator);
 
         if unstaked_balance.as_yoctonear() > 0 && can_withdraw {
             return self

@@ -153,10 +153,20 @@ impl Contract {
             .expect("Validator not found on the allowlist")
     }
 
-    pub(crate) fn require_validator_pool_callback(&self, validator_id: &ValidatorId) -> Validator {
+    pub(crate) fn require_validator_callback(&self, validator_id: &ValidatorId) -> Validator {
         self.validators
             .get(validator_id)
             .cloned()
-            .expect("Validator not found on allowlist (pool callback)")
+            .expect("Validator not found on allowlist (validator callback)")
+    }
+
+    /// True once a pool `unstake` is on record and [`crate::config::Config::epoch_unstake_settle_epochs`]
+    /// have passed since [`Validator::last_unstake_epoch`] (gates withdraw-from-pool and further unstakes).
+    pub(crate) fn validator_unstake_waiting_finished(&self, validator: &Validator) -> bool {
+        validator.last_unstake_epoch > 0
+            && env::epoch_height()
+                >= validator
+                    .last_unstake_epoch
+                    .saturating_add(self.config.epoch_unstake_settle_epochs)
     }
 }

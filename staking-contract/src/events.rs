@@ -126,9 +126,9 @@ pub fn log_epoch_operation(epoch_action: &str, validator_id: &ValidatorId) {
     );
 }
 
-pub fn log_pool_withdraw_in(amount_yocto: u128, validator_id: &ValidatorId) {
+pub fn log_validator_withdraw_in(amount_yocto: u128, validator_id: &ValidatorId) {
     emit(
-        "pool_withdraw_in",
+        "validator_withdraw_in",
         serde_json::json!({
             "validator_id": validator_id.to_string(),
             "amount_yocto": amount_yocto.to_string(),

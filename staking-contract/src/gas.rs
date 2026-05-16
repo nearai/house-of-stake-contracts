@@ -29,8 +29,6 @@ pub mod callbacks {
     pub const ON_LOCK_REFRESH_THEN_FINALIZE: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// After `get_owner_id`: callback does a few storage writes (catalog or owner cache refresh).
     pub const ON_VALIDATOR_OWNER_CHECK: Gas = Gas::from_gas(BASE_GAS.as_gas() * 2);
-    /// Re-enter claim bookkeeping after an internal pool withdraw prefetched funds for `pending_to_withdraw`.
-    pub const ON_CLAIM_AFTER_POOL_WITHDRAW: Gas = Gas::from_gas(BASE_GAS.as_gas() * 6);
     /// Tail dispatch after shared per-epoch settlement (`PerEpochContinue`).
     pub const ON_EPOCH_SETTLEMENT_DISPATCH: Gas = Gas::from_gas(BASE_GAS.as_gas() * 6);
     /// After pool `get_account_total_balance` during shared settlement (before lock / unlock).
@@ -38,7 +36,8 @@ pub mod callbacks {
     /// After pool `get_account_unstaked_balance` during shared settlement.
     pub const ON_EPOCH_SETTLEMENT_AFTER_UNSTAKED: Gas = Gas::from_gas(BASE_GAS.as_gas() * 6);
     /// After `try_epoch_settle` pool call during shared settlement.
-    pub const ON_EPOCH_SETTLEMENT_AFTER_TRY_EPOCH_POOL: Gas = Gas::from_gas(BASE_GAS.as_gas() * 6);
+    pub const ON_EPOCH_SETTLEMENT_AFTER_TRY_EPOCH_SETTLE: Gas =
+        Gas::from_gas(BASE_GAS.as_gas() * 6);
     /// After withdraw chain hop during shared settlement.
     pub const ON_EPOCH_SETTLEMENT_AFTER_WITHDRAW_CHAIN: Gas = Gas::from_gas(BASE_GAS.as_gas() * 6);
     /// Mint lock and optional post-settle after shared pipeline.

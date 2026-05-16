@@ -12,9 +12,9 @@
 //! When [`Validator::last_settlement_epoch`] is **before** the current NEAR epoch, the contract runs:
 //! 1. [`Contract::promise_get_validator_total_staked_balance`] → [`Contract::on_epoch_settlement_after_total_balance`]
 //!    (updates [`Validator::total_staked_balance`]).
-//! 2. [`Contract::promise_fetch_pool_unstaked_then_continue_settlement`] → [`Contract::on_epoch_settlement_after_unstaked`]
+//! 2. [`Contract::promise_get_validator_unstaked_then_continue_settlement`] → [`Contract::on_epoch_settlement_after_unstaked`]
 //!    (may call [`Contract::try_epoch_withdraw`] to top up [`Validator::pending_to_withdraw`], then continues).
-//! 3. [`Contract::try_pool_settle_if_due_or_dispatch_continue`] → either [`Contract::try_epoch_settle`] (pool call) or an
+//! 3. [`Contract::try_validator_settle_if_due_or_dispatch_continue`] → either [`Contract::try_epoch_settle`] (pool call) or an
 //!    immediate hop to [`Contract::on_epoch_settlement_dispatch_continue`].
 //! When the pool **already** settled this epoch, steps 1–3 are skipped and [`Contract::on_epoch_settlement_dispatch_continue`]
 //! runs directly with the caller’s [`PerEpochContinue`] payload (cached **`total_staked_balance`** is authoritative).
@@ -100,7 +100,7 @@ pub trait ExtSelfEpoch {
         validator_id: ValidatorId,
         cont: PerEpochContinue,
     ) -> Promise;
-    /// Step 3: after optional withdraw-during-settlement hop; resumes [`Contract::try_pool_settle_if_due_or_dispatch_continue`].
+    /// Step 3: after optional withdraw-during-settlement hop; resumes [`Contract::try_validator_settle_if_due_or_dispatch_continue`].
     fn on_epoch_settlement_after_withdraw_chain(
         &mut self,
         #[callback] _prior: bool,
@@ -108,10 +108,10 @@ pub trait ExtSelfEpoch {
         cont: PerEpochContinue,
     ) -> Promise;
     /// Step 4: after [`Contract::try_epoch_settle`] from the settlement chain; forwards to dispatch (pool
-    /// success/failure is reflected in validator state via earlier callbacks, not `_pool_ok`).
-    fn on_epoch_settlement_after_try_epoch_pool(
+    /// success/failure is reflected in validator state via earlier callbacks, not `_settle_ok`).
+    fn on_epoch_settlement_after_try_epoch_settle(
         &mut self,
-        #[callback] _pool_ok: bool,
+        #[callback] _settle_ok: bool,
         validator_id: ValidatorId,
         cont: PerEpochContinue,
     ) -> Promise;
@@ -135,7 +135,7 @@ pub trait ExtSelfEpoch {
         validator_id: ValidatorId,
         shares_remove: u128,
     ) -> Promise;
-    /// Private callback: resumes [`Contract::payout_user_withdraw`] after shared settlement or after a pool `withdraw` prefetch.
+    /// Private callback: resumes [`Contract::payout_user_withdraw`] after shared per-epoch settlement.
     fn on_user_withdraw_payout_continue(
         &mut self,
         account_id: AccountId,
@@ -200,8 +200,8 @@ impl Contract {
     /// **`withdraw`**:
     /// When [`Validator::last_settlement_epoch`] is **before** the current NEAR epoch: (1)
     /// [`Contract::promise_get_validator_total_staked_balance`], (2) withdraw ready unstaked NEAR from the pool if allowed
-    /// ([`Contract::promise_fetch_pool_unstaked_then_continue_settlement`]), (3) net settle via
-    /// [`Contract::try_pool_settle_if_due_or_dispatch_continue`] / [`Contract::try_epoch_settle`], then dispatch **`cont`**.
+    /// ([`Contract::promise_get_validator_unstaked_then_continue_settlement`]), (3) net settle via
+    /// [`Contract::try_validator_settle_if_due_or_dispatch_continue`] / [`Contract::try_epoch_settle`], then dispatch **`cont`**.
     /// When the pool **already** settled this epoch (`last_settlement_epoch` ≥ current height), **skip** that
     /// pre-user pipeline and run [`Contract::on_epoch_settlement_dispatch_continue`] immediately (mint / unlock /
     /// withdraw payout uses cached **`total_staked_balance`**). Callers must ensure the pool row is **`Idle`**.
@@ -230,8 +230,8 @@ impl Contract {
     }
 
     /// Settlement step 2: query pool unstaked balance, then resume in [`Contract::on_epoch_settlement_after_unstaked`]
-    /// (withdraw-if-ready, then [`Contract::try_pool_settle_if_due_or_dispatch_continue`]).
-    pub(crate) fn promise_fetch_pool_unstaked_then_continue_settlement(
+    /// (withdraw-if-ready, then [`Contract::try_validator_settle_if_due_or_dispatch_continue`]).
+    pub(crate) fn promise_get_validator_unstaked_then_continue_settlement(
         &self,
         validator_id: ValidatorId,
         cont: PerEpochContinue,
@@ -249,13 +249,13 @@ impl Contract {
     /// Clears equal `pending_to_stake` / `pending_to_unstake` without a pool call when both match
     /// `matched_pending_yocto` (net-zero queue). Re-roots `pending_to_unstake` at [`Validator::pending_user_unstake_total`]
     /// so user exit liability continues to drive the next unstake round. Shared by [`Contract::on_settle_net_zero_done`]
-    /// and the inline net-zero branch inside [`Contract::try_pool_settle_if_due_or_dispatch_continue`].
+    /// and the inline net-zero branch inside [`Contract::try_validator_settle_if_due_or_dispatch_continue`].
     pub(crate) fn apply_net_zero_pending_matched_clear(
         &mut self,
         validator_id: &ValidatorId,
         matched_pending_yocto: u128,
     ) {
-        let mut validator = self.require_validator_pool_callback(validator_id);
+        let mut validator = self.require_validator_callback(validator_id);
         require!(
             validator.pending_to_stake.as_yoctonear() == matched_pending_yocto
                 && validator.pending_to_unstake.as_yoctonear() == matched_pending_yocto,
@@ -279,11 +279,11 @@ impl Contract {
     pub(crate) fn try_epoch_settle(
         &mut self,
         validator_id: ValidatorId,
-        pool_already_busy: bool,
+        validator_already_busy: bool,
     ) -> Promise {
         let mut validator = self.require_validator(&validator_id);
-        // `pool_already_busy`: unlock / withdraw paths may already hold `Busy` before chaining settle.
-        if pool_already_busy {
+        // `validator_already_busy`: unlock / withdraw paths may already hold `Busy` before chaining settle.
+        if validator_already_busy {
             require!(
                 validator.tx_status == TransactionStatus::Busy,
                 "Validator pool must be busy for this settle step"
@@ -304,7 +304,7 @@ impl Contract {
 
         // Nothing queued → caller error (epoch_settle) or upstream should not route here.
         if pending_stake_yocto == 0 && pending_unstake_yocto == 0 {
-            if pool_already_busy {
+            if validator_already_busy {
                 validator.tx_status = TransactionStatus::Idle;
                 self.validators.insert(validator_id, validator);
             }
@@ -314,7 +314,7 @@ impl Contract {
         // Equal pending → net-zero clear via self-call (or async callback when not already busy).
         if pending_stake_yocto == pending_unstake_yocto && pending_stake_yocto > 0 {
             events::log_epoch_operation("epoch_settle_net_zero", &validator_id);
-            if !pool_already_busy {
+            if !validator_already_busy {
                 validator.tx_status = TransactionStatus::Busy;
             }
             self.validators.insert(validator_id.clone(), validator);
@@ -331,7 +331,7 @@ impl Contract {
                 "Net stake amount is zero after netting pending unstake"
             );
             events::log_epoch_operation("epoch_settle_stake", &validator_id);
-            if !pool_already_busy {
+            if !validator_already_busy {
                 validator.tx_status = TransactionStatus::Busy;
             }
             self.validators.insert(validator_id.clone(), validator);
@@ -348,11 +348,8 @@ impl Contract {
 
         // Excess unstake → pool `unstake(net)` (subject to prior-unstake settle delay above).
         if validator.last_unstake_epoch > 0 {
-            let ready_epoch = validator
-                .last_unstake_epoch
-                .saturating_add(self.config.epoch_unstake_settle_epochs);
             require!(
-                env::epoch_height() >= ready_epoch,
+                self.validator_unstake_waiting_finished(&validator),
                 "Wait until the previous unstake has finished its settle period before unstaking again"
             );
         }
@@ -362,7 +359,7 @@ impl Contract {
             "Net unstake amount is zero after netting pending stake"
         );
         events::log_epoch_operation("epoch_settle_unstake", &validator_id);
-        if !pool_already_busy {
+        if !validator_already_busy {
             validator.tx_status = TransactionStatus::Busy;
             self.validators.insert(validator_id.clone(), validator);
         }
@@ -382,28 +379,21 @@ impl Contract {
     // ---------------------------------------------------------------------------
 
     /// Pull unstaked NEAR from the staking pool into this contract’s [`Validator::pending_to_withdraw`].
-    /// When `pool_already_busy` is true, the row must already be `Busy` (unlock pipeline); it is not flipped to `Busy` again.
+    /// When `validator_already_busy` is true, the row must already be `Busy` (unlock pipeline); it is not flipped to `Busy` again.
     pub(crate) fn try_epoch_withdraw(
         &mut self,
         validator_id: ValidatorId,
-        pool_already_busy: bool,
+        validator_already_busy: bool,
     ) -> Promise {
         events::log_epoch_operation("epoch_withdraw", &validator_id);
 
         let mut validator = self.require_validator(&validator_id);
         require!(
-            validator.last_unstake_epoch > 0,
-            "No unstake has been recorded for this validator yet; wait until after an unstake completes"
-        );
-        require!(
-            env::epoch_height()
-                >= validator
-                    .last_unstake_epoch
-                    .saturating_add(self.config.epoch_unstake_settle_epochs),
+            self.validator_unstake_waiting_finished(&validator),
             "Wait until enough epochs have passed after the last unstake before withdrawing"
         );
 
-        if pool_already_busy {
+        if validator_already_busy {
             require!(
                 validator.tx_status == TransactionStatus::Busy,
                 "Validator pool must be busy for this withdraw step"
@@ -445,8 +435,8 @@ impl Contract {
 
     /// End of the **pre-user** balance/withdraw phase: either there is nothing left to net-settle this epoch,
     /// or we inline net-zero, or we attach [`Contract::try_epoch_settle`] and resume at
-    /// [`Contract::on_epoch_settlement_after_try_epoch_pool`] before [`Contract::on_epoch_settlement_dispatch_continue`].
-    pub(crate) fn try_pool_settle_if_due_or_dispatch_continue(
+    /// [`Contract::on_epoch_settlement_after_try_epoch_settle`] before [`Contract::on_epoch_settlement_dispatch_continue`].
+    pub(crate) fn try_validator_settle_if_due_or_dispatch_continue(
         &mut self,
         validator_id: ValidatorId,
         cont: PerEpochContinue,
@@ -482,8 +472,8 @@ impl Contract {
         // Asymmetric pending → one pool mutating call for this epoch (`try_epoch_settle` enforces the mutex).
         self.try_epoch_settle(validator_id.clone(), false).then(
             ext_self_epoch::ext(env::current_account_id())
-                .with_static_gas(callbacks::ON_EPOCH_SETTLEMENT_AFTER_TRY_EPOCH_POOL)
-                .on_epoch_settlement_after_try_epoch_pool(validator_id, cont),
+                .with_static_gas(callbacks::ON_EPOCH_SETTLEMENT_AFTER_TRY_EPOCH_SETTLE)
+                .on_epoch_settlement_after_try_epoch_settle(validator_id, cont),
         )
     }
 }
@@ -496,7 +486,7 @@ impl Contract {
 #[near]
 impl Contract {
     #[private]
-    /// Settlement step 1 callback: persist refreshed pool total, then [`Contract::promise_fetch_pool_unstaked_then_continue_settlement`].
+    /// Settlement step 1 callback: persist refreshed pool total, then [`Contract::promise_get_validator_unstaked_then_continue_settlement`].
     pub fn on_epoch_settlement_after_total_balance(
         &mut self,
         #[callback] total_balance: NearToken,
@@ -509,6 +499,7 @@ impl Contract {
             );
         }
         let mut validator = self.require_validator(&validator_id);
+        // TODO: should we panic here if validator is busy
         require!(
             validator.tx_status == TransactionStatus::Idle,
             "Validator pool is busy; wait for the in-flight pool call to finish"
@@ -517,12 +508,12 @@ impl Contract {
         validator.last_balance_refresh_ns = U64(env::block_timestamp());
         self.validators.insert(validator_id.clone(), validator);
 
-        self.promise_fetch_pool_unstaked_then_continue_settlement(validator_id, cont)
+        self.promise_get_validator_unstaked_then_continue_settlement(validator_id, cont)
     }
 
     #[private]
     /// Settlement step 2 callback: optionally [`Contract::try_epoch_withdraw`], else jump to
-    /// [`Contract::try_pool_settle_if_due_or_dispatch_continue`].
+    /// [`Contract::try_validator_settle_if_due_or_dispatch_continue`].
     pub fn on_epoch_settlement_after_unstaked(
         &mut self,
         #[callback] unstaked_balance: NearToken,
@@ -535,11 +526,7 @@ impl Contract {
 
         let validator = self.require_validator(&validator_id);
         // Pool may hold spendable unstaked NEAR after a prior unstake; pull it in before net settle when allowed.
-        let can_withdraw = validator.last_unstake_epoch > 0
-            && env::epoch_height()
-                >= validator
-                    .last_unstake_epoch
-                    .saturating_add(self.config.epoch_unstake_settle_epochs);
+        let can_withdraw = self.validator_unstake_waiting_finished(&validator);
 
         if unstaked_balance.as_yoctonear() > 0 && can_withdraw {
             return self
@@ -556,7 +543,7 @@ impl Contract {
                 );
         }
 
-        self.try_pool_settle_if_due_or_dispatch_continue(validator_id, cont)
+        self.try_validator_settle_if_due_or_dispatch_continue(validator_id, cont)
     }
 
     #[private]
@@ -568,16 +555,16 @@ impl Contract {
         validator_id: ValidatorId,
         cont: PerEpochContinue,
     ) -> Promise {
-        self.try_pool_settle_if_due_or_dispatch_continue(validator_id, cont)
+        self.try_validator_settle_if_due_or_dispatch_continue(validator_id, cont)
     }
 
     #[private]
     /// Settlement step 4 callback: pool outcome is already folded into `validator` by `on_deposit_and_stake` /
     /// `on_unstake`; this hop only forwards to [`Contract::on_epoch_settlement_dispatch_continue`].
     #[allow(unused_variables)]
-    pub fn on_epoch_settlement_after_try_epoch_pool(
+    pub fn on_epoch_settlement_after_try_epoch_settle(
         &mut self,
-        #[callback] _pool_ok: bool,
+        #[callback] _settle_ok: bool,
         validator_id: ValidatorId,
         cont: PerEpochContinue,
     ) -> Promise {
@@ -652,7 +639,7 @@ impl Contract {
         absorb_unstake_yocto: U128,
     ) -> bool {
         let ok = is_promise_success();
-        let mut validator = self.require_validator_pool_callback(&validator_id);
+        let mut validator = self.require_validator_callback(&validator_id);
 
         validator.tx_status = TransactionStatus::Idle;
 
@@ -696,7 +683,7 @@ impl Contract {
         absorb_stake_yocto: U128,
     ) -> bool {
         let ok = is_promise_success();
-        let mut validator = self.require_validator_pool_callback(&validator_id);
+        let mut validator = self.require_validator_callback(&validator_id);
         validator.tx_status = TransactionStatus::Idle;
         if ok {
             let eh = env::epoch_height();
@@ -730,14 +717,14 @@ impl Contract {
         validator_id: ValidatorId,
     ) -> PromiseOrValue<bool> {
         if !is_promise_success() {
-            let mut validator = self.require_validator_pool_callback(&validator_id);
+            let mut validator = self.require_validator_callback(&validator_id);
             validator.tx_status = TransactionStatus::Idle;
             self.validators.insert(validator_id, validator);
             return PromiseOrValue::Value(false);
         }
 
         if unstaked_balance.as_yoctonear() == 0 {
-            let mut validator = self.require_validator_pool_callback(&validator_id);
+            let mut validator = self.require_validator_callback(&validator_id);
             validator.tx_status = TransactionStatus::Idle;
             self.validators.insert(validator_id, validator);
             return PromiseOrValue::Value(true);
@@ -762,7 +749,7 @@ impl Contract {
         withdrawn: NearToken,
     ) -> PromiseOrValue<bool> {
         let ok = is_promise_success();
-        let mut validator = self.require_validator_pool_callback(&validator_id);
+        let mut validator = self.require_validator_callback(&validator_id);
         validator.tx_status = TransactionStatus::Idle;
         let credited_yocto = if ok { withdrawn.as_yoctonear() } else { 0 };
         if ok && credited_yocto > 0 {
@@ -781,7 +768,7 @@ impl Contract {
                 .pending_to_withdraw
                 .checked_add(add)
                 .expect("pending_to_withdraw overflow after pool transfer");
-            events::log_pool_withdraw_in(credited_yocto, &validator_id);
+            events::log_validator_withdraw_in(credited_yocto, &validator_id);
         }
         self.validators.insert(validator_id, validator);
         PromiseOrValue::Value(ok)

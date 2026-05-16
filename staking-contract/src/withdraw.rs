@@ -3,14 +3,11 @@
 //! (epoch-gated), then sent to the user.
 //!
 //! **Flow (WASM):** `withdraw` → shared per-epoch settlement ([`crate::epoch::Contract::promise_validator_per_epoch_settlement_then`],
-//! same ordering as `lock` / `unlock`) → [`Contract::on_user_withdraw_payout_continue`] → [`Contract::payout_user_withdraw`].
-//! That payout step may attach one pool `withdraw` prefetch when the bucket is still empty (`LAZY_EPOCH_PIPELINE` section 2b),
-//! then [`Contract::claim_from_withdraw_bucket`] + `Promise::transfer`.
+//! same ordering as `lock` / `unlock`, including pool withdraw-if-ready) → [`Contract::on_user_withdraw_payout_continue`]
+//! → [`Contract::claim_from_withdraw_bucket`] + `Promise::transfer`.
 //!
 //! **Non-WASM:** `testing_env!` skips promise chains; [`Contract::payout_user_withdraw`] runs directly from [`Contract::withdraw`].
 
-use crate::epoch::ext_self_epoch;
-use crate::gas::callbacks;
 use crate::*;
 use near_sdk::{AccountId, NearToken, Promise, env, near, require};
 
@@ -29,8 +26,6 @@ impl Contract {
     ///
     /// **Non-WASM:** Runs [`Contract::payout_user_withdraw`] only (host `testing_env!` does not execute pool promise chains;
     /// see `lock.rs`).
-    ///
-    /// [`Contract::payout_user_withdraw`] may prefetch a pool `withdraw` when the in-contract bucket is empty (`LAZY_EPOCH_PIPELINE` section 2b).
     #[payable]
     pub fn withdraw(&mut self, validator_id: ValidatorId) -> Promise {
         near_sdk::assert_one_yocto();
@@ -82,9 +77,7 @@ impl Contract {
     }
 
     #[private]
-    /// Single continuation for user-withdraw payout: invoked after per-epoch settlement **or** after an
-    /// optional `try_epoch_withdraw` hop prefetched the pool → contract bucket. Always resumes
-    /// [`Contract::payout_user_withdraw`] (which may chain **another** pool withdraw if the bucket is still empty).
+    /// WASM continuation after [`crate::epoch::Contract::promise_validator_per_epoch_settlement_then`].
     pub fn on_user_withdraw_payout_continue(
         &mut self,
         account_id: AccountId,
@@ -258,10 +251,8 @@ impl Contract {
         credit
     }
 
-    /// End-to-end user withdraw payout on this pool: either pull NEAR already in `pending_to_withdraw`
-    /// through [`Contract::claim_from_withdraw_bucket`] and `Promise::transfer`, **or** (bucket empty
-    /// but unstake is old enough and the pool is idle) enqueue [`Contract::try_epoch_withdraw`] and resume
-    /// on [`Contract::on_user_withdraw_payout_continue`] (`LAZY_EPOCH_PIPELINE` section 2b).
+    /// Claim from `pending_to_withdraw` and transfer to the user. Pool → contract withdraw runs in the
+    /// shared per-epoch settlement chain before this ([`crate::epoch::Contract::promise_validator_per_epoch_settlement_then`]).
     ///
     /// Called from [`Contract::withdraw`] (non-WASM / tests) and from [`Contract::on_user_withdraw_payout_continue`] on WASM.
     pub(crate) fn payout_user_withdraw(
@@ -269,29 +260,6 @@ impl Contract {
         account_id: AccountId,
         validator_id: ValidatorId,
     ) -> Promise {
-        let validator = self.require_validator(&validator_id);
-        let pending_withdraw_bucket_yocto = validator.pending_to_withdraw.as_yoctonear();
-
-        // Prefetch only when: nothing in-bucket yet, we have seen an unstake epoch, the configured settle
-        // delay has passed (pool-side funds should be withdrawable), and no other pool tx is in flight.
-        let may_prefetch_pool_withdraw = pending_withdraw_bucket_yocto == 0
-            && validator.last_unstake_epoch > 0
-            && env::epoch_height()
-                >= validator
-                    .last_unstake_epoch
-                    .saturating_add(self.config.epoch_unstake_settle_epochs)
-            && validator.tx_status == TransactionStatus::Idle;
-
-        if may_prefetch_pool_withdraw {
-            self.validators.insert(validator_id.clone(), validator);
-            return self.try_epoch_withdraw(validator_id.clone(), false).then(
-                ext_self_epoch::ext(env::current_account_id())
-                    .with_static_gas(callbacks::ON_CLAIM_AFTER_POOL_WITHDRAW)
-                    .on_user_withdraw_payout_continue(account_id, validator_id),
-            );
-        }
-
-        self.validators.insert(validator_id.clone(), validator);
         let credit = self.claim_from_withdraw_bucket(account_id.clone(), validator_id);
         Promise::new(account_id).transfer(credit)
     }
