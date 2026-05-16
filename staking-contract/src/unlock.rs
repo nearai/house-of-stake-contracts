@@ -100,24 +100,29 @@ impl Contract {
     }
 
     #[private]
-    pub fn on_unstake_pipeline_unstaked_balance(
+    pub fn on_unstake_pipeline_pool_account(
         &mut self,
-        #[callback] unstaked_balance: NearToken,
+        #[callback] pool_account: PoolAccountView,
         validator_id: ValidatorId,
     ) -> PromiseOrValue<bool> {
         if !is_promise_success() {
             let mut validator = self.require_validator_callback(&validator_id);
             validator.tx_status = TransactionStatus::Idle;
             self.validators.insert(validator_id, validator);
-            env::panic_str("Could not read unstaked balance from the pool; retry in a few blocks");
+            env::panic_str("Could not read pool account from the pool; retry in a few blocks");
         }
 
         let validator = self.require_validator(&validator_id);
         let can_withdraw = self.validator_unstake_waiting_finished(&validator);
+        let unstaked = pool_account.unstaked();
 
-        if unstaked_balance.as_yoctonear() > 0 && can_withdraw {
+        if unstaked.as_yoctonear() > 0 && can_withdraw {
+            require!(
+                pool_account.can_withdraw,
+                "Pool reports unstaked balance is not yet withdrawable"
+            );
             return self
-                .try_epoch_withdraw(validator_id.clone(), true)
+                .try_epoch_withdraw_known_unstaked(validator_id.clone(), unstaked, true)
                 .then(
                     ext_self_epoch::ext(env::current_account_id())
                         .with_static_gas(callbacks::ON_GET_UNSTAKED_FOR_WITHDRAW)

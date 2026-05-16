@@ -6,10 +6,10 @@ pub mod staking_pool {
     use near_sdk::Gas;
     pub const DEPOSIT_AND_STAKE: Gas = Gas::from_gas(super::BASE_GAS.as_gas() * 3);
     pub const UNSTAKE: Gas = Gas::from_gas(super::BASE_GAS.as_gas() * 3);
-    /// Pull unstaked NEAR from pool (after `get_account_unstaked_balance`).
+    /// Pull unstaked NEAR from pool into this contract.
     pub const WITHDRAW: Gas = Gas::from_gas(super::BASE_GAS.as_gas() * 3);
-    pub const GET_ACCOUNT_TOTAL_BALANCE: Gas = super::BASE_GAS;
-    pub const GET_ACCOUNT_UNSTAKED_BALANCE: Gas = super::BASE_GAS;
+    /// Pool `get_account` (staked + unstaked + `can_withdraw` in one view).
+    pub const GET_ACCOUNT: Gas = super::BASE_GAS;
     /// View call to the pool's `get_owner_id`.
     pub const GET_OWNER_ID: Gas = super::BASE_GAS;
 }
@@ -31,10 +31,10 @@ pub mod callbacks {
     pub const ON_VALIDATOR_OWNER_CHECK: Gas = Gas::from_gas(BASE_GAS.as_gas() * 2);
     /// Tail dispatch after shared per-epoch settlement (`PerEpochContinue`).
     pub const ON_EPOCH_SETTLEMENT_DISPATCH: Gas = Gas::from_gas(BASE_GAS.as_gas() * 6);
-    /// After pool `get_account_total_balance` during shared settlement (before lock / unlock).
-    pub const ON_EPOCH_SETTLEMENT_AFTER_TOTAL_BALANCE: Gas = Gas::from_gas(BASE_GAS.as_gas() * 6);
-    /// After pool `get_account_unstaked_balance` during shared settlement.
-    pub const ON_EPOCH_SETTLEMENT_AFTER_UNSTAKED: Gas = Gas::from_gas(BASE_GAS.as_gas() * 6);
+    /// After pool `get_account` during shared settlement (balance refresh + withdraw-if-ready).
+    pub const ON_EPOCH_SETTLEMENT_AFTER_POOL_ACCOUNT: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
+    /// After pool `get_account` on unlock unstake pipeline.
+    pub const ON_UNSTAKE_PIPELINE_POOL_ACCOUNT: Gas = Gas::from_gas(BASE_GAS.as_gas() * 6);
     /// After `try_epoch_settle` pool call during shared settlement.
     pub const ON_EPOCH_SETTLEMENT_AFTER_TRY_EPOCH_SETTLE: Gas =
         Gas::from_gas(BASE_GAS.as_gas() * 6);

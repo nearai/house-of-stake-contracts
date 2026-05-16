@@ -378,7 +378,7 @@ impl Contract {
     ///
     /// **When to call:** Stake figures passed into [`mint_shares`] must match pool reality. Production
     /// invokes this from [`crate::epoch::Contract::on_lock_finally_mint_and_maybe_post_settle`] after
-    /// a successful `get_account_total_balance` refresh on the lock promise chain.
+    /// a successful pool `get_account` refresh on the lock promise chain.
     pub(crate) fn commit_catalog_lock(
         &mut self,
         buyer: AccountId,

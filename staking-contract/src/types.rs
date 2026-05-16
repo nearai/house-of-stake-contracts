@@ -12,6 +12,30 @@ pub type LockId = String;
 /// Staking pool contract account id (allowlist key, catalog scope, lock pool).
 pub type ValidatorId = AccountId;
 
+/// Snapshot from a NEAR staking pool `get_account` view (matches `HumanReadableAccount` fields used here).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [json])]
+pub struct PoolAccountView {
+    pub unstaked_balance: U128,
+    pub staked_balance: U128,
+    /// Pool-side unstaked unlock flag (`unstaked_available_epoch_height <= epoch_height`).
+    pub can_withdraw: bool,
+}
+
+impl PoolAccountView {
+    pub fn unstaked(&self) -> NearToken {
+        NearToken::from_yoctonear(self.unstaked_balance.0)
+    }
+
+    pub fn total_balance(&self) -> NearToken {
+        NearToken::from_yoctonear(
+            self.unstaked_balance
+                .0
+                .saturating_add(self.staked_balance.0),
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[near(serializers = [borsh, json])]
 pub enum PriceType {

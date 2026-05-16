@@ -13,7 +13,7 @@ pub struct Validator {
     /// Total issued stake.dao **share units** for this pool (integer; same scale as per-user shares).
     pub total_shares: U128,
     /// Cached **staked NEAR** for this contract’s account on the pool, from the last successful
-    /// `get_account_total_balance` (plus bookkeeping updates on stake/unstake/withdraw paths). Used with
+    /// pool `get_account` total balance (plus bookkeeping updates on stake/unstake/withdraw paths). Used with
     /// `pending_*` for share mint/burn pricing—not updated until the next pool read or accounting step.
     pub total_staked_balance: NearToken,
     /// `block_timestamp` (nanoseconds) when `total_staked_balance` was last synced from the pool (or row created).
@@ -32,7 +32,7 @@ pub struct Validator {
     /// from the pool when eligible, then at most one **net** pool `deposit_and_stake` / `unstake` / net-zero
     /// clearance for that epoch (same mutex the staking pool enforces per account). Successful callbacks
     /// on stake, unstake, and net-zero settlement set this to `env::epoch_height()`. When this equals the
-    /// current epoch, user flows **skip** another `get_account_total_balance` for this validator until the
+    /// current epoch, user flows **skip** another pool `get_account` refresh for this validator until the
     /// next NEAR epoch.
     pub last_settlement_epoch: u64,
     /// NEAR that has been **`withdraw`**n from the pool into this contract and sits in the claim bucket until
