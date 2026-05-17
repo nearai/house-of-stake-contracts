@@ -77,7 +77,7 @@ impl Contract {
     }
 
     #[private]
-    /// WASM continuation after [`crate::epoch::Contract::promise_validator_per_epoch_settlement_then`].
+    /// **[Pipeline 5c]** User withdraw payout after **4** (then **6**).
     pub fn on_user_withdraw_payout_continue(
         &mut self,
         account_id: AccountId,

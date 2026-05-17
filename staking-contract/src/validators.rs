@@ -20,7 +20,7 @@ pub struct Validator {
     pub last_balance_refresh_ns: U64,
 
     /// NEAR waiting to be sent to the pool via **`deposit_and_stake`** (aggregated locks; net-settled vs
-    /// `pending_to_unstake` in `Contract::try_epoch_settle` in `epoch.rs`).
+    /// `pending_to_unstake` in `Contract::try_epoch_stake_or_unstake` in `epoch.rs`).
     pub pending_to_stake: NearToken,
     /// NEAR queued to leave the pool via **`unstake`** (user unlocks etc.; net-settled vs `pending_to_stake`).
     pub pending_to_unstake: NearToken,
@@ -151,13 +151,6 @@ impl Contract {
             .get(validator_id)
             .cloned()
             .expect("Validator not found on the allowlist")
-    }
-
-    pub(crate) fn require_validator_callback(&self, validator_id: &ValidatorId) -> Validator {
-        self.validators
-            .get(validator_id)
-            .cloned()
-            .expect("Validator not found on allowlist (validator callback)")
     }
 
     /// True once a pool `unstake` is on record and [`crate::config::Config::epoch_unstake_settle_epochs`]

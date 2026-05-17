@@ -49,7 +49,7 @@ Key roles:
 
 ## 3. Crate layout
 
-See source files under [src/](../src/). Key modules: `config`, `types`, `ids`, `validators`, `products`, `accounts`, `governance`, `pause`, `upgrade`, `lock`, `unlock`, `withdraw`, **`epoch`** (pool cross-contract calls and self-callbacks; `try_epoch_settle` / `try_epoch_withdraw`, `epoch_settle`), `prices`, `subscriptions`, `events`, `gas`, `internal` (share math and NEAR price lock check).
+See source files under [src/](../src/). Key modules: `config`, `types`, `ids`, `validators`, `products`, `accounts`, `governance`, `pause`, `upgrade`, `lock`, `unlock`, `withdraw`, **`epoch`** (pool cross-contract calls and self-callbacks; `try_epoch_stake_or_unstake` / `try_epoch_withdraw`, `epoch_settle`), `prices`, `subscriptions`, `events`, `gas`, `internal` (share math and NEAR price lock check).
 
 ## 4. Data model (summary)
 

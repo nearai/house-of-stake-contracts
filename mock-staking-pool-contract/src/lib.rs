@@ -6,8 +6,7 @@
 //! real cross-contract promises instead of host-side mocks.
 //!
 //! **Surface area:** matches what the staking contract actually invokes — `get_owner_id`,
-//! `deposit_and_stake`, `unstake`, `get_account_unstaked_balance`, `get_account_total_balance`,
-//! `withdraw`. Not a full NEAR core staking-pool implementation.
+//! `deposit_and_stake`, `unstake`, `get_account`, `withdraw`. Not a full NEAR core staking-pool implementation.
 //!
 //! **Accounting (LiNEAR-style split):** for each *caller* account id we track `staked` vs `unstaked`.
 //! - `deposit_and_stake` — increases `staked` by `attached_deposit` (caller is the staking contract when
@@ -15,10 +14,21 @@
 //! - `unstake` — moves up to `amount` from `staked` to `unstaked` for `predecessor`.
 //! - `withdraw` — sends `amount` from `unstaked` to `predecessor` via promise (same pattern as production pools).
 
+use near_sdk::json_types::U128;
+use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::store::LookupMap;
 use near_sdk::{
     AccountId, BorshStorageKey, NearToken, PanicOnDefault, Promise, env, near, require,
 };
+
+/// Matches staking-contract [`PoolAccountView`] / NEAR staking-pool `get_account` JSON shape.
+#[derive(Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct PoolAccountView {
+    pub unstaked_balance: U128,
+    pub staked_balance: U128,
+    pub can_withdraw: bool,
+}
 
 #[derive(BorshStorageKey)]
 #[near]
@@ -92,15 +102,24 @@ impl MockStakingPoolContract {
         self.unstaked.insert(account_id, new_u);
     }
 
-    /// Query unstaked bucket for any account (staking contract passes its own id during `epoch_withdraw`).
+    /// Staked + unstaked snapshot (production pools expose the same via `get_account`).
+    pub fn get_account(&self, account_id: AccountId) -> PoolAccountView {
+        PoolAccountView {
+            unstaked_balance: U128(self.get_unstaked(&account_id).as_yoctonear()),
+            staked_balance: U128(self.get_staked(&account_id).as_yoctonear()),
+            // Mock pool has no epoch-gated unstaked delay; tests use contract-side gates.
+            can_withdraw: true,
+        }
+    }
+
+    /// Query unstaked bucket for any account (legacy test views).
     pub fn get_account_unstaked_balance(&self, account_id: AccountId) -> NearToken {
         self.get_unstaked(&account_id)
     }
 
     pub fn get_account_total_balance(&self, account_id: AccountId) -> NearToken {
-        let s = self.get_staked(&account_id);
-        let u = self.get_unstaked(&account_id);
-        s.checked_add(u).expect("total balance overflow")
+        let acct = self.get_account(account_id);
+        NearToken::from_yoctonear(acct.unstaked_balance.0 + acct.staked_balance.0)
     }
 
     /// Pulls liquid NEAR from `unstaked[predecessor]` and transfers it to `predecessor` (the staking contract).

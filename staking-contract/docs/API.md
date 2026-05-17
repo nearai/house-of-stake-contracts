@@ -87,7 +87,7 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 
 | Method | Access | Deposit | Description |
 |--------|--------|---------|-------------|
-| `lock_for_product` | Buyer | **Attach NEAR** | One-off purchase: JSON **`price_id`**, **`lock_duration_ns`** (`U64`), **`product_id`**. Provide **exactly one** of **`price_id`** or **`product_id`** (the other **`null`**). If **`product_id`** is set, uses **`Product.default_price_id`** (must be a **one-off** price). Returns **`PromiseOrValue<LockId>`** (pool balance refresh then **`try_epoch_settle`**; see `docs/LAZY_EPOCH_PIPELINE.md`). |
+| `lock_for_product` | Buyer | **Attach NEAR** | One-off purchase: JSON **`price_id`**, **`lock_duration_ns`** (`U64`), **`product_id`**. Provide **exactly one** of **`price_id`** or **`product_id`** (the other **`null`**). If **`product_id`** is set, uses **`Product.default_price_id`** (must be a **one-off** price). Returns **`PromiseOrValue<LockId>`** (pool balance refresh then **`try_epoch_stake_or_unstake`**; see `docs/LAZY_EPOCH_PIPELINE.md`). |
 | `lock_for_subscription` | Subscriber | **Attach NEAR** | Recurring (monthly): **`price_id`**, **`product_id`** — same XOR rule as **`lock_for_product`**; default price must be **recurring** monthly. Returns **`PromiseOrValue<LockId>`**. |
 | `cancel_subscription` | Subscriber | **1 yocto** | `product_id` — stop renewing after current period (`cancel_at_period_end`). After **`end_ns`**, the next **`lock_for_subscription`** replaces the row so the user may subscribe again (index is not left stale). |
 | `resume_subscription` | Subscriber | **1 yocto** | `product_id` — clear **`cancel_at_period_end`** while subscription is still **`Active`** (undo **`cancel_subscription`** before period end). Requires subscription was scheduled for cancellation; otherwise panics with **`Not scheduled for cancellation`**. |
@@ -110,14 +110,14 @@ Public **`epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator
 
 **Per allowlisted pool (`validator_id` = staking pool contract account):**
 
-- **`tx_status`**: at most one in-flight cross-contract pool call at a time (`Idle` / `Busy`).
-- **Per NEAR `epoch_height`**: at most **one** successful pool **`deposit_and_stake`** **or** **`unstake`**. Both paths update **`Validator.last_settlement_epoch`** on success (same mutex). Catalog **`lock`** / **`unlock`** use **`last_settlement_epoch`** to branch: when it is **already** the current `epoch_height`, the contract **skips** the pre-user **`get_account_total_balance`**, withdraw-if-ready, and **`try_epoch_settle`** chain and proceeds directly to mint or unlock queue (cached `total_staked_balance`). When it is **behind** the current height, the contract runs withdraw-if-ready then **`try_epoch_settle`** on existing pending before the user action. **`try_epoch_settle`** nets **`pending_to_stake`** vs **`pending_to_unstake`** in yocto (stake excess, unstake excess, or clear-equal without a pool mutating call) in that single epoch slot.
+- **`tx_status`**: at most one orchestrated validator pipeline at a time (`Idle` / `Busy`); cleared by `on_epoch_pipeline_terminal_release` after the flow tail promise completes.
+- **Per NEAR `epoch_height`**: at most **one** successful pool **`deposit_and_stake`** **or** **`unstake`**. Both paths update **`Validator.last_settlement_epoch`** on success (same mutex). Catalog **`lock`** / **`unlock`** use **`last_settlement_epoch`** to branch: when it is **already** the current `epoch_height`, the contract **skips** the pre-user **`get_account_total_balance`**, withdraw-if-ready, and **`try_epoch_stake_or_unstake`** chain and proceeds directly to mint or unlock queue (cached `total_staked_balance`). When it is **behind** the current height, the contract runs withdraw-if-ready then **`try_epoch_stake_or_unstake`** on existing pending before the user action. **`try_epoch_stake_or_unstake`** nets **`pending_to_stake`** vs **`pending_to_unstake`** in yocto (stake excess, unstake excess, or clear-equal without a pool mutating call) in that single epoch slot.
 - **Unstake spacing**: further **`unstake`** rounds also require **`epoch_height >= last_unstake_epoch + epoch_unstake_settle_epochs`** (NEAR pool settlement).
 - **Withdraw from pool** (`get_account_unstaked_balance` → `withdraw`): does **not** consume the stake/unstake epoch slot above.
 
 | Method | Access | Deposit | Returns | Description |
 |--------|--------|---------|---------|-------------|
-| `epoch_settle` | Any | **None** | **`Promise`** | JSON **`validator_id`** (allowlisted pool account). Runs **`try_epoch_settle`** for manual retry or to advance pending stake/unstake when automatic scheduling did not complete; same per-epoch rules as automatic flows. |
+| `epoch_settle` | Any | **None** | **`Promise`** | JSON **`validator_id`** (allowlisted pool account). Runs **`try_epoch_stake_or_unstake`** for manual retry or to advance pending stake/unstake when automatic scheduling did not complete; same per-epoch rules as automatic flows. |
 
 ---
 
@@ -132,7 +132,9 @@ Public **`epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator
 | `on_settle_net_zero_done` | Internal: equal pending stake/unstake cleared without pool **`deposit`** / **`unstake`**. |
 | `on_get_unstaked_for_epoch_withdraw` | Continues withdraw-from-pool; may chain **`withdraw`** on pool. |
 | `on_epoch_withdraw_transfer_done` | Credits **`pending_to_withdraw`** after pool transfer. |
-| `on_unlock_refresh_then_queue` / `on_unstake_pipeline_unstaked_balance` / `on_after_withdraw_then_unstake` / `on_lock_refresh_then_finalize` | User-flow continuations for **`unlock`** / **`lock`**. |
+| `on_unlock_tail_after_pre_user_settle` / `on_unstake_pipeline_pool_account` | User-flow continuations for **`unlock`**. |
+| `on_after_pool_withdraw_maybe_settle` | After pool `withdraw`; may run `try_epoch_stake_or_unstake` (stake / unstake / net-zero). |
+| `on_lock_finally_mint_and_maybe_post_settle` | Catalog lock mint tail (`lock.rs`). |
 
 ---
 

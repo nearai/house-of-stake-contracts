@@ -516,6 +516,7 @@ impl Contract {
 #[near]
 impl Contract {
     #[private]
+    /// **[Pipeline 5a]** Catalog mint after **4**; may re-enter **3** (then **6** via **4**).
     pub fn on_lock_finally_mint_and_maybe_post_settle(
         &mut self,
         buyer: AccountId,
@@ -535,13 +536,13 @@ impl Contract {
         );
         let validator = self.require_validator(&validator_id);
         require!(
-            validator.tx_status == TransactionStatus::Idle,
-            "Validator pool is busy; wait for the in-flight pool call to finish"
+            validator.tx_status == TransactionStatus::Busy,
+            "Validator pool must be busy after per-epoch settlement"
         );
         let has_p = validator.pending_to_stake.as_yoctonear() > 0
             || validator.pending_to_unstake.as_yoctonear() > 0;
         if has_p && validator.last_settlement_epoch < env::epoch_height() {
-            PromiseOrValue::Promise(self.try_epoch_settle(validator_id, false))
+            PromiseOrValue::Promise(self.try_epoch_stake_or_unstake(validator_id, None))
         } else {
             PromiseOrValue::Value(())
         }

@@ -181,7 +181,7 @@ pub struct Lock {
 
 /// Payload chained after [`Contract::promise_validator_per_epoch_settlement_then`] for catalog lock,
 /// unlock, or **user withdraw**: either the full pre-user pipeline ran (balance sync → withdraw-if-ready →
-/// [`crate::epoch::Contract::try_epoch_settle`]), or the pool had **already** settled this NEAR epoch and
+/// [`crate::epoch::Contract::try_epoch_stake_or_unstake`]), or the pool had **already** settled this NEAR epoch and
 /// the contract skipped that pipeline and jumped straight here (cached **`total_staked_balance`**).
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
@@ -205,4 +205,17 @@ pub enum PerEpochContinue {
         validator_id: ValidatorId,
         account_id: AccountId,
     },
+    /// Public [`crate::epoch::Contract::epoch_settle`]: no user tail after the shared pipeline.
+    SettleOnly { validator_id: ValidatorId },
+}
+
+impl PerEpochContinue {
+    pub fn validator_id(&self) -> &ValidatorId {
+        match self {
+            Self::CatalogLockMint { validator_id, .. }
+            | Self::UnlockQueueUnstake { validator_id, .. }
+            | Self::WithdrawUserTransfer { validator_id, .. }
+            | Self::SettleOnly { validator_id } => validator_id,
+        }
+    }
 }

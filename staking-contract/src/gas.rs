@@ -21,11 +21,11 @@ pub mod callbacks {
     pub const ON_UNSTAKE: Gas = BASE_GAS;
     /// Self-callback after net-zero stake/unstake pending (no pool deposit/unstake).
     pub const ON_SETTLE_NET_ZERO: Gas = BASE_GAS;
-    /// May chain a second promise to `withdraw` on the pool.
-    pub const ON_GET_UNSTAKED_FOR_WITHDRAW: Gas = Gas::from_gas(BASE_GAS.as_gas() * 4);
+    /// After pool `withdraw`: tail settle (`None`) or settlement `try_epoch_stake_or_unstake` + dispatch (`Some(cont)`).
+    pub const ON_GET_UNSTAKED_FOR_WITHDRAW: Gas = Gas::from_gas(BASE_GAS.as_gas() * 6);
     pub const ON_WITHDRAW_TRANSFER: Gas = Gas::from_gas(BASE_GAS.as_gas() * 2);
     pub const ON_TOTAL_BALANCE: Gas = BASE_GAS;
-    /// Balance refresh then catalog mint, usage bumps, subscription index, and `try_epoch_settle_pool`.
+    /// Balance refresh then catalog mint, usage bumps, subscription index, and `try_epoch_stake_or_unstake`.
     pub const ON_LOCK_REFRESH_THEN_FINALIZE: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// After `get_owner_id`: callback does a few storage writes (catalog or owner cache refresh).
     pub const ON_VALIDATOR_OWNER_CHECK: Gas = Gas::from_gas(BASE_GAS.as_gas() * 2);
@@ -35,15 +35,15 @@ pub mod callbacks {
     pub const ON_EPOCH_SETTLEMENT_AFTER_POOL_ACCOUNT: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// After pool `get_account` on unlock unstake pipeline.
     pub const ON_UNSTAKE_PIPELINE_POOL_ACCOUNT: Gas = Gas::from_gas(BASE_GAS.as_gas() * 6);
-    /// After `try_epoch_settle` pool call during shared settlement.
-    pub const ON_EPOCH_SETTLEMENT_AFTER_TRY_EPOCH_SETTLE: Gas =
+    /// After `try_epoch_stake_or_unstake` pool call during shared settlement.
+    pub const ON_EPOCH_SETTLEMENT_AFTER_TRY_EPOCH_STAKE_OR_UNSTAKE: Gas =
         Gas::from_gas(BASE_GAS.as_gas() * 6);
-    /// After withdraw chain hop during shared settlement.
-    pub const ON_EPOCH_SETTLEMENT_AFTER_WITHDRAW_CHAIN: Gas = Gas::from_gas(BASE_GAS.as_gas() * 6);
     /// Mint lock and optional post-settle after shared pipeline.
     pub const ON_LOCK_FINALLY_MINT: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// Unlock tail after pre-user settlement.
     pub const ON_UNLOCK_TAIL_AFTER_PRE_USER: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// User withdraw tail after shared per-epoch settlement (batch claim + transfer).
     pub const ON_WITHDRAW_USER_AFTER_EPOCH_SETTLEMENT: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
+    /// After user-flow tail promise completes: release pipeline `Busy`.
+    pub const ON_EPOCH_PIPELINE_TERMINAL_RELEASE: Gas = BASE_GAS;
 }

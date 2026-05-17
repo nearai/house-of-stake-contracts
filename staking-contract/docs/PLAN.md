@@ -33,7 +33,7 @@ todos:
     content: "Implement subscriptions.rs calendar-month extension (Stripe-style anchor day, last-day-of-month clamp); compute new_end_ns and use (new_end - old_end) for price-formula duration"
     status: pending
   - id: epoch_jobs
-    content: "Superseded — lazy pipeline in epoch.rs (try_epoch_settle / try_epoch_withdraw, promise chains from lock/unlock/withdraw; public epoch_settle only)"
+    content: "Superseded — lazy pipeline in epoch.rs (try_epoch_stake_or_unstake / try_epoch_withdraw, promise chains from lock/unlock/withdraw; public epoch_settle only)"
     status: cancelled
   - id: withdraw_module
     content: "Implement withdraw.rs: user withdraw(validator_id) — pro-rata tranche payout + NEAR transfer (may chain pool withdraw)"
@@ -59,7 +59,7 @@ The plan below describes the on-chain design of the contract at [house-of-stake-
 
 ## 0. Lazy pipeline (current)
 
-**Implemented:** Validator pool mutations are **not** exposed as public `epoch_*` batch jobs and there is **no** `Config.operators` / `set_operators`. Settlement runs from **`lock`**, **`unlock`**, **`withdraw`**, and optional **`epoch_settle(validator_id)`** (manual retry / advance). Per-NEAR-epoch limits use **`Validator.last_settlement_epoch`** and **`try_epoch_settle`**. Full rules and status table: [`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md).
+**Implemented:** Validator pool mutations are **not** exposed as public `epoch_*` batch jobs and there is **no** `Config.operators` / `set_operators`. Settlement runs from **`lock`**, **`unlock`**, **`withdraw`**, and optional **`epoch_settle(validator_id)`** (manual retry / advance). Per-NEAR-epoch limits use **`Validator.last_settlement_epoch`** and **`try_epoch_stake_or_unstake`**. Full rules and status table: [`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md).
 
 **Reading this file:** YAML todos at the top may still show `pending` for already-built modules; treat the todo list as historical scaffolding. Narrative sections below §5 have been updated for the lazy pipeline where noted; [`DESIGN.md`](DESIGN.md) and [`API.md`](API.md) match the ABI.
 
@@ -120,7 +120,7 @@ Add a new crate inside the workspace mirroring sibling crates. Suggested files (
 - `lock.rs` — `lock_for_product`, `lock_for_subscription`, `check_near_price_lock`, finalize lock and `pending_to_stake` accounting.
 - `unlock.rs` — `unlock(lock_id)`, user-initiated only.
 - `withdraw.rs` — user **`withdraw(validator_id)`** (tranche claims + transfer; may chain pool withdraw per lazy pipeline).
-- `epoch.rs` — `try_epoch_settle`, `try_epoch_withdraw`, promise chains and self-callbacks for pool operations; public **`epoch_settle(validator_id)`** for manual retry. No separate `pool_callbacks.rs` module in-tree.
+- `epoch.rs` — `try_epoch_stake_or_unstake`, `try_epoch_withdraw`, promise chains and self-callbacks for pool operations; public **`epoch_settle(validator_id)`** for manual retry. No separate `pool_callbacks.rs` module in-tree.
 - `events.rs` — `EVENT_JSON` emitters for product/price/subscription/lock/unlock/withdraw (extends pattern from [common/src/events.rs](house-of-stake-contracts/common/src/events.rs)).
 - `gas.rs` — gas constants per external call (mirrors [lockup-contract/src/gas.rs](house-of-stake-contracts/lockup-contract/src/gas.rs)).
 - `types.rs` — `PriceType`, `BillingPeriod`, `OrderRef`, `LockStatus`, `CatalogStatus`, `SubscriptionStatus`, `ValidatorStatus`, `TransactionStatus`, `Product`, `Price`, `Lock`, etc.
@@ -179,7 +179,7 @@ pub struct Validator {
 Share math (per-validator):
 - `shares_for(amount) = amount * total_shares / total_staked_balance` (or 1:1 when pool is empty).
 - `near_for(shares) = shares * total_staked_balance / total_shares`.
-- `total_staked_balance` for share math includes `pending_to_stake` so existing rewards aren't diluted toward new joiners between `lock` and the next successful pool `deposit_and_stake` from `try_epoch_settle` (user-driven).
+- `total_staked_balance` for share math includes `pending_to_stake` so existing rewards aren't diluted toward new joiners between `lock` and the next successful pool `deposit_and_stake` from `try_epoch_stake_or_unstake` (user-driven).
 - `total_staked_balance` is updated on every confirmed pool deposit/withdraw/refresh callback so existing shares revalue with rewards (and slashes).
 
 `Validator.total_shares` is the canonical contract-level total for that validator and the **denominator** for every share-math computation. It is maintained as an invariant against the per-account view:
@@ -321,7 +321,7 @@ sequenceDiagram
 ```
 
 Notes:
-- Production `lock_for_product` / `lock_for_subscription` return `PromiseOrValue<LockId>`: after optional pre-user balance sync and `try_epoch_settle`, the contract mints shares and records `pending_to_stake`; actual `deposit_and_stake` follows the per-epoch rules in [`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md) (not a separate public `epoch_stake` call).
+- Production `lock_for_product` / `lock_for_subscription` return `PromiseOrValue<LockId>`: after optional pre-user balance sync and `try_epoch_stake_or_unstake`, the contract mints shares and records `pending_to_stake`; actual `deposit_and_stake` follows the per-epoch rules in [`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md) (not a separate public `epoch_stake` call).
 - Catalog mutations (`create_product`, `create_price`, …) use a pool `get_owner_id` callback to verify the validator owner; that is unrelated to pricing—locks are priced purely in NEAR on-chain as above.
 
 ### 5.2 Locking for a subscription (`lock_for_subscription`)
@@ -349,7 +349,7 @@ Notes:
 Unlock is always user-driven: only `lock.account_id` may call it; there is no separate protocol role that queues unlocks on behalf of users.
 
 - `unlock(lock_id)` is callable once `now >= lock.end_ns`.
-- When `last_settlement_epoch` is behind the current NEAR `epoch_height`, the contract runs the shared pre-user pipeline (`get_account_total_balance`, withdraw-if-ready, `try_epoch_settle`) before queueing unstake; otherwise it uses cached `total_staked_balance` for pricing (see [`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md)).
+- When `last_settlement_epoch` is behind the current NEAR `epoch_height`, the contract runs the shared pre-user pipeline (`get_account_total_balance`, withdraw-if-ready, `try_epoch_stake_or_unstake`) before queueing unstake; otherwise it uses cached `total_staked_balance` for pricing (see [`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md)).
 - It converts burned shares to NEAR liability, increments `validator.pending_to_unstake` and user tranche bookkeeping (`user_pending_unstake`), sets `Busy`, and continues withdraw-first / `unstake` via promise chains in `epoch.rs`.
 
 **Rationale:** Conversion at **unlock** time keeps room for **per-validator reward sharing** without protocol changes: rewards over the lock period accrue to the user’s shares, and pricing the exit at unlock reflects those rewards (and slashing) correctly.
@@ -362,7 +362,7 @@ After unlock, the user receives liquid NEAR via **`withdraw(validator_id)`** (an
 
 ### 5.5 Pool settlement (lazy, `epoch.rs`)
 
-There is **no** public `epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator_balance`. Pool calls are composed from **`lock`**, **`unlock`**, **`withdraw`**, and optional **`epoch_settle(validator_id)`** for manual retry. `try_epoch_settle` nets `pending_to_stake` vs `pending_to_unstake` under `last_settlement_epoch` / `epoch_height` rules; withdraw-from-pool is sequenced before new `unstake` when applicable. See [`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md) and [`epoch.rs`](../src/epoch.rs).
+There is **no** public `epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator_balance`. Pool calls are composed from **`lock`**, **`unlock`**, **`withdraw`**, and optional **`epoch_settle(validator_id)`** for manual retry. `try_epoch_stake_or_unstake` nets `pending_to_stake` vs `pending_to_unstake` under `last_settlement_epoch` / `epoch_height` rules; withdraw-from-pool is sequenced before new `unstake` when applicable. See [`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md) and [`epoch.rs`](../src/epoch.rs).
 
 ## 6. Owner / governance methods
 

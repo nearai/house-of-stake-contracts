@@ -29,7 +29,7 @@ For **sandbox integration tests** that exercise real pool cross-contract calls, 
 
 Typical sequence after locks exist (no public `epoch_*`; the contract schedules pool calls from user methods; see [`docs/LAZY_EPOCH_PIPELINE.md`](docs/LAZY_EPOCH_PIPELINE.md)):
 
-1. **`lock_for_product` / `lock_for_subscription`** — Mints shares, queues `pending_to_stake`, then [`try_epoch_settle_pool`](src/epoch.rs) runs after balance refresh (one pool **`deposit_and_stake`** or **`unstake`** per NEAR epoch, net of pending buckets).
+1. **`lock_for_product` / `lock_for_subscription`** — Mints shares, queues `pending_to_stake`, then [`try_epoch_stake_or_unstake`](src/epoch.rs) runs after balance refresh (one pool **`deposit_and_stake`** or **`unstake`** per NEAR epoch, net of pending buckets).
 2. User **`unlock`** — After lock period; refresh balance, queue unstake, then **`unstake`** / withdraw-from-pool as needed.
 3. Wait **`epoch_unstake_settle_epochs`** (config) after each successful pool **`unstake`**.
 4. User **`withdraw(validator_id)`** — May pull unstaked NEAR from the pool into `pending_to_withdraw` when allowed, then pro-rata claim and **transfer** that NEAR to the caller in one flow.

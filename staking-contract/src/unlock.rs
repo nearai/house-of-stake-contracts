@@ -57,6 +57,7 @@ impl Contract {
 #[near]
 impl Contract {
     #[private]
+    /// **[Pipeline 5b]** Share exit, then start **5b′** ([`Contract::promise_post_unlock_unstaked_pipeline`]).
     pub fn on_unlock_tail_after_pre_user_settle(
         &mut self,
         lock_id: LockId,
@@ -64,13 +65,11 @@ impl Contract {
         validator_id: ValidatorId,
         shares_remove: u128,
     ) -> Promise {
-        let mut validator = self.require_validator(&validator_id);
+        let validator = self.require_validator(&validator_id);
         require!(
-            validator.tx_status == TransactionStatus::Idle,
-            "Validator pool is busy; wait for the in-flight pool call to finish"
+            validator.tx_status == TransactionStatus::Busy,
+            "Validator pool must be busy after per-epoch settlement"
         );
-        validator.tx_status = TransactionStatus::Busy;
-        self.validators.insert(validator_id.clone(), validator);
 
         let mut lock = self
             .locks
@@ -100,60 +99,39 @@ impl Contract {
     }
 
     #[private]
+    /// **[Pipeline 5b′]** Unlock tail: `get_account`, optional **2a–2c**, optional **3** (then **6** via **4**).
     pub fn on_unstake_pipeline_pool_account(
         &mut self,
         #[callback] pool_account: PoolAccountView,
         validator_id: ValidatorId,
     ) -> PromiseOrValue<bool> {
         if !is_promise_success() {
-            let mut validator = self.require_validator_callback(&validator_id);
-            validator.tx_status = TransactionStatus::Idle;
-            self.validators.insert(validator_id, validator);
+            self.release_validator_pool_pipeline(&validator_id);
             env::panic_str("Could not read pool account from the pool; retry in a few blocks");
         }
 
-        let validator = self.require_validator(&validator_id);
-        let can_withdraw = self.validator_unstake_waiting_finished(&validator);
         let unstaked = pool_account.unstaked();
 
-        if unstaked.as_yoctonear() > 0 && can_withdraw {
-            require!(
-                pool_account.can_withdraw,
-                "Pool reports unstaked balance is not yet withdrawable"
-            );
+        if unstaked.as_yoctonear() > 0 && pool_account.can_withdraw {
             return self
-                .try_epoch_withdraw_known_unstaked(validator_id.clone(), unstaked, true)
+                .try_epoch_withdraw_known_unstaked(
+                    validator_id.clone(),
+                    unstaked,
+                    pool_account.can_withdraw,
+                )
                 .then(
                     ext_self_epoch::ext(env::current_account_id())
                         .with_static_gas(callbacks::ON_GET_UNSTAKED_FOR_WITHDRAW)
-                        .on_after_withdraw_then_unstake(validator_id),
+                        .on_after_pool_withdraw_maybe_settle(validator_id, None),
                 )
                 .into();
         }
 
         let validator = self.require_validator(&validator_id);
         if validator.last_settlement_epoch < env::epoch_height() {
-            return self.try_epoch_settle(validator_id, true).into();
+            return self.try_epoch_stake_or_unstake(validator_id, None).into();
         }
         PromiseOrValue::Value(true)
-    }
-
-    #[private]
-    pub fn on_after_withdraw_then_unstake(
-        &mut self,
-        validator_id: ValidatorId,
-    ) -> PromiseOrValue<bool> {
-        let validator = self.require_validator(&validator_id);
-        require!(
-            validator.tx_status == TransactionStatus::Idle,
-            "Validator pool is busy; wait for the in-flight pool call to finish"
-        );
-        if validator.pending_to_stake.as_yoctonear() == 0
-            && validator.pending_to_unstake.as_yoctonear() == 0
-        {
-            return PromiseOrValue::Value(true);
-        }
-        self.try_epoch_settle(validator_id, false).into()
     }
 }
 
@@ -224,7 +202,7 @@ impl Contract {
             near_from_shares(shares_remove, effective_stake_yocto, validator_total_shares);
         let near_token = NearToken::from_yoctonear(near_amt);
 
-        // Validator: burn pool shares, queue NEAR for `try_epoch_settle` / pool `unstake`, and track
+        // Validator: burn pool shares, queue NEAR for `try_epoch_stake_or_unstake` / pool `unstake`, and track
         // gross user-exit liability until claims drain `user_pending_unstake`.
         validator.total_shares = U128(validator_total_shares - shares_remove);
         validator.pending_to_unstake = validator
