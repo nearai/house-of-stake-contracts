@@ -11,6 +11,10 @@ use std::path::Path;
 /// `10^24` — matches `staking_contract::internal::LOCK_FACTOR_DENOM`.
 pub const LOCK_FACTOR_DENOM: &str = "1000000000000000000000000";
 
+/// Prepaid gas for `lock_for_product`, `unlock`, `withdraw`, and `epoch_settle`.
+/// Sandbox runs of the lazy epoch pipeline burn ~3_000 TGas; keep headroom for CI.
+pub const SETTLEMENT_PIPELINE_GAS_TGAS: u64 = 4_000;
+
 /// Resolve WASM bytes from typical build outputs (`make …`, `cargo near`, or `cargo build --target wasm32`).
 pub fn wasm_from_candidates(rel_paths: &[&str]) -> Result<Vec<u8>, std::io::Error> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
@@ -162,12 +166,44 @@ pub async fn buyer_lock_for_product(
             "product_id": null,
         }))
         .deposit(NearToken::from_near(deposit_near))
-        .gas(WsGas::from_tgas(200))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
         .await?
         .into_result()?
         .json()?;
     Ok(lock_id)
+}
+
+pub async fn buyer_unlock(
+    buyer: &near_workspaces::Account,
+    staking_id: &near_workspaces::AccountId,
+    lock_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    buyer
+        .call(staking_id, "unlock")
+        .args_json(json!({ "lock_id": lock_id }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
+        .transact()
+        .await?
+        .into_result()?;
+    Ok(())
+}
+
+pub async fn buyer_withdraw(
+    buyer: &near_workspaces::Account,
+    staking_id: &near_workspaces::AccountId,
+    pool_id: &near_workspaces::AccountId,
+) -> Result<(), Box<dyn std::error::Error>> {
+    buyer
+        .call(staking_id, "withdraw")
+        .args_json(json!({ "validator_id": pool_id }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
+        .transact()
+        .await?
+        .into_result()?;
+    Ok(())
 }
 
 pub async fn call_epoch_settle(
@@ -178,7 +214,7 @@ pub async fn call_epoch_settle(
     caller
         .call(staking_id, "epoch_settle")
         .args_json(json!({ "validator_id": pool_id }))
-        .gas(WsGas::from_tgas(300))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
         .await
 }

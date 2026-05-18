@@ -372,7 +372,7 @@ impl Contract {
     ///
     /// **When to call:** Stake figures passed into [`mint_shares`] must match pool reality. Production
     /// invokes this from [`crate::epoch::Contract::on_lock_finally_mint_and_maybe_post_settle`] after
-    /// a successful pool `get_account` refresh on the lock promise chain.
+    /// the shared per-epoch pre-user settlement pipeline (**0–3**) on the lock promise chain.
     pub(crate) fn commit_catalog_lock(
         &mut self,
         buyer: AccountId,
@@ -510,7 +510,8 @@ impl Contract {
 #[near]
 impl Contract {
     #[private]
-    /// **[Pipeline 5a]** Catalog mint after **4**; may re-enter **3** (then **6** via **4**).
+    /// **[Pipeline 5a]** Catalog mint after **4**. Pre-user settlement (**0–3**) already ran before
+    /// mint; this lock's `pending_to_stake` is queued for a later `unlock` / `withdraw` / `epoch_settle`.
     pub fn on_lock_finally_mint_and_maybe_post_settle(
         &mut self,
         buyer: AccountId,
@@ -533,12 +534,6 @@ impl Contract {
             validator.tx_status == TransactionStatus::Busy,
             "Validator pool must be busy after per-epoch settlement"
         );
-        let has_p = validator.pending_to_stake.as_yoctonear() > 0
-            || validator.pending_to_unstake.as_yoctonear() > 0;
-        if has_p && validator.last_settlement_epoch < env::epoch_height() {
-            PromiseOrValue::Promise(self.try_epoch_stake_or_unstake(validator_id, None))
-        } else {
-            PromiseOrValue::Value(())
-        }
+        PromiseOrValue::Value(())
     }
 }

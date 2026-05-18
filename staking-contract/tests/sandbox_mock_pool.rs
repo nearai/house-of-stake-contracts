@@ -5,26 +5,13 @@
 mod mock_pool;
 
 use mock_pool::{
-    add_validator_pair, create_one_off_product_and_price, deploy_staking_and_mock_pool,
-    fast_forward_until_timestamp, json_near_token_yocto, json_u64_field, mock_pool_wasm_bytes,
-    near_token_yocto_from_view, staking_wasm_bytes,
+    SETTLEMENT_PIPELINE_GAS_TGAS, add_validator_pair, call_epoch_settle,
+    create_one_off_product_and_price, deploy_staking_and_mock_pool, fast_forward_until_timestamp,
+    json_near_token_yocto, json_u64_field, mock_pool_wasm_bytes, near_token_yocto_from_view,
+    staking_wasm_bytes,
 };
 use near_workspaces::types::{Gas as WsGas, NearToken};
 use serde_json::json;
-
-/// Manual pool advance: public `epoch_settle` (lazy pipeline retry).
-async fn call_epoch_settle(
-    caller: &near_workspaces::Account,
-    staking: &near_workspaces::Account,
-    pool_id: &near_workspaces::AccountId,
-) -> Result<near_workspaces::result::ExecutionFinalResult, near_workspaces::error::Error> {
-    caller
-        .call(staking.id(), "epoch_settle")
-        .args_json(json!({ "validator_id": pool_id }))
-        .gas(WsGas::from_tgas(300))
-        .transact()
-        .await
-}
 
 #[tokio::test]
 async fn staking_get_validators_includes_allowlisted_pool() -> Result<(), Box<dyn std::error::Error>>
@@ -104,7 +91,7 @@ async fn staking_epoch_settle_fast_path_succeeds_after_lock_consumed_slot()
             "product_id": null,
         }))
         .deposit(NearToken::from_near(50))
-        .gas(WsGas::from_tgas(200))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
         .await?
         .into_result()?;
@@ -161,7 +148,7 @@ async fn staking_two_locks_aggregate_then_epoch_settle_next_epoch_clears_pending
                 "product_id": null,
             }))
             .deposit(NearToken::from_near(50))
-            .gas(WsGas::from_tgas(200))
+            .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
             .transact()
             .await?
             .into_result()?;
@@ -257,7 +244,7 @@ async fn staking_pause_validator_blocks_new_lock_for_product()
             "product_id": null,
         }))
         .deposit(NearToken::from_near(50))
-        .gas(WsGas::from_tgas(200))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
         .await?;
 
@@ -309,7 +296,7 @@ async fn staking_contract_pause_blocks_epoch_settle() -> Result<(), Box<dyn std:
             "product_id": null,
         }))
         .deposit(NearToken::from_near(50))
-        .gas(WsGas::from_tgas(200))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
         .await?
         .into_result()?;
@@ -375,7 +362,7 @@ async fn staking_withdraw_succeeds_after_unlock_and_epoch_gates()
             "product_id": null,
         }))
         .deposit(NearToken::from_near(50))
-        .gas(WsGas::from_tgas(200))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
         .await?
         .into_result()?
@@ -393,7 +380,7 @@ async fn staking_withdraw_succeeds_after_unlock_and_epoch_gates()
         .call(staking.id(), "unlock")
         .args_json(json!({ "lock_id": lock_id }))
         .deposit(NearToken::from_yoctonear(1))
-        .gas(WsGas::from_tgas(200))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
         .await?
         .into_result()?;
@@ -404,7 +391,7 @@ async fn staking_withdraw_succeeds_after_unlock_and_epoch_gates()
         .call(staking.id(), "withdraw")
         .args_json(json!({ "validator_id": pool.id() }))
         .deposit(NearToken::from_yoctonear(1))
-        .gas(WsGas::from_tgas(200))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
         .await?
         .into_result()?;
@@ -454,7 +441,7 @@ async fn staking_withdraw_fails_when_pool_withdraw_bucket_not_ready()
             "product_id": null,
         }))
         .deposit(NearToken::from_near(50))
-        .gas(WsGas::from_tgas(200))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
         .await?
         .into_result()?
@@ -472,7 +459,7 @@ async fn staking_withdraw_fails_when_pool_withdraw_bucket_not_ready()
         .call(staking.id(), "unlock")
         .args_json(json!({ "lock_id": lock_id }))
         .deposit(NearToken::from_yoctonear(1))
-        .gas(WsGas::from_tgas(200))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
         .await?
         .into_result()?;
@@ -484,7 +471,7 @@ async fn staking_withdraw_fails_when_pool_withdraw_bucket_not_ready()
         .call(staking.id(), "withdraw")
         .args_json(json!({ "validator_id": pool.id() }))
         .deposit(NearToken::from_yoctonear(1))
-        .gas(WsGas::from_tgas(200))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
         .await?;
 
@@ -526,7 +513,7 @@ async fn staking_create_product_fails_if_signer_is_not_pool_owner()
             "description": "Y",
         }))
         .deposit(NearToken::from_yoctonear(1))
-        .gas(WsGas::from_tgas(200))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
         .await?;
 
@@ -579,7 +566,7 @@ async fn staking_validator_total_staked_balance_matches_pool_after_lock()
             "product_id": null,
         }))
         .deposit(NearToken::from_near(50))
-        .gas(WsGas::from_tgas(200))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
         .await?
         .into_result()?;
@@ -600,7 +587,7 @@ async fn staking_validator_total_staked_balance_matches_pool_after_lock()
 
     assert_eq!(
         recorded, pool_total,
-        "after `lock_for_product`, lazy settlement should align Validator.total_staked_balance with the pool view"
+        "after `lock_for_product`, pre-user settlement should align Validator.total_staked_balance with the pool view"
     );
 
     Ok(())

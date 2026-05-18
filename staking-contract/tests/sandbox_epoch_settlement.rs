@@ -9,31 +9,13 @@
 mod mock_pool;
 
 use mock_pool::{
-    buyer_lock_for_product, buyer_storage_deposit, call_epoch_settle, fast_forward_until_timestamp,
-    fetch_validator, json_near_token_yocto, json_tx_status, json_u64_field,
-    pool_total_balance_yocto, setup_staking_fixture,
+    buyer_lock_for_product, buyer_storage_deposit, buyer_unlock, buyer_withdraw, call_epoch_settle,
+    fast_forward_until_timestamp, fetch_validator, json_near_token_yocto, json_tx_status,
+    json_u64_field, pool_total_balance_yocto, setup_staking_fixture,
 };
-use near_workspaces::types::NearToken;
 use serde_json::json;
 
-const LOCK_GAS_TGAS: u64 = 200;
 const SHORT_LOCK_NS: &str = "1000000000";
-
-async fn unlock_lock(
-    buyer: &near_workspaces::Account,
-    staking_id: &near_workspaces::AccountId,
-    lock_id: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    buyer
-        .call(staking_id, "unlock")
-        .args_json(json!({ "lock_id": lock_id }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(near_workspaces::types::Gas::from_tgas(LOCK_GAS_TGAS))
-        .transact()
-        .await?
-        .into_result()?;
-    Ok(())
-}
 
 #[tokio::test]
 async fn lock_runs_settlement_pipeline_and_clears_tx_status()
@@ -52,14 +34,14 @@ async fn lock_runs_settlement_pipeline_and_clears_tx_status()
         "lock promise chain must release validator pipeline mutex"
     );
     assert!(
-        json_near_token_yocto(&v["total_staked_balance"]).unwrap_or(0) > 0,
-        "settlement should refresh and align total_staked_balance with the pool"
+        json_near_token_yocto(&v["pending_to_stake"]).unwrap_or(0) > 0,
+        "lock mints shares and queues pending_to_stake; pool stake follows a later settle"
     );
     let pool_total = pool_total_balance_yocto(&worker, pool.id(), staking.id()).await?;
     assert_eq!(
         json_near_token_yocto(&v["total_staked_balance"]).unwrap_or(0),
         pool_total,
-        "cached validator balance should match mock pool total after lock"
+        "pre-user refresh should keep cached total_staked_balance aligned with the pool view"
     );
 
     Ok(())
@@ -179,7 +161,7 @@ async fn unlock_queues_unstake_then_epoch_settle_next_epoch_clears_pending()
     let end_ns = json_u64_field(&lock["end_ns"]).expect("lock.end_ns");
     fast_forward_until_timestamp(&worker, end_ns.saturating_add(1)).await?;
 
-    unlock_lock(&buyer, staking.id(), &lock_id).await?;
+    buyer_unlock(&buyer, staking.id(), &lock_id).await?;
 
     let v_after_unlock = fetch_validator(&worker, staking.id(), pool.id()).await?;
     assert!(
@@ -233,7 +215,7 @@ async fn epoch_settle_net_zero_when_stake_and_unstake_pending_match()
     fast_forward_until_timestamp(&worker, end_ns.saturating_add(1)).await?;
 
     // Same NEAR epoch: unlock queues unstake; a second lock queues matching stake (no pool op yet).
-    unlock_lock(&buyer, staking.id(), &lock_id).await?;
+    buyer_unlock(&buyer, staking.id(), &lock_id).await?;
     buyer_lock_for_product(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
 
     let v_before = fetch_validator(&worker, staking.id(), pool.id()).await?;
@@ -292,19 +274,12 @@ async fn withdraw_runs_settlement_prefetch_before_payout() -> Result<(), Box<dyn
     let end_ns = json_u64_field(&lock["end_ns"]).expect("lock.end_ns");
     fast_forward_until_timestamp(&worker, end_ns.saturating_add(1)).await?;
 
-    unlock_lock(&buyer, staking.id(), &lock_id).await?;
+    buyer_unlock(&buyer, staking.id(), &lock_id).await?;
 
     worker.fast_forward(8_000).await?;
 
     let balance_before = buyer.view_account().await?.balance;
-    buyer
-        .call(staking.id(), "withdraw")
-        .args_json(json!({ "validator_id": pool.id() }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(near_workspaces::types::Gas::from_tgas(LOCK_GAS_TGAS))
-        .transact()
-        .await?
-        .into_result()?;
+    buyer_withdraw(&buyer, staking.id(), pool.id()).await?;
 
     let balance_after = buyer.view_account().await?.balance;
     assert!(

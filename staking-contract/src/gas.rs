@@ -34,7 +34,7 @@ pub mod callbacks {
     /// After `try_epoch_stake_or_unstake` pool call during shared settlement.
     pub const ON_EPOCH_SETTLEMENT_AFTER_TRY_EPOCH_STAKE_OR_UNSTAKE: Gas =
         Gas::from_gas(BASE_GAS.as_gas() * 6);
-    /// Mint lock and optional post-settle after shared pipeline.
+    /// Mint lock after shared pre-user settlement pipeline.
     pub const ON_LOCK_FINALLY_MINT: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// Unlock tail after pre-user settlement.
     pub const ON_UNLOCK_TAIL_AFTER_PRE_USER: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
