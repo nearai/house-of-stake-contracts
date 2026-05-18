@@ -74,6 +74,15 @@ pub trait ExtSelfEpoch {
         validator_id: ValidatorId,
         subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
     ) -> PromiseOrValue<()>;
+    /// **[Pipeline 5d]** Subscription upgrade after pre-user settlement (`subscriptions.rs`).
+    fn on_subscription_upgrade_after_settle(
+        &mut self,
+        buyer: AccountId,
+        deposit: NearToken,
+        new_price_id: PriceId,
+        subscription_id: SubscriptionId,
+        validator_id: ValidatorId,
+    ) -> PromiseOrValue<LockId>;
     /// **[Pipeline 5b]** Share exit after pre-user settlement (`unlock.rs`).
     fn on_unlock_tail_after_pre_user_settle(
         &mut self,
@@ -546,6 +555,21 @@ impl Contract {
                     order,
                     validator_id,
                     subscription_followup,
+                ),
+            PerEpochContinue::SubscriptionUpgrade {
+                validator_id,
+                buyer,
+                deposit,
+                new_price_id,
+                subscription_id,
+            } => ext_self_epoch::ext(env::current_account_id())
+                .with_static_gas(callbacks::ON_SUBSCRIPTION_UPGRADE_AFTER_SETTLE)
+                .on_subscription_upgrade_after_settle(
+                    buyer,
+                    deposit,
+                    new_price_id,
+                    subscription_id,
+                    validator_id,
                 ),
             // Share exit: burn shares and queue `pending_to_unstake` (pool `unstake` on a later settlement).
             PerEpochContinue::UnlockQueueUnstake {

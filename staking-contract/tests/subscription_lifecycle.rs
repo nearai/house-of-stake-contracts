@@ -92,7 +92,7 @@ fn upgrade_subscription_updates_tier_and_lock_amount() {
     let amt_before = lock_before.amount_near.as_yoctonear();
 
     testing_env!(ctx(acct(BUYER), NearToken::from_near(40)));
-    let _lock_same = c.upgrade_subscription(price_high.clone());
+    let _lock_same = unwrap_sync_lock_id(c.upgrade_subscription(price_high.clone()));
 
     let sub = c
         .get_subscription_for_product(acct(BUYER), product_id)

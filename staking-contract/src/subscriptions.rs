@@ -10,7 +10,7 @@ use crate::internal::{
 use crate::*;
 use common::U256;
 use near_sdk::json_types::U128;
-use near_sdk::{AccountId, NearToken, assert_one_yocto, env, near, require};
+use near_sdk::{AccountId, NearToken, PromiseOrValue, assert_one_yocto, env, near, require};
 
 /// Extend `from_ns` by `months` × average Gregorian months (linear approximation).
 ///
@@ -92,9 +92,10 @@ impl Contract {
 
     /// Upgrade to a higher-priced recurring tier on the same product immediately. Attach extra NEAR so that
     /// `existing_locked + deposit` satisfies [`check_near_price_lock`] for the new tier over the remainder of
-    /// the current period (`lock.end_ns - now`).
+    /// the current period (`lock.end_ns - now`). Runs the shared per-epoch validator pipeline before minting
+    /// additional shares (same as [`crate::lock::Contract::lock_for_subscription`] on WASM).
     #[payable]
-    pub fn upgrade_subscription(&mut self, new_price_id: PriceId) -> LockId {
+    pub fn upgrade_subscription(&mut self, new_price_id: PriceId) -> PromiseOrValue<LockId> {
         self.assert_not_paused();
         let buyer = env::predecessor_account_id();
 
@@ -137,7 +138,7 @@ impl Contract {
             .get(&(buyer.clone(), new_price.product_id.clone()))
             .cloned()
             .unwrap_or_else(|| env::panic_str("No subscription for this product; subscribe first"));
-        let mut sub = self
+        let sub = self
             .subscriptions
             .get(sid.as_str())
             .cloned()
@@ -159,7 +160,7 @@ impl Contract {
             "New tier must have a higher catalog amount than current tier"
         );
 
-        let mut lock = self
+        let lock = self
             .locks
             .get(&sub.last_lock_id)
             .cloned()
@@ -187,66 +188,33 @@ impl Contract {
         let validator_id = product.validator_id.clone();
         self.assert_validator_active_for_lock(&validator_id);
 
-        let mut validator = self.require_validator(&validator_id);
+        let validator = self.require_validator(&validator_id);
+        self.assert_validator_idle_for_user_action(&validator);
 
-        let effective_stake_yocto = effective_stake_for_share_exit(
-            validator.total_staked_balance,
-            validator.pending_to_stake,
-            validator.pending_user_unstake_total,
-        );
-        let validator_total_shares = validator.total_shares.0;
-        if validator_total_shares > 0 {
-            require!(
-                effective_stake_yocto > 0,
-                "No effective stake for share minting; wait for balance refresh or settlement"
-            );
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            return PromiseOrValue::Value(self.commit_subscription_upgrade(
+                buyer,
+                deposit,
+                new_price_id,
+                sid,
+            ));
         }
-        let add_shares = mint_shares(
-            validator_total_shares,
-            effective_stake_yocto,
-            deposit.as_yoctonear(),
-        );
-
-        validator.total_shares = U128(validator_total_shares.saturating_add(add_shares));
-        validator.pending_to_stake = validator
-            .pending_to_stake
-            .checked_add(deposit)
-            .expect("pending_to_stake overflow when recording this lock");
-
-        let user_validator_shares_key = (buyer.clone(), validator_id.clone());
-        let user_shares_before_upgrade = self
-            .user_validator_shares
-            .get(&user_validator_shares_key)
-            .copied()
-            .unwrap_or(0);
-        self.user_validator_shares.insert(
-            user_validator_shares_key,
-            user_shares_before_upgrade.saturating_add(add_shares),
-        );
-
-        lock.amount_near = lock
-            .amount_near
-            .checked_add(deposit)
-            .expect("lock amount_near overflow");
-        lock.shares = U128(lock.shares.0.saturating_add(add_shares));
-        lock.order = OrderRef::Subscription {
-            subscription_id: sub.subscription_id.clone(),
-            price_id: new_price_id.clone(),
-            period_start_ns: sub.start_ns,
-            period_end_ns: sub.end_ns,
-        };
-
-        sub.price_id = new_price_id.clone();
-
-        let lock_id_out = lock.lock_id.clone();
-        self.validators.insert(validator_id.clone(), validator);
-        self.locks.insert(lock_id_out.clone(), lock);
-        self.subscriptions.insert(sid, sub);
-
-        crate::events::log_subscription_upgrade(&buyer, &new_price_id);
-        crate::events::log_lock(lock_id_out.as_str(), &buyer);
-
-        lock_id_out
+        #[cfg(target_arch = "wasm32")]
+        {
+            return self
+                .promise_validator_per_epoch_settlement_then(
+                    validator_id.clone(),
+                    PerEpochContinue::SubscriptionUpgrade {
+                        validator_id,
+                        buyer,
+                        deposit,
+                        new_price_id,
+                        subscription_id: sid,
+                    },
+                )
+                .into();
+        }
     }
 
     /// Schedule a lower tier for the **next** billing period (Phase A: applied at renewal; no automatic refund).
@@ -330,7 +298,142 @@ impl Contract {
     }
 }
 
+// =============================================================================
+// Epoch pipeline: subscription upgrade tail (callback from `epoch` settlement dispatch)
+// =============================================================================
+
+#[near]
 impl Contract {
+    #[private]
+    /// **[Pipeline 5d]** Subscription upgrade after pre-user settlement (**4**).
+    pub fn on_subscription_upgrade_after_settle(
+        &mut self,
+        buyer: AccountId,
+        deposit: NearToken,
+        new_price_id: PriceId,
+        subscription_id: SubscriptionId,
+        validator_id: ValidatorId,
+    ) -> PromiseOrValue<LockId> {
+        let lock_id =
+            self.commit_subscription_upgrade(buyer, deposit, new_price_id, subscription_id);
+        let validator = self.require_validator(&validator_id);
+        require!(
+            validator.tx_status == TransactionStatus::Busy,
+            "Validator pool must be busy after per-epoch settlement"
+        );
+        let has_p = validator.pending_to_stake.as_yoctonear() > 0
+            || validator.pending_to_unstake.as_yoctonear() > 0;
+        if has_p && validator.last_settlement_epoch < env::epoch_height() {
+            PromiseOrValue::Promise(self.try_epoch_stake_or_unstake(validator_id, None))
+        } else {
+            PromiseOrValue::Value(lock_id)
+        }
+    }
+}
+
+impl Contract {
+    pub(crate) fn commit_subscription_upgrade(
+        &mut self,
+        buyer: AccountId,
+        deposit: NearToken,
+        new_price_id: PriceId,
+        subscription_id: SubscriptionId,
+    ) -> LockId {
+        let mut sub = self
+            .subscriptions
+            .get(subscription_id.as_str())
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("Subscription not found"));
+        require!(
+            sub.account_id == buyer,
+            "Only the subscription owner can perform this action"
+        );
+
+        let new_price = self
+            .prices
+            .get(&new_price_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("Price not found in the catalog"));
+        let product = self
+            .products
+            .get(&new_price.product_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("Product not found in the catalog"));
+
+        let mut lock = self
+            .locks
+            .get(&sub.last_lock_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("No lock is linked to this subscription"));
+        require!(
+            lock.account_id == buyer,
+            "Only the lock owner can change this subscription lock"
+        );
+        require!(lock.status == LockStatus::Active, "Lock is not active");
+
+        let validator_id = product.validator_id.clone();
+        let mut validator = self.require_validator(&validator_id);
+
+        let effective_stake_yocto = effective_stake_for_share_exit(
+            validator.total_staked_balance,
+            validator.pending_to_stake,
+            validator.pending_user_unstake_total,
+        );
+        let validator_total_shares = validator.total_shares.0;
+        if validator_total_shares > 0 {
+            require!(
+                effective_stake_yocto > 0,
+                "No effective stake for share minting; wait for balance refresh or settlement"
+            );
+        }
+        let add_shares = mint_shares(
+            validator_total_shares,
+            effective_stake_yocto,
+            deposit.as_yoctonear(),
+        );
+
+        validator.total_shares = U128(validator_total_shares.saturating_add(add_shares));
+        validator.pending_to_stake = validator
+            .pending_to_stake
+            .checked_add(deposit)
+            .expect("pending_to_stake overflow when recording this lock");
+
+        let user_validator_shares_key = (buyer.clone(), validator_id.clone());
+        let user_shares_before_upgrade = self
+            .user_validator_shares
+            .get(&user_validator_shares_key)
+            .copied()
+            .unwrap_or(0);
+        self.user_validator_shares.insert(
+            user_validator_shares_key,
+            user_shares_before_upgrade.saturating_add(add_shares),
+        );
+
+        lock.amount_near = lock
+            .amount_near
+            .checked_add(deposit)
+            .expect("lock amount_near overflow");
+        lock.shares = U128(lock.shares.0.saturating_add(add_shares));
+        lock.order = OrderRef::Subscription {
+            subscription_id: sub.subscription_id.clone(),
+            price_id: new_price_id.clone(),
+            period_start_ns: sub.start_ns,
+            period_end_ns: sub.end_ns,
+        };
+
+        sub.price_id = new_price_id.clone();
+
+        let lock_id_out = lock.lock_id.clone();
+        self.validators.insert(validator_id, validator);
+        self.locks.insert(lock_id_out.clone(), lock);
+        self.subscriptions.insert(subscription_id, sub);
+
+        crate::events::log_subscription_upgrade(&buyer, &new_price_id);
+        crate::events::log_lock(lock_id_out.as_str(), &buyer);
+
+        lock_id_out
+    }
+
     /// Phase B: at scheduled downgrade renewal, release catalog **tier-gap** stake (min high − min low for
     /// the completed period) as shares → same unstake queue as [`crate::unlock::Contract::unlock`].
     pub(crate) fn apply_downgrade_prorate_at_renewal(

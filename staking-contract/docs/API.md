@@ -83,57 +83,82 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 
 ---
 
-## Locks & subscriptions (`lock.rs`)
+## Locks (`lock.rs`)
 
-| Method | Access | Deposit | Description |
-|--------|--------|---------|-------------|
-| `lock_for_product` | Buyer | **Attach NEAR** | One-off purchase: JSON **`price_id`**, **`lock_duration_ns`** (`U64`), **`product_id`**. Provide **exactly one** of **`price_id`** or **`product_id`** (the other **`null`**). If **`product_id`** is set, uses **`Product.default_price_id`** (must be a **one-off** price). Returns **`PromiseOrValue<LockId>`** (pool balance refresh then **`try_epoch_stake_or_unstake`**; see `docs/LAZY_EPOCH_PIPELINE.md`). |
-| `lock_for_subscription` | Subscriber | **Attach NEAR** | Recurring (monthly): **`price_id`**, **`product_id`** — same XOR rule as **`lock_for_product`**; default price must be **recurring** monthly. Returns **`PromiseOrValue<LockId>`**. |
-| `cancel_subscription` | Subscriber | **1 yocto** | `product_id` — stop renewing after current period (`cancel_at_period_end`). After **`end_ns`**, the next **`lock_for_subscription`** replaces the row so the user may subscribe again (index is not left stale). |
-| `resume_subscription` | Subscriber | **1 yocto** | `product_id` — clear **`cancel_at_period_end`** while subscription is still **`Active`** (undo **`cancel_subscription`** before period end). Requires subscription was scheduled for cancellation; otherwise panics with **`Not scheduled for cancellation`**. |
-| `upgrade_subscription` | Subscriber | **Attach NEAR** (≥ `min_lock_amount`; tier differential) | `new_price_id` — upgrade recurring tier mid-period; returns **`LockId`**. |
-| `schedule_downgrade_subscription` | Subscriber | **1 yocto** | `target_price_id` — schedule lower tier for next billing period. |
+| Method | Access | Deposit | Returns | Description |
+|--------|--------|---------|---------|-------------|
+| `lock_for_product` | Buyer | **Attach NEAR** | **`PromiseOrValue<LockId>`** | One-off: **`price_id`**, **`lock_duration_ns`** (`U64`), **`product_id`** — provide **exactly one** of **`price_id`** or **`product_id`** (other **`null`**). Default price from **`Product.default_price_id`** when only **`product_id`** is set (must be **one-off**). **WASM:** shared per-epoch pipeline (**0–3**) then mint (**5a**); see [EPOCH_SETTLEMENT_CHAIN.md](EPOCH_SETTLEMENT_CHAIN.md). **Host tests:** synchronous mint (no promise chain). |
+| `lock_for_subscription` | Subscriber | **Attach NEAR** | **`PromiseOrValue<LockId>`** | Recurring (monthly): same XOR rule; default price must be **recurring** monthly. Same settlement + mint pipeline as **`lock_for_product`**. |
+
+---
+
+## Subscriptions (`subscriptions.rs`)
+
+Lifecycle RPCs (locking / renewal stays in **`lock_for_subscription`** above).
+
+| Method | Access | Deposit | Returns | Description |
+|--------|--------|---------|---------|-------------|
+| `cancel_subscription` | Subscriber | **1 yocto** | — | **`product_id`** — set **`cancel_at_period_end`**; lock remains until **`lock.end_ns`**, then **`unlock`**. After **`end_ns`**, next **`lock_for_subscription`** starts a new period. |
+| `resume_subscription` | Subscriber | **1 yocto** | — | **`product_id`** — clear **`cancel_at_period_end`** while **`Active`**. Requires **`cancel_at_period_end == true`**. |
+| `upgrade_subscription` | Subscriber | **Attach NEAR** (≥ `min_lock_amount`; tier differential) | **`PromiseOrValue<LockId>`** | **`new_price_id`** — higher tier on same product mid-period; adds shares / **`pending_to_stake`** on existing **`last_lock_id`**. **WASM:** same pre-user pipeline as **`lock_for_subscription`**, then **`commit_subscription_upgrade`** (**5d**); may post **`try_epoch_stake_or_unstake`** if epoch slot still free. **Host tests:** synchronous upgrade. |
+| `schedule_downgrade_subscription` | Subscriber | **1 yocto** | — | **`target_price_id`** — lower tier applied at next **`lock_for_subscription`** renewal (Phase A; no refund). |
 
 ---
 
 ## Unlock (`unlock.rs`)
 
-| Method | Access | Deposit | Description |
-|--------|--------|---------|-------------|
-| `unlock` | Lock owner | **1 yocto** | After **`block_timestamp >= lock.end_ns`**, refreshes pool balance, queues unstake, then runs withdraw-first / unstake on the pool. Returns **`Promise`**. |
+| Method | Access | Deposit | Returns | Description |
+|--------|--------|---------|---------|-------------|
+| `unlock` | Lock owner | **1 yocto** | **`Promise`** | After **`block_timestamp >= lock.end_ns`**: pre-user settlement (**0–3**), then **`commit_share_exit`** (**5b**) — burns shares, queues **`pending_to_unstake`** and user tranches. Pool **`unstake`** for this exit is **not** called in the same transaction; it runs on the next **`lock`**, **`unlock`**, **`withdraw`**, or **`epoch_settle`** when the epoch slot is available. |
 
 ---
 
-## Pool pipeline (`epoch.rs` — internal scheduling + user helpers)
+## Pool pipeline (`epoch.rs`)
 
-Public **`epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator_balance`** are **not** exposed. Pool work is scheduled from **`lock`**, **`unlock`**, **`withdraw`**, and may be advanced manually via **`epoch_settle`** (`validator_id`).
+Public **`epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator_balance`** are **not** exposed. Pool work is driven by user flows below and optional **`epoch_settle`**.
 
-**Per allowlisted pool (`validator_id` = staking pool contract account):**
+**Per allowlisted pool (`validator_id` = pool contract account):**
 
-- **`tx_status`**: at most one orchestrated validator pipeline at a time (`Idle` / `Busy`); cleared by `on_epoch_pipeline_terminal_release` after the flow tail promise completes.
-- **Per NEAR `epoch_height`**: at most **one** successful pool **`deposit_and_stake`** **or** **`unstake`**. Both paths update **`Validator.last_settlement_epoch`** on success (same mutex). Catalog **`lock`** / **`unlock`** use **`last_settlement_epoch`** to branch: when it is **already** the current `epoch_height`, the contract **skips** the pre-user **`get_account_total_balance`**, withdraw-if-ready, and **`try_epoch_stake_or_unstake`** chain and proceeds directly to mint or unlock queue (cached `total_staked_balance`). When it is **behind** the current height, the contract runs withdraw-if-ready then **`try_epoch_stake_or_unstake`** on existing pending before the user action. **`try_epoch_stake_or_unstake`** nets **`pending_to_stake`** vs **`pending_to_unstake`** in yocto (stake excess, unstake excess, or clear-equal without a pool mutating call) in that single epoch slot.
-- **Unstake spacing**: further **`unstake`** rounds also require **`epoch_height >= last_unstake_epoch + epoch_unstake_settle_epochs`** (NEAR pool settlement).
-- **Withdraw from pool** (`get_account_unstaked_balance` → `withdraw`): does **not** consume the stake/unstake epoch slot above.
+- **`tx_status`**: **`Idle`** / **`Busy`** — one orchestrated pipeline at a time; **`Busy`** from entry until **`on_epoch_pipeline_terminal_release`** (**6**).
+- **Per NEAR `epoch_height`**: at most **one** successful pool **`deposit_and_stake`** **or** **`unstake`** (or inline net-zero clear); updates **`last_settlement_epoch`**.
+- **Fast path**: when **`last_settlement_epoch >= epoch_height`**, skip pool **`get_account`**, withdraw-if-ready, and net settle; jump to user tail (**4**) using cached **`total_staked_balance`**.
+- **Full path**: pool **`get_account`** → optional withdraw (**2a–2c**) → **`try_epoch_stake_or_unstake`** on **existing** pending → user tail (**4**).
+- **Unstake spacing**: another pool **`unstake`** requires **`validator_unstake_waiting_finished`** (`last_unstake_epoch` + **`epoch_unstake_settle_epochs`**).
+- **Withdraw from pool** does **not** consume the stake/unstake epoch slot.
+
+| Entry | `PerEpochContinue` tail | User tail |
+|--------|-------------------------|-----------|
+| `lock_for_product` / `lock_for_subscription` | `CatalogLockMint` | Mint lock (**5a**); optional post-settle |
+| `upgrade_subscription` | `SubscriptionUpgrade` | Upgrade lock (**5d**); optional post-settle |
+| `unlock` | `UnlockQueueUnstake` | Share exit only (**5b**) |
+| `withdraw` (WASM) | `WithdrawUserTransfer` | Payout (**5c**) |
+| `epoch_settle` | `SettleOnly` | No-op then **6** |
 
 | Method | Access | Deposit | Returns | Description |
 |--------|--------|---------|---------|-------------|
-| `epoch_settle` | Any | **None** | **`Promise`** | JSON **`validator_id`** (allowlisted pool account). Runs **`try_epoch_stake_or_unstake`** for manual retry or to advance pending stake/unstake when automatic scheduling did not complete; same per-epoch rules as automatic flows. |
+| `epoch_settle` | Any | **None** | **`Promise`** | **`validator_id`** — manual retry / advance pending stake or unstake; same rules as automatic flows. |
+
+Step-by-step callbacks: [EPOCH_SETTLEMENT_CHAIN.md](EPOCH_SETTLEMENT_CHAIN.md). Product rules: [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md).
 
 ---
 
-## Private pool callbacks (`epoch.rs`)
+## Private pool callbacks (`epoch.rs`, `lock.rs`, `unlock.rs`, `subscriptions.rs`)
 
-**Not intended for users.** Marked **`#[private]`** — only the contract account may call (promise continuation).
+**Not for users.** **`#[private]`** — only this contract account (promise continuations).
 
-| Method | Role |
-|--------|------|
-| `on_deposit_and_stake` | Completes stake; reduces **`pending_to_stake`** / **`pending_to_unstake`** per net-settle args, may absorb matching user unstake liability, updates **`total_staked_balance`**, sets **`last_settlement_epoch`**. |
-| `on_unstake` | Completes unstake; reduces **`pending_to_unstake`** / **`pending_to_stake`** per net-settle args; updates **`last_unstake_epoch`** and **`last_settlement_epoch`**. |
-| `on_get_unstaked_for_epoch_withdraw` | Continues withdraw-from-pool; may chain **`withdraw`** on pool. |
-| `on_epoch_withdraw_transfer_done` | Credits **`pending_to_withdraw`** after pool transfer. |
-| `on_unlock_tail_after_pre_user_settle` / `on_unstake_pipeline_pool_account` | User-flow continuations for **`unlock`**. |
-| `on_after_pool_withdraw_maybe_settle` | After pool `withdraw`; may run `try_epoch_stake_or_unstake` (stake / unstake / net-zero). |
-| `on_lock_finally_mint_and_maybe_post_settle` | Catalog lock mint tail (`lock.rs`). |
+| Callback | Pipeline | Role |
+|----------|----------|------|
+| `on_epoch_settlement_after_pool_account` | **1** | After pool **`get_account`**: refresh **`total_staked_balance`**, optional **2a–2c**, then **3** with `Some(cont)`. |
+| `on_epoch_withdraw_transfer_done` | **2b** | Credit **`pending_to_withdraw`** after pool **`withdraw`**. |
+| `on_after_pool_withdraw_maybe_settle` | **2c** | After **2b**; **`Some(cont)`** → **3** + **4**, **`None`** → tail **3** only. |
+| `on_deposit_and_stake` | **3b** | Stake callback; pending queue + **`last_settlement_epoch`**. |
+| `on_unstake` | **3c** | Unstake callback; **`last_unstake_epoch`**, **`last_settlement_epoch`**. |
+| `on_epoch_settlement_after_try_epoch_stake_or_unstake` | **3′** | After async **3** → **4**. |
+| `on_epoch_settlement_dispatch_continue` | **4** | Fan-out to **5a** / **5b** / **5c** / **5d**, then **6**. |
+| `on_lock_finally_mint_and_maybe_post_settle` | **5a** | Catalog mint (`lock.rs`). |
+| `on_unlock_tail_after_pre_user_settle` | **5b** | Share exit (`unlock.rs`). |
+| `on_subscription_upgrade_after_settle` | **5d** | Subscription upgrade (`subscriptions.rs`). |
+| `on_epoch_pipeline_terminal_release` | **6** | Set **`tx_status`** → **`Idle`**. |
 
 ---
 
@@ -204,5 +229,7 @@ For EVENT_JSON shapes and naming, see [`../src/events.rs`](../src/events.rs).
 
 | Doc | Content |
 |-----|---------|
+| [EPOCH_SETTLEMENT_CHAIN.md](EPOCH_SETTLEMENT_CHAIN.md) | Promise pipeline steps **0–6**, callbacks, `PerEpochContinue` |
+| [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md) | Per-epoch limits, fast path, user-driven cadence |
 | [DESIGN.md](DESIGN.md) | Architecture overview |
 | [PLAN.md](PLAN.md) | Detailed design notes |

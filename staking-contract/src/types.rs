@@ -207,6 +207,14 @@ pub enum PerEpochContinue {
     },
     /// Public [`crate::epoch::Contract::epoch_settle`]: no user tail after the shared pipeline.
     SettleOnly { validator_id: ValidatorId },
+    /// Mid-period subscription tier upgrade after pre-user settlement (`subscriptions.rs`).
+    SubscriptionUpgrade {
+        validator_id: ValidatorId,
+        buyer: AccountId,
+        deposit: NearToken,
+        new_price_id: PriceId,
+        subscription_id: SubscriptionId,
+    },
 }
 
 impl PerEpochContinue {
@@ -215,7 +223,8 @@ impl PerEpochContinue {
             Self::CatalogLockMint { validator_id, .. }
             | Self::UnlockQueueUnstake { validator_id, .. }
             | Self::WithdrawUserTransfer { validator_id, .. }
-            | Self::SettleOnly { validator_id } => validator_id,
+            | Self::SettleOnly { validator_id }
+            | Self::SubscriptionUpgrade { validator_id, .. } => validator_id,
         }
     }
 }
