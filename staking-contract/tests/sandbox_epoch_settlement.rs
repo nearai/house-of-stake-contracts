@@ -296,7 +296,7 @@ async fn withdraw_runs_settlement_prefetch_before_payout() -> Result<(), Box<dyn
 
     worker.fast_forward(8_000).await?;
 
-    let balance_before = buyer.view().await?.balance;
+    let balance_before = buyer.view_account().await?.balance;
     buyer
         .call(staking.id(), "withdraw")
         .args_json(json!({ "validator_id": pool.id() }))
@@ -306,7 +306,7 @@ async fn withdraw_runs_settlement_prefetch_before_payout() -> Result<(), Box<dyn
         .await?
         .into_result()?;
 
-    let balance_after = buyer.view().await?.balance;
+    let balance_after = buyer.view_account().await?.balance;
     assert!(
         balance_after > balance_before,
         "withdraw should transfer NEAR after settlement prefetch and tranche payout"
