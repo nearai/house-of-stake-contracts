@@ -64,7 +64,7 @@ async fn staking_get_validators_includes_allowlisted_pool() -> Result<(), Box<dy
 }
 
 #[tokio::test]
-async fn staking_epoch_settle_fails_when_pool_already_settled_this_epoch()
+async fn staking_epoch_settle_fast_path_succeeds_after_lock_consumed_slot()
 -> Result<(), Box<dyn std::error::Error>> {
     let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
     let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
@@ -109,13 +109,10 @@ async fn staking_epoch_settle_fails_when_pool_already_settled_this_epoch()
         .await?
         .into_result()?;
 
-    // `lock_for_product` completes the per-epoch stake slot for this NEAR epoch when pending exists.
-    let again = call_epoch_settle(&buyer, &staking, pool.id()).await?;
-
-    assert!(
-        again.is_failure(),
-        "epoch_settle must fail once this pool already settled this NEAR epoch (second call same epoch)"
-    );
+    // `lock_for_product` already ran the per-epoch pipeline; a second `epoch_settle` is a fast-path no-op.
+    call_epoch_settle(&buyer, &staking, pool.id())
+        .await?
+        .into_result()?;
 
     Ok(())
 }

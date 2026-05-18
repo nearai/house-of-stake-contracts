@@ -112,6 +112,125 @@ pub fn json_u64_field(v: &serde_json::Value) -> Option<u64> {
     v.as_str()?.parse().ok()
 }
 
+pub fn json_u64_field_any(v: &serde_json::Value) -> Option<u64> {
+    json_u64_field(v).or_else(|| v.as_u64())
+}
+
+pub fn json_tx_status(v: &serde_json::Value) -> Option<&str> {
+    v.as_str()
+}
+
+/// Validator row from `get_validator`.
+pub async fn fetch_validator(
+    worker: &Worker<Sandbox>,
+    staking_id: &near_workspaces::AccountId,
+    pool_id: &near_workspaces::AccountId,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    Ok(worker
+        .view(staking_id, "get_validator")
+        .args_json(json!({ "validator_id": pool_id }))
+        .await?
+        .json()?)
+}
+
+pub async fn buyer_storage_deposit(
+    buyer: &near_workspaces::Account,
+    staking_id: &near_workspaces::AccountId,
+) -> Result<(), Box<dyn std::error::Error>> {
+    buyer
+        .call(staking_id, "storage_deposit")
+        .deposit(NearToken::from_millinear(500))
+        .gas(WsGas::from_tgas(50))
+        .transact()
+        .await?
+        .into_result()?;
+    Ok(())
+}
+
+pub async fn buyer_lock_for_product(
+    buyer: &near_workspaces::Account,
+    staking_id: &near_workspaces::AccountId,
+    price_id: &str,
+    lock_duration_ns: &str,
+    deposit_near: u64,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let lock_id: String = buyer
+        .call(staking_id, "lock_for_product")
+        .args_json(json!({
+            "price_id": price_id,
+            "lock_duration_ns": lock_duration_ns,
+            "product_id": null,
+        }))
+        .deposit(NearToken::from_near(deposit_near))
+        .gas(WsGas::from_tgas(200))
+        .transact()
+        .await?
+        .into_result()?
+        .json()?;
+    Ok(lock_id)
+}
+
+pub async fn call_epoch_settle(
+    caller: &near_workspaces::Account,
+    staking_id: &near_workspaces::AccountId,
+    pool_id: &near_workspaces::AccountId,
+) -> Result<near_workspaces::result::ExecutionFinalResult, near_workspaces::error::Error> {
+    caller
+        .call(staking_id, "epoch_settle")
+        .args_json(json!({ "validator_id": pool_id }))
+        .gas(WsGas::from_tgas(300))
+        .transact()
+        .await
+}
+
+pub async fn pool_total_balance_yocto(
+    worker: &Worker<Sandbox>,
+    pool_id: &near_workspaces::AccountId,
+    staking_id: &near_workspaces::AccountId,
+) -> Result<u128, Box<dyn std::error::Error>> {
+    let bal_json: serde_json::Value = worker
+        .view(pool_id, "get_account_total_balance")
+        .args_json(json!({ "account_id": staking_id }))
+        .await?
+        .json()?;
+    near_token_yocto_from_view(&bal_json)
+}
+
+/// Deploy staking + mock pool, allowlist pool, and create a one-off catalog price.
+pub async fn setup_staking_fixture(
+    worker: &Worker<Sandbox>,
+) -> Result<
+    (
+        near_workspaces::Account,
+        near_workspaces::Account,
+        near_workspaces::Account,
+        String,
+        String,
+    ),
+    Box<dyn std::error::Error>,
+> {
+    let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
+    let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
+
+    let staking = worker.dev_create_account().await?;
+    let pool = worker.dev_create_account().await?;
+    let validator_owner = worker.dev_create_account().await?;
+
+    deploy_staking_and_mock_pool(
+        &staking,
+        &pool,
+        validator_owner.id(),
+        &staking_wasm,
+        &pool_wasm,
+    )
+    .await?;
+    add_validator_pair(&staking, &pool).await?;
+    let (product_id, price_id) =
+        create_one_off_product_and_price(&staking, &pool, &validator_owner).await?;
+
+    Ok((staking, pool, validator_owner, product_id, price_id))
+}
+
 /// Deploy staking contract on `staking`, mock pool on `pool`; pool owner = `validator_owner`.
 pub async fn deploy_staking_and_mock_pool(
     staking: &near_workspaces::Account,

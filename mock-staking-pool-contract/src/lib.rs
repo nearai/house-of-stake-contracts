@@ -15,15 +15,14 @@
 //! - `withdraw` — sends `amount` from `unstaked` to `predecessor` via promise (same pattern as production pools).
 
 use near_sdk::json_types::U128;
-use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::store::LookupMap;
 use near_sdk::{
     AccountId, BorshStorageKey, NearToken, PanicOnDefault, Promise, env, near, require,
 };
 
 /// Matches staking-contract [`PoolAccountView`] / NEAR staking-pool `get_account` JSON shape.
-#[derive(Serialize, Deserialize)]
-#[serde(crate = "near_sdk::serde")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [json])]
 pub struct PoolAccountView {
     pub unstaked_balance: U128,
     pub staked_balance: U128,
