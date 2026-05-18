@@ -42,8 +42,6 @@ pub mod callbacks {
     pub const ON_LOCK_FINALLY_MINT: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// Unlock tail after pre-user settlement.
     pub const ON_UNLOCK_TAIL_AFTER_PRE_USER: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
-    /// User withdraw tail after shared per-epoch settlement (batch claim + transfer).
-    pub const ON_WITHDRAW_USER_AFTER_EPOCH_SETTLEMENT: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// After user-flow tail promise completes: release pipeline `Busy`.
     pub const ON_EPOCH_PIPELINE_TERMINAL_RELEASE: Gas = BASE_GAS;
 }

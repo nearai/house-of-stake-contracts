@@ -6,7 +6,7 @@ use crate::gas::{callbacks, staking_pool};
 use crate::*;
 use near_sdk::ext_contract;
 use near_sdk::json_types::U128;
-use near_sdk::{AccountId, Promise, env, is_promise_success, near, require};
+use near_sdk::{AccountId, Promise, env, near, require};
 
 fn next_unique_price_id(contract: &mut Contract) -> PriceId {
     for _ in 0..64 {
@@ -206,15 +206,7 @@ impl Contract {
         lock_factor_near_months: U128,
         expected_caller: AccountId,
     ) -> PriceId {
-        require!(
-            is_promise_success(),
-            "Could not read the validator pool owner; try again later"
-        );
-        self.assert_not_paused();
-        require!(
-            pool_owner == expected_caller,
-            "Only the validator owner can call this method"
-        );
+        self.assert_pool_owner_callback(pool_owner, &expected_caller);
         let mut product = self
             .products
             .get(&product_id)
@@ -253,15 +245,7 @@ impl Contract {
         description: String,
         expected_caller: AccountId,
     ) {
-        require!(
-            is_promise_success(),
-            "Could not read the validator pool owner; try again later"
-        );
-        self.assert_not_paused();
-        require!(
-            pool_owner == expected_caller,
-            "Only the validator owner can call this method"
-        );
+        self.assert_pool_owner_callback(pool_owner, &expected_caller);
         let mut price = self
             .prices
             .get(&price_id)
@@ -279,15 +263,7 @@ impl Contract {
         price_id: PriceId,
         expected_caller: AccountId,
     ) {
-        require!(
-            is_promise_success(),
-            "Could not read the validator pool owner; try again later"
-        );
-        self.assert_not_paused();
-        require!(
-            pool_owner == expected_caller,
-            "Only the validator owner can call this method"
-        );
+        self.assert_pool_owner_callback(pool_owner, &expected_caller);
         let mut price = self
             .prices
             .get(&price_id)
@@ -306,15 +282,7 @@ impl Contract {
         price_id: PriceId,
         expected_caller: AccountId,
     ) {
-        require!(
-            is_promise_success(),
-            "Could not read the validator pool owner; try again later"
-        );
-        self.assert_not_paused();
-        require!(
-            pool_owner == expected_caller,
-            "Only the validator owner can call this method"
-        );
+        self.assert_pool_owner_callback(pool_owner, &expected_caller);
         let price = self
             .prices
             .get(&price_id)
@@ -343,15 +311,7 @@ impl Contract {
         price_id: PriceId,
         expected_caller: AccountId,
     ) {
-        require!(
-            is_promise_success(),
-            "Could not read the validator pool owner; try again later"
-        );
-        self.assert_not_paused();
-        require!(
-            pool_owner == expected_caller,
-            "Only the validator owner can call this method"
-        );
+        self.assert_pool_owner_callback(pool_owner, &expected_caller);
         let mut price = self
             .prices
             .get(&price_id)

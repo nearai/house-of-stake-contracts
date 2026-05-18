@@ -33,10 +33,7 @@ impl Contract {
 
         let validator_id = lock.validator_id.clone();
         let validator = self.require_validator(&validator_id);
-        require!(
-            validator.tx_status == TransactionStatus::Idle,
-            "Validator pool is busy; wait for the in-flight pool call to finish"
-        );
+        self.assert_validator_idle_for_user_action(&validator);
 
         self.promise_validator_per_epoch_settlement_then(
             validator_id.clone(),

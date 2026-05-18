@@ -153,6 +153,14 @@ impl Contract {
             .expect("Validator not found on the allowlist")
     }
 
+    /// User entry (`lock` / `unlock` / `withdraw` / pipeline **0**) must not start while a pool pipeline is in flight.
+    pub(crate) fn assert_validator_idle_for_user_action(&self, validator: &Validator) {
+        require!(
+            validator.tx_status == TransactionStatus::Idle,
+            "Validator pool is busy; wait for the in-flight pool call to finish"
+        );
+    }
+
     /// True once a pool `unstake` is on record and [`crate::config::Config::epoch_unstake_settle_epochs`]
     /// have passed since [`Validator::last_unstake_epoch`] (gates withdraw-from-pool and further unstakes).
     pub(crate) fn validator_unstake_waiting_finished(&self, validator: &Validator) -> bool {

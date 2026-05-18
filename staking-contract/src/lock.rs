@@ -74,10 +74,7 @@ impl Contract {
             price_id: price.price_id.clone(),
         };
         let validator = self.require_validator(&validator_id);
-        require!(
-            validator.tx_status == TransactionStatus::Idle,
-            "Validator pool is busy; wait for the in-flight pool call to finish"
-        );
+        self.assert_validator_idle_for_user_action(&validator);
         // WASM production: [`Contract::promise_validator_per_epoch_settlement_then`] then mint (`epoch.rs`).
         // Host targets (`tests/*.rs`, `cargo check` on the host triple): `near_sdk::testing_env!` does not run
         // returned promise chains—use synchronous commit (`finalize_lock` → `commit_catalog_lock`).
@@ -263,10 +260,7 @@ impl Contract {
         };
 
         let validator = self.require_validator(&validator_id);
-        require!(
-            validator.tx_status == TransactionStatus::Idle,
-            "Validator pool is busy; wait for the in-flight pool call to finish"
-        );
+        self.assert_validator_idle_for_user_action(&validator);
         // Same host synchronous path as `lock_for_product_with_price_id` (see comment there).
         #[cfg(not(target_arch = "wasm32"))]
         {

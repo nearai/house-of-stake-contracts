@@ -1,11 +1,11 @@
-//! Share minting and pricing helpers.
+//! Share minting, pricing helpers, and shared catalog auth checks.
 //!
 //! Time constants: [`NS_PER_DAY`] is `u128` for fixed-point price math; [`NS_PER_DAY_TIMESTAMP`] is the same
 //! nanosecond length as `u64` for block timestamps (subscription billing anchors in `lock.rs`).
 
-use crate::Price;
+use crate::{Contract, Price};
 use common::U256;
-use near_sdk::NearToken;
+use near_sdk::{AccountId, NearToken, is_promise_success, require};
 
 /// Fixed-point denominator for `Price.lock_factor_near_months`.
 pub const LOCK_FACTOR_DENOM: u128 = 1_000_000_000_000_000_000_000_000;
@@ -106,6 +106,25 @@ pub fn check_near_price_lock(
         Ok(())
     } else {
         Err("Locked NEAR or lock duration is too low for this catalog price")
+    }
+}
+
+impl Contract {
+    /// After pool `get_owner_id`: promise ok, not paused, caller is pool owner.
+    pub(crate) fn assert_pool_owner_callback(
+        &self,
+        pool_owner: AccountId,
+        expected_caller: &AccountId,
+    ) {
+        require!(
+            is_promise_success(),
+            "Could not read the validator pool owner; try again later"
+        );
+        self.assert_not_paused();
+        require!(
+            pool_owner == *expected_caller,
+            "Only the validator owner can call this method"
+        );
     }
 }
 

@@ -181,7 +181,7 @@ try_epoch_withdraw_known_unstaked  [2a]
 |----------------------------|--------------|--------|
 | `CatalogLockMint { … }` | `on_lock_finally_mint_and_maybe_post_settle` | `lock.rs` → `commit_catalog_lock`; may post `try_epoch_stake_or_unstake` if slot still free |
 | `UnlockQueueUnstake { … }` | `on_unlock_tail_after_pre_user_settle` | `unlock.rs` → `commit_share_exit` → `promise_post_unlock_unstaked_pipeline` |
-| `WithdrawUserTransfer { … }` | `on_user_withdraw_payout_continue` | `withdraw.rs` → `payout_user_withdraw` |
+| `WithdrawUserTransfer { … }` | `payout_user_withdraw` (inline from **4**) | `withdraw.rs` |
 | `SettleOnly { … }` | No-op promise | Then [`Contract::on_epoch_pipeline_terminal_release`] |
 
 ---
@@ -276,7 +276,7 @@ Stable promise target names — change only with coordinated migration.
 | **5a** | `on_lock_finally_mint_and_maybe_post_settle` | **4** (lock) |
 | **5b** | `on_unlock_tail_after_pre_user_settle` | **4** (unlock) |
 | **5b′** | `on_unstake_pipeline_pool_account` | Pool `get_account` (unlock tail) |
-| **5c** | `on_user_withdraw_payout_continue` | **4** (withdraw) |
+| **5c** | `payout_user_withdraw` | **4** (withdraw) |
 | **6** | `on_epoch_pipeline_terminal_release` | **4** tail complete → **`Idle`** |
 
 ---

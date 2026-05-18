@@ -1,44 +1,9 @@
-//! Validator pool pipeline: refresh cached balances, pull ready unstaked NEAR from pools into this contract,
-//! net pending stake vs unstake, and perform at most one successful pool **`deposit_and_stake`** or **`unstake`**
-//! per NEAR `epoch_height` per pool ([`Validator::last_settlement_epoch`]). See `docs/EPOCH_SETTLEMENT_CHAIN.md`
-//! (step-by-step promise chain) and `docs/LAZY_EPOCH_PIPELINE.md` (product goals).
+//! Validator pool pipeline: balance refresh, withdraw-if-ready, net stake/unstake (one mutating pool op per NEAR epoch per pool).
+//! Step-by-step promise chain: [`docs/EPOCH_SETTLEMENT_CHAIN.md`](../docs/EPOCH_SETTLEMENT_CHAIN.md). Product goals: `docs/LAZY_EPOCH_PIPELINE.md`.
 //!
-//! ## Who calls what
-//! - **Catalog `lock` / `unlock` / user `withdraw` (WASM):** share [`Contract::promise_validator_per_epoch_settlement_then`]
-//!   so balance sync, withdraw-if-ready, and net settle run in a consistent order before user-visible tails
-//!   (`lock.rs`, `unlock.rs`, `withdraw.rs`).
-//! - **Anyone:** [`Contract::epoch_settle`] uses the same pre-user pipeline as catalog flows (skipped when
-//!   this pool already settled the current NEAR epoch).
-//!
-//! ## Pipeline step map (full path; fast path skips **1–3** → **4**)
-//!
-//! | Step | Function | Where |
-//! |------|----------|-------|
-//! | **0** | [`Contract::promise_validator_per_epoch_settlement_then`] | `epoch.rs` — entry, set **`Busy`** |
-//! | **1** | [`Contract::on_epoch_settlement_after_pool_account`] | after pool `get_account` |
-//! | **2a–2c** | withdraw-if-ready (optional): [`Contract::try_epoch_withdraw_known_unstaked`] → [`Contract::on_epoch_withdraw_transfer_done`] → [`Contract::on_after_pool_withdraw_maybe_settle`] | settlement passes `Some(cont)` into **2c** |
-//! | **3** | [`Contract::try_epoch_stake_or_unstake`] | stake / unstake / net-zero; `Some(cont)` → **4** when due, else pool op → **3′** → **4** |
-//! | **3a–3c** | [`Contract::on_settle_net_zero_done`] \| [`Contract::on_deposit_and_stake`] \| [`Contract::on_unstake`] | pool callbacks from **3** |
-//! | **3′** | [`Contract::on_epoch_settlement_after_try_epoch_stake_or_unstake`] | after async **3** |
-//! | **4** | [`Contract::on_epoch_settlement_dispatch_continue`] | fan-out to user tail |
-//! | **5a** | [`Contract::on_lock_finally_mint_and_maybe_post_settle`] | `lock.rs` (may re-enter **3**) |
-//! | **5b** | [`Contract::on_unlock_tail_after_pre_user_settle`] → **5b′** [`Contract::on_unstake_pipeline_pool_account`] | `unlock.rs` |
-//! | **5c** | [`Contract::on_user_withdraw_payout_continue`] | `withdraw.rs` |
-//! | **6** | [`Contract::on_epoch_pipeline_terminal_release`] | always after **4** tail; set **`Idle`** |
-//!
-//! When [`Validator::last_settlement_epoch`] ≥ current NEAR epoch, **0** jumps straight to **4** (cached balance).
-//!
-//! **Unlock / unstake ordering:** when a new pool `unstake` starts, if the pool reports withdrawable unstaked
-//! NEAR (`PoolAccountView::can_withdraw`), [`Contract::try_epoch_withdraw_known_unstaked`] runs first (same doc, section 2b).
-//!
-//! ## Net settle
-//! [`Contract::try_epoch_stake_or_unstake`] compares `pending_to_stake` vs `pending_to_unstake` in yocto: stake the excess,
-//! unstake the deficit, clear both without a pool call when equal (net-zero path uses [`Contract::apply_net_zero_pending_matched_clear`]),
-//! or panic when nothing is queued.
-//!
-//! ## File layout
-//! Public **`epoch_settle`** in its own `#[near] impl` block; pipeline steps **0** → **6** in a second
-//! `#[near] impl` (source order). User tails **5a–5c** are in `lock.rs`, `unlock.rs`, and `withdraw.rs`.
+//! **Entry:** [`Contract::promise_validator_per_epoch_settlement_then`] (**0**, sets **`Busy`**) — shared by `lock`, `unlock`, `withdraw`, `epoch_settle`.
+//! Fast path when [`Validator::last_settlement_epoch`] ≥ current epoch: **0** → **4** only.
+//! User tails **5a–5c** live in `lock.rs`, `unlock.rs`, `withdraw.rs`; **6** clears **`Idle`**.
 
 use crate::events;
 use crate::gas::{callbacks, staking_pool};
@@ -119,12 +84,6 @@ pub trait ExtSelfEpoch {
         validator_id: ValidatorId,
         shares_remove: u128,
     ) -> Promise;
-    /// **[Pipeline 5c]** User withdraw payout after shared settlement (`withdraw.rs`).
-    fn on_user_withdraw_payout_continue(
-        &mut self,
-        account_id: AccountId,
-        validator_id: ValidatorId,
-    ) -> Promise;
     /// **[Pipeline 5b′]** Unlock tail: `get_account`, optional **2a–2c**, optional **3** (`unlock.rs`).
     fn on_unstake_pipeline_pool_account(
         &mut self,
@@ -178,10 +137,7 @@ impl Contract {
         cont: PerEpochContinue,
     ) -> Promise {
         let mut validator = self.require_validator(&validator_id);
-        require!(
-            validator.tx_status == TransactionStatus::Idle,
-            "Validator pool is busy; wait for the in-flight pool call to finish"
-        );
+        self.assert_validator_idle_for_user_action(&validator);
         // Fast path when this pool already consumed its one settle slot for the current NEAR epoch.
         let needs_pre_user_settlement_pipeline =
             validator.last_settlement_epoch < env::epoch_height();
@@ -638,9 +594,7 @@ impl Contract {
             PerEpochContinue::WithdrawUserTransfer {
                 account_id,
                 validator_id,
-            } => ext_self_epoch::ext(env::current_account_id())
-                .with_static_gas(callbacks::ON_WITHDRAW_USER_AFTER_EPOCH_SETTLEMENT)
-                .on_user_withdraw_payout_continue(account_id, validator_id),
+            } => self.payout_user_withdraw(account_id, validator_id),
             PerEpochContinue::SettleOnly { .. } => Promise::new(env::current_account_id()),
         };
         tail.then(

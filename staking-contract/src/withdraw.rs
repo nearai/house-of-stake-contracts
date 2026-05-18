@@ -2,9 +2,7 @@
 //! is matched against this account’s `user_pending_unstake` tranches
 //! (epoch-gated), then sent to the user.
 //!
-//! **Flow (WASM):** `withdraw` → shared per-epoch settlement ([`crate::epoch::Contract::promise_validator_per_epoch_settlement_then`],
-//! same ordering as `lock` / `unlock`, including pool withdraw-if-ready) → [`Contract::on_user_withdraw_payout_continue`]
-//! → [`Contract::claim_from_withdraw_bucket`] + `Promise::transfer`.
+//! **Flow (WASM):** `withdraw` → shared per-epoch settlement → [`Contract::payout_user_withdraw`] (claim bucket + transfer).
 //!
 //! **Non-WASM:** `testing_env!` skips promise chains; [`Contract::payout_user_withdraw`] runs directly from [`Contract::withdraw`].
 
@@ -44,10 +42,7 @@ impl Contract {
         );
 
         let mut validator = self.require_validator(&validator_id);
-        require!(
-            validator.tx_status == TransactionStatus::Idle,
-            "Validator pool is busy; wait for the in-flight pool call to finish"
-        );
+        self.assert_validator_idle_for_user_action(&validator);
         // `accounts_with_pending_unstake` is the validator-side index used by epoch / withdraw scheduling;
         // ensure this account is listed whenever they still carry tranches (idempotent if already present).
         if !validator
@@ -74,16 +69,6 @@ impl Contract {
                 },
             )
         }
-    }
-
-    #[private]
-    /// **[Pipeline 5c]** User withdraw payout after **4** (then **6**).
-    pub fn on_user_withdraw_payout_continue(
-        &mut self,
-        account_id: AccountId,
-        validator_id: ValidatorId,
-    ) -> Promise {
-        self.payout_user_withdraw(account_id, validator_id)
     }
 }
 
@@ -254,7 +239,7 @@ impl Contract {
     /// Claim from `pending_to_withdraw` and transfer to the user. Pool → contract withdraw runs in the
     /// shared per-epoch settlement chain before this ([`crate::epoch::Contract::promise_validator_per_epoch_settlement_then`]).
     ///
-    /// Called from [`Contract::withdraw`] (non-WASM / tests) and from [`Contract::on_user_withdraw_payout_continue`] on WASM.
+    /// Called from [`Contract::withdraw`] (non-WASM / tests) and from [`crate::epoch::Contract::on_epoch_settlement_dispatch_continue`] on WASM.
     pub(crate) fn payout_user_withdraw(
         &mut self,
         account_id: AccountId,
