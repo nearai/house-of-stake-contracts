@@ -167,7 +167,7 @@ try_epoch_withdraw_known_unstaked  [2a]
 
 | `pending_to_stake` vs `pending_to_unstake` | Pool action | Callback | `last_settlement_epoch` on success |
 |--------------------------------------------|-------------|----------|-------------------------------------|
-| Equal, > 0 | None (inline **3a**) | `apply_net_zero_pending_matched_clear` (`on_settle_net_zero_done` retained for ABI only) | Current epoch |
+| Equal, > 0 | None (inline **3a**) | `apply_net_zero_pending_matched_clear` (synchronous in **3**) | Current epoch |
 | Stake > unstake | `deposit_and_stake(net)` + attached `net` | `on_deposit_and_stake(net, absorb_unstake)` | Current epoch |
 | Unstake > stake | `unstake(net)` (requires `validator_unstake_waiting_finished` if `last_unstake_epoch > 0`) | `on_unstake(net, absorb_stake)` | Current epoch; sets `last_unstake_epoch` |
 
@@ -267,8 +267,7 @@ Stable promise target names — change only with coordinated migration.
 | **1** | `on_epoch_settlement_after_pool_account` | Pool `get_account` (settlement) |
 | **2b** | `on_epoch_withdraw_transfer_done` | Pool `withdraw` |
 | **2c** | `on_after_pool_withdraw_maybe_settle` | **2b**; settlement `Some(cont)`, unlock **5b′** `None` |
-| **3** | `try_epoch_stake_or_unstake` | **1**, **2c** (`Some` / `None`), **5a** / **5b′** |
-| **3a** | `on_settle_net_zero_done` | ABI only; net-zero is inline in **3** |
+| **3** | `try_epoch_stake_or_unstake` | **1**, **2c** (`Some` / `None`), **5a** / **5b′** (inline **3a** net-zero when pending queues match) |
 | **3b** | `on_deposit_and_stake` | Pool `deposit_and_stake` |
 | **3c** | `on_unstake` | Pool `unstake` |
 | **3′** | `on_epoch_settlement_after_try_epoch_stake_or_unstake` | Async **3** |

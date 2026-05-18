@@ -129,7 +129,6 @@ Public **`epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator
 |--------|------|
 | `on_deposit_and_stake` | Completes stake; reduces **`pending_to_stake`** / **`pending_to_unstake`** per net-settle args, may absorb matching user unstake liability, updates **`total_staked_balance`**, sets **`last_settlement_epoch`**. |
 | `on_unstake` | Completes unstake; reduces **`pending_to_unstake`** / **`pending_to_stake`** per net-settle args; updates **`last_unstake_epoch`** and **`last_settlement_epoch`**. |
-| `on_settle_net_zero_done` | Internal: equal pending stake/unstake cleared without pool **`deposit`** / **`unstake`**. |
 | `on_get_unstaked_for_epoch_withdraw` | Continues withdraw-from-pool; may chain **`withdraw`** on pool. |
 | `on_epoch_withdraw_transfer_done` | Credits **`pending_to_withdraw`** after pool transfer. |
 | `on_unlock_tail_after_pre_user_settle` / `on_unstake_pipeline_pool_account` | User-flow continuations for **`unlock`**. |

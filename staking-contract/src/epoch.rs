@@ -41,8 +41,6 @@ pub trait ExtSelfEpoch {
         validator_id: ValidatorId,
         cont: Option<PerEpochContinue>,
     ) -> PromiseOrValue<bool>;
-    /// **[Pipeline 3a]** Net-zero pending cleared (no pool `deposit` / `unstake`).
-    fn on_settle_net_zero_done(&mut self, validator_id: ValidatorId, matched_pending_yocto: U128);
     /// **[Pipeline 3b]** Pool `deposit_and_stake` result: updates pending queues, bumps `last_settlement_epoch`.
     fn on_deposit_and_stake(
         &mut self,
@@ -76,7 +74,7 @@ pub trait ExtSelfEpoch {
         validator_id: ValidatorId,
         subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
     ) -> PromiseOrValue<()>;
-    /// **[Pipeline 5b]** Share exit + start unlock pool pipeline (**5b′**) (`unlock.rs`).
+    /// **[Pipeline 5b]** Share exit after pre-user settlement (`unlock.rs`).
     fn on_unlock_tail_after_pre_user_settle(
         &mut self,
         lock_id: LockId,
@@ -84,12 +82,6 @@ pub trait ExtSelfEpoch {
         validator_id: ValidatorId,
         shares_remove: u128,
     ) -> Promise;
-    /// **[Pipeline 5b′]** Unlock tail: `get_account`, optional **2a–2c**, optional **3** (`unlock.rs`).
-    fn on_unstake_pipeline_pool_account(
-        &mut self,
-        #[callback] pool_account: PoolAccountView,
-        validator_id: ValidatorId,
-    ) -> PromiseOrValue<bool>;
     /// **[Pipeline 6]** After **4** tail promise completes: sets pipeline **`Idle`**.
     fn on_epoch_pipeline_terminal_release(&mut self, validator_id: ValidatorId);
 }
@@ -157,7 +149,7 @@ impl Contract {
             )
     }
 
-    /// Pool `get_account` before **[Pipeline 1]** or **[Pipeline 5b′]**.
+    /// Pool `get_account` before **[Pipeline 1]**.
     pub(crate) fn promise_get_validator_pool_account(&self, validator_id: ValidatorId) -> Promise {
         ext_staking_pool::ext(validator_id)
             .with_static_gas(staking_pool::GET_ACCOUNT)
@@ -209,7 +201,7 @@ impl Contract {
 
     // --- [Pipeline 2a] ---
 
-    /// **[Pipeline 2a]** Pull unstaked NEAR into [`Validator::pending_to_withdraw`] (from **1** or **5b′**).
+    /// **[Pipeline 2a]** Pull unstaked NEAR into [`Validator::pending_to_withdraw`] (from **1**).
     pub(crate) fn try_epoch_withdraw_known_unstaked(
         &mut self,
         validator_id: ValidatorId,
@@ -300,17 +292,7 @@ impl Contract {
             validator.tx_status == TransactionStatus::Busy,
             "Validator pool must be busy for post-withdraw settle"
         );
-        if let Some(c) = cont {
-            return self
-                .try_epoch_stake_or_unstake(validator_id, Some(c))
-                .into();
-        }
-        if validator.pending_to_stake.as_yoctonear() == 0
-            && validator.pending_to_unstake.as_yoctonear() == 0
-        {
-            return PromiseOrValue::Value(true);
-        }
-        self.try_epoch_stake_or_unstake(validator_id, None).into()
+        self.try_epoch_stake_or_unstake(validator_id, cont).into()
     }
 
     // --- [Pipeline 3 / 3a] ---
@@ -321,28 +303,9 @@ impl Contract {
             .on_epoch_settlement_dispatch_continue(cont)
     }
 
-    /// **[Pipeline 3a]** Inline net-zero clear (no pool `deposit` / `unstake`); [`Contract::on_settle_net_zero_done`] kept for ABI.
-    pub(crate) fn apply_net_zero_pending_matched_clear(
-        &mut self,
-        validator_id: &ValidatorId,
-        matched_pending_yocto: u128,
-    ) {
-        let mut validator = self.require_validator(validator_id);
-        require!(
-            validator.pending_to_stake.as_yoctonear() == matched_pending_yocto
-                && validator.pending_to_unstake.as_yoctonear() == matched_pending_yocto,
-            "Net zero settle state changed before callback; retry next epoch"
-        );
-        validator.pending_to_stake = NearToken::from_near(0);
-        // User tranches are unchanged; re-queue pool unstake for remaining user exit liability.
-        validator.pending_to_unstake = validator.pending_user_unstake_total;
-        validator.last_settlement_epoch = env::epoch_height();
-        self.validators.insert(validator_id.clone(), validator);
-    }
-
     /// **[Pipeline 3]** At most one pool `deposit_and_stake` or `unstake` per NEAR epoch (**3a** net-zero inline).
     /// `dispatch_after: Some(cont)` → skip to **4** when nothing pending or slot used; else pool op → **3′** → **4**.
-    /// `None` — tail-only (**2c**, **5a**, **5b′**); panics if nothing queued.
+    /// `None` — tail-only (**2c**, **5a**); no-op when nothing queued (same as slot already used).
     pub(crate) fn try_epoch_stake_or_unstake(
         &mut self,
         validator_id: ValidatorId,
@@ -365,7 +328,7 @@ impl Contract {
             }
         } else if !has_pending {
             self.validators.insert(validator_id, validator);
-            env::panic_str("Nothing is queued to settle for this validator");
+            return Promise::new(env::current_account_id());
         } else if !can_settle {
             return Promise::new(env::current_account_id());
         }
@@ -435,15 +398,23 @@ impl Contract {
 
     // --- [Pipeline 3a] ---
 
-    #[private]
-    /// **[Pipeline 3a]** Async net-zero from **3** (self-call).
-    pub fn on_settle_net_zero_done(
+    /// **[Pipeline 3a]** Inline net-zero clear (no pool `deposit` / `unstake`).
+    pub(crate) fn apply_net_zero_pending_matched_clear(
         &mut self,
-        validator_id: ValidatorId,
-        matched_pending_yocto: U128,
+        validator_id: &ValidatorId,
+        matched_pending_yocto: u128,
     ) {
-        let g = matched_pending_yocto.0;
-        self.apply_net_zero_pending_matched_clear(&validator_id, g);
+        let mut validator = self.require_validator(validator_id);
+        require!(
+            validator.pending_to_stake.as_yoctonear() == matched_pending_yocto
+                && validator.pending_to_unstake.as_yoctonear() == matched_pending_yocto,
+            "Net zero settle state changed; retry next epoch"
+        );
+        validator.pending_to_stake = NearToken::from_near(0);
+        // User tranches are unchanged; re-queue pool unstake for remaining user exit liability.
+        validator.pending_to_unstake = validator.pending_user_unstake_total;
+        validator.last_settlement_epoch = env::epoch_height();
+        self.validators.insert(validator_id.clone(), validator);
     }
 
     // --- [Pipeline 3b] ---
@@ -576,7 +547,7 @@ impl Contract {
                     validator_id,
                     subscription_followup,
                 ),
-            // Share exit: burn shares and drive pool `unstake` / withdraw pipeline for this lock.
+            // Share exit: burn shares and queue `pending_to_unstake` (pool `unstake` on a later settlement).
             PerEpochContinue::UnlockQueueUnstake {
                 lock_id,
                 account_id,
@@ -602,21 +573,6 @@ impl Contract {
                 .with_static_gas(callbacks::ON_EPOCH_PIPELINE_TERMINAL_RELEASE)
                 .on_epoch_pipeline_terminal_release(validator_id),
         )
-    }
-
-    // --- [Pipeline 5b′] ---
-
-    /// **[Pipeline 5b′]** Orchestrator: pool `get_account` → [`Contract::on_unstake_pipeline_pool_account`] (`unlock.rs`).
-    pub(crate) fn promise_post_unlock_unstaked_pipeline(
-        &mut self,
-        validator_id: ValidatorId,
-    ) -> Promise {
-        self.promise_get_validator_pool_account(validator_id.clone())
-            .then(
-                ext_self_epoch::ext(env::current_account_id())
-                    .with_static_gas(callbacks::ON_UNSTAKE_PIPELINE_POOL_ACCOUNT)
-                    .on_unstake_pipeline_pool_account(validator_id),
-            )
     }
 
     // --- [Pipeline 6] ---

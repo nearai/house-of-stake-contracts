@@ -19,8 +19,6 @@ pub mod callbacks {
     use near_sdk::Gas;
     pub const ON_DEPOSIT_AND_STAKE: Gas = BASE_GAS;
     pub const ON_UNSTAKE: Gas = BASE_GAS;
-    /// Self-callback after net-zero stake/unstake pending (no pool deposit/unstake).
-    pub const ON_SETTLE_NET_ZERO: Gas = BASE_GAS;
     /// After pool `withdraw`: tail settle (`None`) or settlement `try_epoch_stake_or_unstake` + dispatch (`Some(cont)`).
     pub const ON_GET_UNSTAKED_FOR_WITHDRAW: Gas = Gas::from_gas(BASE_GAS.as_gas() * 6);
     pub const ON_WITHDRAW_TRANSFER: Gas = Gas::from_gas(BASE_GAS.as_gas() * 2);
@@ -33,8 +31,6 @@ pub mod callbacks {
     pub const ON_EPOCH_SETTLEMENT_DISPATCH: Gas = Gas::from_gas(BASE_GAS.as_gas() * 6);
     /// After pool `get_account` during shared settlement (balance refresh + withdraw-if-ready).
     pub const ON_EPOCH_SETTLEMENT_AFTER_POOL_ACCOUNT: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
-    /// After pool `get_account` on unlock unstake pipeline.
-    pub const ON_UNSTAKE_PIPELINE_POOL_ACCOUNT: Gas = Gas::from_gas(BASE_GAS.as_gas() * 6);
     /// After `try_epoch_stake_or_unstake` pool call during shared settlement.
     pub const ON_EPOCH_SETTLEMENT_AFTER_TRY_EPOCH_STAKE_OR_UNSTAKE: Gas =
         Gas::from_gas(BASE_GAS.as_gas() * 6);

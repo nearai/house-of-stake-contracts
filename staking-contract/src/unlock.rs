@@ -1,16 +1,14 @@
-use crate::epoch::ext_self_epoch;
-use crate::gas::callbacks;
 use crate::internal::{effective_stake_for_share_exit, near_from_shares};
 use crate::*;
 use near_sdk::json_types::U128;
-use near_sdk::{NearToken, Promise, PromiseOrValue, env, is_promise_success, near, require};
+use near_sdk::{NearToken, Promise, env, near, require};
 
 #[near]
 impl Contract {
     /// User-driven unlock: only the lock owner, after `lock.end_ns`. Runs the same per-epoch validator
     /// pipeline as catalog **`lock`** (balance sync / withdraw / settle when due, or fast path when this
-    /// pool already settled the current NEAR epoch), then sets the pool row **`Busy`**, queues your unstake,
-    /// and continues the withdraw-first / **`unstake`** pipeline.
+    /// pool already settled the current NEAR epoch), then **`commit_share_exit`** (queues `pending_to_unstake`;
+    /// pool `unstake` follows on the next settlement-driven flow or **`epoch_settle`**).
     #[payable]
     pub fn unlock(&mut self, lock_id: LockId) -> Promise {
         near_sdk::assert_one_yocto();
@@ -54,7 +52,7 @@ impl Contract {
 #[near]
 impl Contract {
     #[private]
-    /// **[Pipeline 5b]** Share exit, then start **5b′** ([`Contract::promise_post_unlock_unstaked_pipeline`]).
+    /// **[Pipeline 5b]** Share exit after pre-user settlement (**0–3**); pool `unstake` for this exit is deferred.
     pub fn on_unlock_tail_after_pre_user_settle(
         &mut self,
         lock_id: LockId,
@@ -92,43 +90,7 @@ impl Contract {
 
         crate::events::log_unlock(lock_id.as_str(), &account_log, &validator_log);
 
-        self.promise_post_unlock_unstaked_pipeline(validator_id)
-    }
-
-    #[private]
-    /// **[Pipeline 5b′]** Unlock tail: `get_account`, optional **2a–2c**, optional **3** (then **6** via **4**).
-    pub fn on_unstake_pipeline_pool_account(
-        &mut self,
-        #[callback] pool_account: PoolAccountView,
-        validator_id: ValidatorId,
-    ) -> PromiseOrValue<bool> {
-        if !is_promise_success() {
-            self.release_validator_pool_pipeline(&validator_id);
-            env::panic_str("Could not read pool account from the pool; retry in a few blocks");
-        }
-
-        let unstaked = pool_account.unstaked();
-
-        if unstaked.as_yoctonear() > 0 && pool_account.can_withdraw {
-            return self
-                .try_epoch_withdraw_known_unstaked(
-                    validator_id.clone(),
-                    unstaked,
-                    pool_account.can_withdraw,
-                )
-                .then(
-                    ext_self_epoch::ext(env::current_account_id())
-                        .with_static_gas(callbacks::ON_GET_UNSTAKED_FOR_WITHDRAW)
-                        .on_after_pool_withdraw_maybe_settle(validator_id, None),
-                )
-                .into();
-        }
-
-        let validator = self.require_validator(&validator_id);
-        if validator.last_settlement_epoch < env::epoch_height() {
-            return self.try_epoch_stake_or_unstake(validator_id, None).into();
-        }
-        PromiseOrValue::Value(true)
+        Promise::new(env::current_account_id())
     }
 }
 
