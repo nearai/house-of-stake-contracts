@@ -25,7 +25,10 @@ jobs:
       # `build_all.sh`). Plain `cargo build --target wasm32-unknown-unknown` can produce modules
       # that fail with PrepareError(Deserialization) on the near-workspaces sandbox.
       - name: Install cargo-near
-        run: cargo install cargo-near --version 0.17.0 --locked --no-default-features
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/cargo-near/releases/latest/download/cargo-near-installer.sh | sh
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          cargo near --version
 
       - name: Build contract wasm for integration tests
         run: bash build_all.sh

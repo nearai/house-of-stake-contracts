@@ -152,7 +152,7 @@ pub async fn buyer_lock_for_product(
     staking_id: &near_workspaces::AccountId,
     price_id: &str,
     lock_duration_ns: &str,
-    deposit_near: u64,
+    deposit_near: u128,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let lock_id: String = buyer
         .call(staking_id, "lock_for_product")

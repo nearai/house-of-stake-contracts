@@ -21,7 +21,6 @@ use near_sdk::{
 };
 
 /// Matches staking-contract [`PoolAccountView`] / NEAR staking-pool `get_account` JSON shape.
-#[derive(Clone, Debug, PartialEq, Eq)]
 #[near(serializers = [json])]
 pub struct PoolAccountView {
     pub unstaked_balance: U128,
