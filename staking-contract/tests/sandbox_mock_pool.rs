@@ -97,7 +97,7 @@ async fn staking_epoch_settle_fast_path_succeeds_after_lock_consumed_slot()
         .into_result()?;
 
     // `lock_for_product` already ran the per-epoch pipeline; a second `epoch_settle` is a fast-path no-op.
-    call_epoch_settle(&buyer, &staking, pool.id())
+    call_epoch_settle(&buyer, staking.id(), pool.id())
         .await?
         .into_result()?;
 
@@ -167,7 +167,7 @@ async fn staking_two_locks_aggregate_then_epoch_settle_next_epoch_clears_pending
 
     worker.fast_forward(100_000).await?;
 
-    let settle = call_epoch_settle(&buyer_a, &staking, pool.id()).await?;
+    let settle = call_epoch_settle(&buyer_a, staking.id(), pool.id()).await?;
     settle.into_result()?;
 
     let v_after: serde_json::Value = worker
@@ -309,7 +309,7 @@ async fn staking_contract_pause_blocks_epoch_settle() -> Result<(), Box<dyn std:
         .await?
         .into_result()?;
 
-    let outcome = call_epoch_settle(&buyer, &staking, pool.id()).await?;
+    let outcome = call_epoch_settle(&buyer, staking.id(), pool.id()).await?;
 
     assert!(
         outcome.is_failure(),
