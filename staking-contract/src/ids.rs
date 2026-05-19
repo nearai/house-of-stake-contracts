@@ -25,6 +25,25 @@ pub fn next_lock_id(nonce: &mut u64) -> String {
     next_id("lock", SUB_LOCK_SUFFIX_LEN, nonce)
 }
 
+pub fn next_unique_generated_id<FGen, FContains>(
+    nonce: &mut u64,
+    mut generate: FGen,
+    mut contains: FContains,
+    allocation_err_msg: &str,
+) -> String
+where
+    FGen: FnMut(&mut u64) -> String,
+    FContains: FnMut(&str) -> bool,
+{
+    for _ in 0..64 {
+        let id = generate(nonce);
+        if !contains(id.as_str()) {
+            return id;
+        }
+    }
+    env::panic_str(allocation_err_msg)
+}
+
 /// Collision probability with existing IDs is negligible (SHA-256 → base62). Product/price creation retries
 /// if a generated id already exists in storage (see `products` callbacks).
 fn next_id(prefix: &str, suffix_len: usize, nonce: &mut u64) -> String {

@@ -7,8 +7,7 @@ use near_sdk::{AccountId, NearToken, env, near, require};
 impl Contract {
     #[payable]
     pub fn propose_new_owner_account_id(&mut self, new_owner_account_id: Option<AccountId>) {
-        assert_one_yocto();
-        self.assert_owner();
+        self.assert_owner_payable();
         self.config.proposed_new_owner_account_id = new_owner_account_id;
     }
 
@@ -26,50 +25,49 @@ impl Contract {
 
     #[payable]
     pub fn set_guardians(&mut self, guardians: Vec<AccountId>) {
-        assert_one_yocto();
-        self.assert_owner();
+        self.assert_owner_payable();
         self.config.guardians = guardians;
     }
 
     #[payable]
     pub fn set_per_lock_storage_stake(&mut self, per_lock_storage_stake: NearToken) {
-        assert_one_yocto();
-        self.assert_owner();
+        self.assert_owner_payable();
         self.config.per_lock_storage_stake = per_lock_storage_stake;
     }
 
     #[payable]
     pub fn set_lock_bounds(&mut self, min_lock_duration_ns: U64, max_lock_duration_ns: U64) {
-        assert_one_yocto();
-        self.assert_owner();
+        self.assert_owner_payable();
         self.config.min_lock_duration_ns = min_lock_duration_ns;
         self.config.max_lock_duration_ns = max_lock_duration_ns;
     }
 
     #[payable]
     pub fn set_min_lock_amount(&mut self, min_lock_amount: NearToken) {
-        assert_one_yocto();
-        self.assert_owner();
+        self.assert_owner_payable();
         crate::config::require_min_lock_amount_at_protocol_floor(&min_lock_amount);
         self.config.min_lock_amount = min_lock_amount;
     }
 
     #[payable]
     pub fn set_min_storage_deposit(&mut self, min_storage_deposit: NearToken) {
-        assert_one_yocto();
-        self.assert_owner();
+        self.assert_owner_payable();
         self.config.min_storage_deposit = min_storage_deposit;
     }
 
     #[payable]
     pub fn set_epoch_unstake_settle_epochs(&mut self, epochs: u64) {
-        assert_one_yocto();
-        self.assert_owner();
+        self.assert_owner_payable();
         self.config.epoch_unstake_settle_epochs = epochs;
     }
 }
 
 impl Contract {
+    fn assert_owner_payable(&self) {
+        assert_one_yocto();
+        self.assert_owner();
+    }
+
     pub fn assert_owner(&self) {
         require!(
             env::predecessor_account_id() == self.config.owner_account_id,

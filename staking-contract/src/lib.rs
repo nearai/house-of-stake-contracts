@@ -108,3 +108,26 @@ impl Contract {
         }
     }
 }
+
+impl Contract {
+    pub(crate) fn collect_paginated<T, F>(
+        &self,
+        from_index: u64,
+        limit: u64,
+        total_len: u64,
+        mut fetch: F,
+    ) -> Vec<T>
+    where
+        F: FnMut(u32) -> Option<T>,
+    {
+        let mut out = Vec::new();
+        let mut i = from_index;
+        while i < total_len && (out.len() as u64) < limit {
+            if let Some(item) = fetch(i as u32) {
+                out.push(item);
+            }
+            i += 1;
+        }
+        out
+    }
+}

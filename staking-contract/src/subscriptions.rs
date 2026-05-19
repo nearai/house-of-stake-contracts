@@ -13,10 +13,7 @@ use near_sdk::json_types::U128;
 use near_sdk::{AccountId, NearToken, PromiseOrValue, assert_one_yocto, env, near, require};
 
 /// Extend `from_ns` by `months` × average Gregorian months (linear approximation).
-///
-/// `anchor_day` (1–31) is the Stripe-style **billing-cycle day-of-month** hint for future calendar-accurate
-/// billing (end-of-month clamping, leap years). It is validated but **not yet** applied in this helper until a
-/// full calendar implementation lands; see `docs/ACTION_ITEMS.md` (subscriptions section).
+/// `anchor_day` is validated but not yet applied; see `docs/ACTION_ITEMS.md`.
 pub fn add_months_stripe_style(anchor_day: u8, months: u32, from_ns: u64) -> u64 {
     let _anchor_day = anchor_day.clamp(1, 31);
     let add_ns = (months as u128).saturating_mul(AVG_MONTH_NS);
@@ -107,8 +104,7 @@ impl Contract {
         let validator_id = product.validator_id.clone();
         self.assert_validator_active_for_lock(&validator_id);
 
-        let validator = self.require_validator(&validator_id);
-        self.assert_validator_idle_for_user_action(&validator);
+        let _validator = self.require_validator_idle(&validator_id);
 
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -194,9 +190,7 @@ impl Contract {
     }
 }
 
-// =============================================================================
-// Epoch pipeline: subscription upgrade tail (callback from `epoch` settlement dispatch)
-// =============================================================================
+// Epoch pipeline: subscription upgrade tail callback.
 
 #[near]
 impl Contract {
@@ -212,10 +206,9 @@ impl Contract {
     ) -> PromiseOrValue<LockId> {
         let lock_id =
             self.commit_subscription_upgrade(buyer, deposit, new_price_id, subscription_id);
-        let validator = self.require_validator(&validator_id);
-        require!(
-            validator.tx_status == TransactionStatus::Busy,
-            "Validator pool must be busy after per-epoch settlement"
+        let _validator = self.require_validator_busy(
+            &validator_id,
+            "Validator pool must be busy after per-epoch settlement",
         );
         // Pre-user settlement (**0–3**) already ran; new `pending_to_stake` from the upgrade
         // is queued for the next user action or `epoch_settle` (same as **5a** catalog mint).

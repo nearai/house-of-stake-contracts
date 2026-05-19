@@ -15,9 +15,7 @@ use near_sdk::{
     require,
 };
 
-// =============================================================================
-// External interfaces (cross-contract) — trait order follows pipeline steps
-// =============================================================================
+// External interfaces (cross-contract), ordered by pipeline step.
 
 /// Self callbacks for epoch / pool work. Names are **stable promise targets** (`#[private]`); rename only
 /// with a coordinated ABI / off-chain migration.
@@ -114,9 +112,7 @@ pub trait ExtStakingPool {
     fn get_account(&self, account_id: AccountId) -> PoolAccountView;
 }
 
-// =============================================================================
-// Public epoch API
-// =============================================================================
+// Public epoch API.
 
 #[near]
 impl Contract {
@@ -130,9 +126,7 @@ impl Contract {
     }
 }
 
-// =============================================================================
-// Epoch pipeline (`#[near]` impl — ordered by pipeline step; see module doc)
-// =============================================================================
+// Epoch pipeline (`#[near]` impl, ordered by pipeline step; see module docs).
 
 #[near]
 impl Contract {
@@ -144,8 +138,7 @@ impl Contract {
         validator_id: ValidatorId,
         cont: PerEpochContinue,
     ) -> Promise {
-        let mut validator = self.require_validator(&validator_id);
-        self.assert_validator_idle_for_user_action(&validator);
+        let mut validator = self.require_validator_idle(&validator_id);
         // Fast path when this pool already consumed its one settle slot for the current NEAR epoch.
         let needs_pre_user_settlement_pipeline =
             validator.last_settlement_epoch < env::epoch_height();
@@ -188,9 +181,9 @@ impl Contract {
             );
         }
         let mut validator = self.require_validator(&validator_id);
-        require!(
-            validator.tx_status == TransactionStatus::Busy,
-            "Validator pool must be busy for settlement after get_account"
+        self.assert_validator_busy(
+            &validator,
+            "Validator pool must be busy for settlement after get_account",
         );
         validator.total_staked_balance = pool_account.total_balance();
         validator.last_balance_refresh_ns = U64(env::block_timestamp());
@@ -236,9 +229,9 @@ impl Contract {
         events::log_epoch_operation("epoch_withdraw", &validator_id);
 
         let validator = self.require_validator(&validator_id);
-        require!(
-            validator.tx_status == TransactionStatus::Busy,
-            "Validator pool must be busy for this withdraw step"
+        self.assert_validator_busy(
+            &validator,
+            "Validator pool must be busy for this withdraw step",
         );
 
         self.promise_epoch_withdraw_unstaked(validator_id, unstaked_balance)
@@ -304,9 +297,9 @@ impl Contract {
         cont: Option<PerEpochContinue>,
     ) -> PromiseOrValue<bool> {
         let validator = self.require_validator(&validator_id);
-        require!(
-            validator.tx_status == TransactionStatus::Busy,
-            "Validator pool must be busy for post-withdraw settle"
+        self.assert_validator_busy(
+            &validator,
+            "Validator pool must be busy for post-withdraw settle",
         );
         self.try_epoch_stake_or_unstake(validator_id, cont).into()
     }
@@ -328,9 +321,9 @@ impl Contract {
         dispatch_after: Option<PerEpochContinue>,
     ) -> Promise {
         let validator = self.require_validator(&validator_id);
-        require!(
-            validator.tx_status == TransactionStatus::Busy,
-            "Validator pool must be busy for this settle step"
+        self.assert_validator_busy(
+            &validator,
+            "Validator pool must be busy for this settle step",
         );
 
         let pending_stake_yocto = validator.pending_to_stake.as_yoctonear();

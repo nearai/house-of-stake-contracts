@@ -1,12 +1,6 @@
-//! Catalog **prices**: create/edit/archive/unarchive/delete and `get_price`.
-//!
-//! **Auth:** Every mutating entrypoint is **validator-pool-owner** gated. The public method resolves the
-//! price's product → pool, calls `get_owner_id` on that pool, then continues in [`ExtSelfPrices`] callbacks
-//! via [`Contract::assert_validator_owner`]. Contract owner/guardians cannot edit catalog entries directly.
-//!
-//! **Lifecycle:** Archive hides a tier from new locks; delete requires `usage_count == 0`. Archiving or
-//! deleting clears [`Product::default_price_id`] when this price was the product default
-//! ([`Contract::clear_product_default_price_field_if_matches`] in [`crate::products`]).
+//! Catalog prices: CRUD + archive lifecycle for product tiers.
+//! Mutating RPCs are pool-owner gated via `get_owner_id` + [`Contract::assert_validator_owner`].
+//! Archiving/deleting a default tier clears [`Product::default_price_id`] through product helpers.
 
 use crate::gas::callbacks;
 use crate::*;
@@ -16,13 +10,12 @@ use near_sdk::{AccountId, Promise, env, near, require};
 
 /// Retry id generation when a collision exists in [`Contract::prices`] (extremely unlikely).
 fn next_unique_price_id(contract: &mut Contract) -> PriceId {
-    for _ in 0..64 {
-        let id = crate::ids::next_price_id(&mut contract.id_nonce);
-        if !contract.prices.contains_key(&id) {
-            return id;
-        }
-    }
-    env::panic_str("Could not allocate a unique price id; try again")
+    crate::ids::next_unique_generated_id(
+        &mut contract.id_nonce,
+        crate::ids::next_price_id,
+        |id| contract.prices.contains_key(id),
+        "Could not allocate a unique price id; try again",
+    )
 }
 
 /// Self callbacks for **price** catalog after `get_owner_id` on the staking pool.
@@ -142,9 +135,7 @@ impl Contract {
         })
     }
 
-    // -------------------------------------------------------------------------
-    // Private callbacks after pool `get_owner_id`
-    // -------------------------------------------------------------------------
+    // Private callbacks after pool `get_owner_id`.
 
     #[private]
     pub fn create_price_after_get_owner(
@@ -255,9 +246,7 @@ impl Contract {
         self.prices.insert(price_id, price);
     }
 
-    // -------------------------------------------------------------------------
-    // Public price view functions
-    // -------------------------------------------------------------------------
+    // Public price view functions.
 
     pub fn get_price(&self, price_id: PriceId) -> Option<Price> {
         self.prices.get(&price_id).cloned()

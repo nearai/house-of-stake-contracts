@@ -88,18 +88,12 @@ impl Contract {
 
     /// Paginated validator records (stable allowlist order in [`Contract::validator_ids`]).
     pub fn get_validators(&self, from_index: u64, limit: u64) -> Vec<Validator> {
-        let len_u64 = self.validator_ids.len() as u64;
-        let mut out = Vec::new();
-        let mut i = from_index;
-        while i < len_u64 && (out.len() as u64) < limit {
-            if let Some(id) = self.validator_ids.get(i as u32) {
-                if let Some(validator) = self.validators.get(id).cloned() {
-                    out.push(validator);
-                }
-            }
-            i += 1;
-        }
-        out
+        let total_len = self.validator_ids.len() as u64;
+        self.collect_paginated(from_index, limit, total_len, |index| {
+            self.validator_ids
+                .get(index)
+                .and_then(|id| self.validators.get(id).cloned())
+        })
     }
 
     #[payable]
@@ -160,6 +154,26 @@ impl Contract {
             validator.tx_status == TransactionStatus::Idle,
             "Validator pool is busy; wait for the in-flight pool call to finish"
         );
+    }
+
+    pub(crate) fn require_validator_idle(&self, validator_id: &ValidatorId) -> Validator {
+        let validator = self.require_validator(validator_id);
+        self.assert_validator_idle_for_user_action(&validator);
+        validator
+    }
+
+    pub(crate) fn assert_validator_busy(&self, validator: &Validator, err_msg: &str) {
+        require!(validator.tx_status == TransactionStatus::Busy, err_msg);
+    }
+
+    pub(crate) fn require_validator_busy(
+        &self,
+        validator_id: &ValidatorId,
+        err_msg: &str,
+    ) -> Validator {
+        let validator = self.require_validator(validator_id);
+        self.assert_validator_busy(&validator, err_msg);
+        validator
     }
 
     /// True once a pool `unstake` is on record and [`crate::config::Config::epoch_unstake_settle_epochs`]

@@ -26,8 +26,7 @@ impl Contract {
         );
 
         let validator_id = lock.validator_id.clone();
-        let validator = self.require_validator(&validator_id);
-        self.assert_validator_idle_for_user_action(&validator);
+        let _validator = self.require_validator_idle(&validator_id);
 
         self.promise_validator_per_epoch_settlement_then(
             validator_id.clone(),
@@ -41,9 +40,7 @@ impl Contract {
     }
 }
 
-// =============================================================================
-// Epoch pipeline: unlock / unstake tail (callbacks from `epoch` settlement dispatch)
-// =============================================================================
+// Epoch pipeline: unlock / unstake tail callbacks.
 
 #[near]
 impl Contract {
@@ -56,10 +53,9 @@ impl Contract {
         validator_id: ValidatorId,
         shares_remove: u128,
     ) -> Promise {
-        let validator = self.require_validator(&validator_id);
-        require!(
-            validator.tx_status == TransactionStatus::Busy,
-            "Validator pool must be busy after per-epoch settlement"
+        let _validator = self.require_validator_busy(
+            &validator_id,
+            "Validator pool must be busy after per-epoch settlement",
         );
 
         let mut lock = self.require_lock(&lock_id, "Lock not found");

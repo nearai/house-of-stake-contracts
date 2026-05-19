@@ -8,9 +8,7 @@
 use crate::*;
 use near_sdk::{AccountId, NearToken, Promise, env, near, require};
 
-// ---------------------------------------------------------------------------
-// Public `withdraw` + private promise callback (WASM continuation)
-// ---------------------------------------------------------------------------
+// Public `withdraw` + private promise callback (WASM continuation).
 
 #[near]
 impl Contract {
@@ -40,8 +38,7 @@ impl Contract {
             "You have no unlocked NEAR waiting to claim for this validator"
         );
 
-        let mut validator = self.require_validator(&validator_id);
-        self.assert_validator_idle_for_user_action(&validator);
+        let mut validator = self.require_validator_idle(&validator_id);
         // `accounts_with_pending_unstake` is the validator-side index used by epoch / withdraw scheduling;
         // ensure this account is listed whenever they still carry tranches (idempotent if already present).
         if !validator
@@ -71,9 +68,7 @@ impl Contract {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tranche math, bucket claim (no transfer), and payout orchestration
-// ---------------------------------------------------------------------------
+// Tranche math, bucket claim (no transfer), and payout orchestration.
 
 impl Contract {
     /// Total yocto across **all** tranches for `(account, validator)` (includes not-yet-claimable epochs).

@@ -1,12 +1,6 @@
-//! Catalog **products**: create/edit/archive/delete, pagination, default price binding, and the
-//! [`ExtSelfProducts`] pool-owner callback trait.
-//!
-//! **Auth:** Same pool-owner promise pattern as [`crate::prices`]: public RPC → `get_owner_id` on the
-//! product's validator pool → [`ExtSelfProducts`] callback with [`Contract::assert_validator_owner`].
-//!
-//! **Prices** live in [`crate::prices`]; this module owns [`Contract::products`], the [`Product::price_ids`]
-//! list, and [`Product::default_price_id`] (used by [`crate::lock::Contract::lock_for_product`] when callers pass
-//! `product_id` only).
+//! Catalog products: CRUD, pagination, and default-price binding.
+//! Mutating RPCs are pool-owner gated via `get_owner_id` + [`Contract::assert_validator_owner`].
+//! Prices live in [`crate::prices`]; this module owns product records and product->price links.
 
 use crate::gas::callbacks;
 use crate::*;
@@ -16,13 +10,12 @@ use near_sdk::{AccountId, Promise, env, near, require};
 
 /// Retry id generation when a collision exists in [`Contract::products`].
 fn next_unique_product_id(contract: &mut Contract) -> ProductId {
-    for _ in 0..64 {
-        let id = crate::ids::next_product_id(&mut contract.id_nonce);
-        if !contract.products.contains_key(&id) {
-            return id;
-        }
-    }
-    env::panic_str("Could not allocate a unique product id; try again")
+    crate::ids::next_unique_generated_id(
+        &mut contract.id_nonce,
+        crate::ids::next_product_id,
+        |id| contract.products.contains_key(id),
+        "Could not allocate a unique product id; try again",
+    )
 }
 
 /// Self callbacks for **product** catalog after `get_owner_id` on the staking pool.
@@ -307,24 +300,16 @@ impl Contract {
 
     /// Paginated products (stable creation order in [`Contract::product_ids`]).
     pub fn get_products(&self, from_index: u64, limit: u64) -> Vec<Product> {
-        let len_u64 = self.product_ids.len() as u64;
-        let mut out = Vec::new();
-        let mut i = from_index;
-        while i < len_u64 && (out.len() as u64) < limit {
-            if let Some(id) = self.product_ids.get(i as u32) {
-                if let Some(catalog_product) = self.products.get(id).cloned() {
-                    out.push(catalog_product);
-                }
-            }
-            i += 1;
-        }
-        out
+        let total_len = self.product_ids.len() as u64;
+        self.collect_paginated(from_index, limit, total_len, |index| {
+            self.product_ids
+                .get(index)
+                .and_then(|id| self.products.get(id).cloned())
+        })
     }
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers (also used from [`crate::prices`])
-// ---------------------------------------------------------------------------
+// Internal helpers (also used from [`crate::prices`]).
 
 impl Contract {
     /// Clears [`Product::default_price_id`] when it references **`price_id`** (e.g. price archived/deleted).

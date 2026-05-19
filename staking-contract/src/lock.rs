@@ -16,6 +16,19 @@ fn anchor_day_from_timestamp(ts: u64) -> u8 {
 
 #[near]
 impl Contract {
+    fn lock_entry_preamble(&self) -> (AccountId, NearToken) {
+        self.assert_not_paused();
+        let buyer = env::predecessor_account_id();
+        self.ensure_min_storage_for_new_lock(&buyer);
+
+        let locked = env::attached_deposit();
+        require!(
+            locked.as_yoctonear() >= self.config.min_lock_amount.as_yoctonear(),
+            "Attached NEAR is below the contract minimum lock amount (min_lock_amount)"
+        );
+        (buyer, locked)
+    }
+
     /// Lock NEAR for a one-off product purchase. Attach the NEAR to lock.
     ///
     /// Provide **exactly one** of **`price_id`** or **`product_id`**:
@@ -37,16 +50,7 @@ impl Contract {
         price_id: PriceId,
         lock_duration_ns: U64,
     ) -> PromiseOrValue<LockId> {
-        self.assert_not_paused();
-
-        let buyer = env::predecessor_account_id();
-        self.ensure_min_storage_for_new_lock(&buyer);
-
-        let locked = env::attached_deposit();
-        require!(
-            locked.as_yoctonear() >= self.config.min_lock_amount.as_yoctonear(),
-            "Attached NEAR is below the contract minimum lock amount (min_lock_amount)"
-        );
+        let (buyer, locked) = self.lock_entry_preamble();
 
         let dur = lock_duration_ns.0;
         require!(
@@ -75,8 +79,7 @@ impl Contract {
             product_id: product.product_id.clone(),
             price_id: price.price_id.clone(),
         };
-        let validator = self.require_validator(&validator_id);
-        self.assert_validator_idle_for_user_action(&validator);
+        let _validator = self.require_validator_idle(&validator_id);
         // WASM production: [`Contract::promise_validator_per_epoch_settlement_then`] then mint (`epoch.rs`).
         // Host targets (`tests/*.rs`, `cargo check` on the host triple): `near_sdk::testing_env!` does not run
         // returned promise chains—use synchronous commit (`finalize_lock` → `commit_catalog_lock`).
@@ -121,15 +124,7 @@ impl Contract {
     }
 
     fn lock_for_subscription_with_price_id(&mut self, price_id: PriceId) -> PromiseOrValue<LockId> {
-        self.assert_not_paused();
-        let buyer = env::predecessor_account_id();
-        self.ensure_min_storage_for_new_lock(&buyer);
-
-        let locked = env::attached_deposit();
-        require!(
-            locked.as_yoctonear() >= self.config.min_lock_amount.as_yoctonear(),
-            "Attached NEAR is below the contract minimum lock amount (min_lock_amount)"
-        );
+        let (buyer, locked) = self.lock_entry_preamble();
 
         let (price, product) = self.get_active_price_and_product(&price_id);
         self.require_recurring_monthly_price(&price);
@@ -246,8 +241,7 @@ impl Contract {
             period_end_ns: subscription.end_ns,
         };
 
-        let validator = self.require_validator(&validator_id);
-        self.assert_validator_idle_for_user_action(&validator);
+        let _validator = self.require_validator_idle(&validator_id);
         // Same host synchronous path as `lock_for_product_with_price_id` (see comment there).
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -534,9 +528,7 @@ impl Contract {
     }
 }
 
-// =============================================================================
-// Epoch pipeline: catalog mint tail (callback from `epoch::on_epoch_settlement_dispatch_continue`)
-// =============================================================================
+// Epoch pipeline: catalog mint tail callback.
 
 #[near]
 impl Contract {
@@ -561,10 +553,9 @@ impl Contract {
             validator_id.clone(),
             subscription_followup,
         );
-        let validator = self.require_validator(&validator_id);
-        require!(
-            validator.tx_status == TransactionStatus::Busy,
-            "Validator pool must be busy after per-epoch settlement"
+        let _validator = self.require_validator_busy(
+            &validator_id,
+            "Validator pool must be busy after per-epoch settlement",
         );
         PromiseOrValue::Value(lock_id)
     }
