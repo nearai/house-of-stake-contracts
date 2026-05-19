@@ -1,11 +1,7 @@
-use crate::epoch::ext_staking_pool;
-use crate::gas::staking_pool;
 use crate::internal::{NS_PER_DAY_TIMESTAMP, check_near_price_lock};
 use crate::*;
 use near_sdk::json_types::{U64, U128};
-use near_sdk::{
-    AccountId, NearToken, Promise, PromiseOrValue, assert_one_yocto, env, near, require,
-};
+use near_sdk::{AccountId, NearToken, PromiseOrValue, env, near, require};
 
 /// Stripe-style **billing anchor day** (1–31). Not the real UTC calendar day-of-month; it is a stable
 /// fingerprint from block time until civil-calendar billing is implemented (see `subscriptions` / `docs/ACTION_ITEMS.md`).
@@ -16,19 +12,6 @@ fn anchor_day_from_timestamp(ts: u64) -> u8 {
 
 #[near]
 impl Contract {
-    fn lock_entry_preamble(&self) -> (AccountId, NearToken) {
-        self.assert_not_paused();
-        let buyer = env::predecessor_account_id();
-        self.ensure_min_storage_for_new_lock(&buyer);
-
-        let locked = env::attached_deposit();
-        require!(
-            locked.as_yoctonear() >= self.config.min_lock_amount.as_yoctonear(),
-            "Attached NEAR is below the contract minimum lock amount (min_lock_amount)"
-        );
-        (buyer, locked)
-    }
-
     /// Lock NEAR for a one-off product purchase. Attach the NEAR to lock.
     ///
     /// Provide **exactly one** of **`price_id`** or **`product_id`**:
@@ -285,114 +268,17 @@ impl Contract {
 }
 
 impl Contract {
-    pub(crate) fn require_price(&self, price_id: &PriceId) -> Price {
-        self.prices
-            .get(price_id)
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("Price not found in the catalog"))
-    }
-
-    pub(crate) fn require_product(&self, product_id: &ProductId) -> Product {
-        self.products
-            .get(product_id)
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("Product not found in the catalog"))
-    }
-
-    pub(crate) fn require_price_and_product(&self, price_id: &PriceId) -> (Price, Product) {
-        let price = self.require_price(price_id);
-        let product = self.require_product(&price.product_id);
-        (price, product)
-    }
-
-    pub(crate) fn get_active_price_and_product(&self, price_id: &PriceId) -> (Price, Product) {
-        let price = self.require_price(price_id);
-        require!(
-            price.status == CatalogStatus::Active,
-            "This price is not active; pick an active price"
-        );
-        let product = self.require_product(&price.product_id);
-        require!(
-            product.status == CatalogStatus::Active,
-            "This product is not active; pick an active product"
-        );
-        (price, product)
-    }
-
-    pub(crate) fn require_recurring_monthly_price(&self, price: &Price) {
-        require!(
-            price.price_type == PriceType::Recurring,
-            "This price is not a recurring subscription price"
-        );
-        require!(
-            price.billing_period == Some(BillingPeriod::Monthly),
-            "Only monthly billing is supported"
-        );
-    }
-
-    pub(crate) fn require_active_recurring_monthly_price(&self, price_id: &PriceId) -> Price {
-        let (price, _) = self.get_active_price_and_product(price_id);
-        self.require_recurring_monthly_price(&price);
-        price
-    }
-
-    /// Preamble for pool-owner catalog RPCs: 1 yocto, not paused, validator allowlisted.
-    pub(crate) fn catalog_admin_entry_for_pool(
-        &self,
-        validator_id: &ValidatorId,
-    ) -> (ValidatorId, AccountId) {
-        assert_one_yocto();
+    pub(crate) fn lock_entry_preamble(&self) -> (AccountId, NearToken) {
         self.assert_not_paused();
-        self.assert_validator_allowlisted(validator_id);
-        (validator_id.clone(), env::predecessor_account_id())
-    }
+        let buyer = env::predecessor_account_id();
+        self.ensure_min_storage_for_new_lock(&buyer);
 
-    /// Pool `get_owner_id` promise chained to a catalog owner-check callback.
-    pub(crate) fn promise_pool_get_owner_id_then(
-        validator_id: ValidatorId,
-        tail: Promise,
-    ) -> Promise {
-        ext_staking_pool::ext(validator_id)
-            .with_static_gas(staking_pool::GET_OWNER_ID)
-            .get_owner_id()
-            .then(tail)
-    }
-
-    /// Resolve product → pool, run catalog admin preamble, then `get_owner_id` → `build_tail(caller, product_id)`.
-    pub(crate) fn promise_catalog_admin_on_product(
-        &self,
-        product_id: ProductId,
-        build_tail: impl FnOnce(AccountId, ProductId) -> Promise,
-    ) -> Promise {
-        let product = self.require_product(&product_id);
-        let (validator_id, expected_caller) =
-            self.catalog_admin_entry_for_pool(&product.validator_id);
-        Self::promise_pool_get_owner_id_then(validator_id, build_tail(expected_caller, product_id))
-    }
-
-    /// Resolve price → product → pool, run catalog admin preamble, then `get_owner_id` → `build_tail(caller, price_id)`.
-    pub(crate) fn promise_catalog_admin_on_price(
-        &self,
-        price_id: PriceId,
-        build_tail: impl FnOnce(AccountId, PriceId) -> Promise,
-    ) -> Promise {
-        let (_, product) = self.require_price_and_product(&price_id);
-        let (validator_id, expected_caller) =
-            self.catalog_admin_entry_for_pool(&product.validator_id);
-        Self::promise_pool_get_owner_id_then(validator_id, build_tail(expected_caller, price_id))
-    }
-
-    /// Catalog admin on a known allowlisted pool (e.g. `create_product` before the product exists in storage).
-    pub(crate) fn promise_catalog_admin_on_pool(
-        &self,
-        validator_id: &ValidatorId,
-        build_tail: impl FnOnce(AccountId, ValidatorId) -> Promise,
-    ) -> Promise {
-        let (validator_id, expected_caller) = self.catalog_admin_entry_for_pool(validator_id);
-        Self::promise_pool_get_owner_id_then(
-            validator_id.clone(),
-            build_tail(expected_caller, validator_id),
-        )
+        let locked = env::attached_deposit();
+        require!(
+            locked.as_yoctonear() >= self.config.min_lock_amount.as_yoctonear(),
+            "Attached NEAR is below the contract minimum lock amount (min_lock_amount)"
+        );
+        (buyer, locked)
     }
 
     /// Picks the catalog price id for a lock from caller input.
@@ -532,10 +418,10 @@ impl Contract {
 
 #[near]
 impl Contract {
-    #[private]
     /// **[Pipeline 5a]** Catalog mint after **4**. Pre-user settlement (**0–3**) already ran before
     /// mint; this lock's `pending_to_stake` is queued for a later `unlock` / `withdraw` / `epoch_settle`.
     /// Returns `lock_id` so user lock calls can decode the minted lock id on WASM.
+    #[private]
     pub fn resolve_lock(
         &mut self,
         buyer: AccountId,

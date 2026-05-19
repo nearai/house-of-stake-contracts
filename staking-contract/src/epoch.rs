@@ -167,8 +167,8 @@ impl Contract {
 
     // --- [Pipeline 1] ---
 
-    #[private]
     /// **[Pipeline 1]** After pool `get_account`: refresh balance, optional **2a–2c**, then **3**.
+    #[private]
     pub fn on_epoch_settlement_after_pool_account(
         &mut self,
         #[callback] pool_account: PoolAccountView,
@@ -255,8 +255,8 @@ impl Contract {
 
     // --- [Pipeline 2b] ---
 
-    #[private]
     /// **[Pipeline 2b]** After pool `withdraw`: credit [`Validator::pending_to_withdraw`] (stays **`Busy`**).
+    #[private]
     pub fn on_epoch_withdraw_transfer_done(
         &mut self,
         validator_id: ValidatorId,
@@ -289,8 +289,8 @@ impl Contract {
 
     // --- [Pipeline 2c] ---
 
-    #[private]
     /// **[Pipeline 2c]** After **2b**: unlock tail runs **3** with `None` when pending; settlement runs **3** → **4** with `Some(cont)`.
+    #[private]
     pub fn on_after_pool_withdraw_maybe_settle(
         &mut self,
         validator_id: ValidatorId,
@@ -428,8 +428,8 @@ impl Contract {
 
     // --- [Pipeline 3b] ---
 
-    #[private]
     /// **[Pipeline 3b]** `deposit_and_stake` callback (stays **`Busy`**).
+    #[private]
     pub fn on_deposit_and_stake(
         &mut self,
         validator_id: ValidatorId,
@@ -477,8 +477,8 @@ impl Contract {
 
     // --- [Pipeline 3c] ---
 
-    #[private]
     /// **[Pipeline 3c]** `unstake` callback (stays **`Busy`**).
+    #[private]
     pub fn on_unstake(
         &mut self,
         validator_id: ValidatorId,
@@ -517,8 +517,8 @@ impl Contract {
 
     // --- [Pipeline 3′] ---
 
-    #[private]
     /// **[Pipeline 3′]** After async **3**; forwards to **4** (pool outcome already recorded on validator state).
+    #[private]
     #[allow(unused_variables)]
     pub fn on_epoch_settlement_after_try_epoch_stake_or_unstake(
         &mut self,
@@ -533,8 +533,8 @@ impl Contract {
 
     // --- [Pipeline 4] ---
 
-    #[private]
     /// **[Pipeline 4]** Fan-out to **5a** / **5b** / **5c**, then chain **6**.
+    #[private]
     pub fn on_epoch_settlement_dispatch_continue(&mut self, cont: PerEpochContinue) -> Promise {
         enum ReleaseKind {
             Terminal,
@@ -631,14 +631,14 @@ impl Contract {
         self.validators.insert(validator_id.clone(), validator);
     }
 
-    #[private]
     /// **[Pipeline 6]** After **4** tail completes: clear pipeline **`Busy`**.
+    #[private]
     pub fn on_epoch_pipeline_terminal_release(&mut self, validator_id: ValidatorId) {
         self.release_validator_pool_pipeline(&validator_id);
     }
 
-    #[private]
     /// **[Pipeline 6]** Release pipeline and preserve lock id from mint/upgrade tails.
+    #[private]
     pub fn on_epoch_pipeline_release_with_lock_id(
         &mut self,
         #[callback_result] lock_id_result: Result<LockId, PromiseError>,

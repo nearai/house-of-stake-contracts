@@ -251,4 +251,62 @@ impl Contract {
     pub fn get_price(&self, price_id: PriceId) -> Option<Price> {
         self.prices.get(&price_id).cloned()
     }
+
+    /// Resolve price → product → pool, run catalog admin preamble, then `get_owner_id` → `build_tail(caller, price_id)`.
+    pub(crate) fn promise_catalog_admin_on_price(
+        &self,
+        price_id: PriceId,
+        build_tail: impl FnOnce(AccountId, PriceId) -> Promise,
+    ) -> Promise {
+        let (_, product) = self.require_price_and_product(&price_id);
+        let (validator_id, expected_caller) =
+            self.catalog_admin_entry_for_pool(&product.validator_id);
+        Self::promise_pool_get_owner_id_then(validator_id, build_tail(expected_caller, price_id))
+    }
+}
+
+impl Contract {
+    pub(crate) fn require_price(&self, price_id: &PriceId) -> Price {
+        self.prices
+            .get(price_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("Price not found in the catalog"))
+    }
+
+    pub(crate) fn require_price_and_product(&self, price_id: &PriceId) -> (Price, Product) {
+        let price = self.require_price(price_id);
+        let product = self.require_product(&price.product_id);
+        (price, product)
+    }
+
+    pub(crate) fn get_active_price_and_product(&self, price_id: &PriceId) -> (Price, Product) {
+        let price = self.require_price(price_id);
+        require!(
+            price.status == CatalogStatus::Active,
+            "This price is not active; pick an active price"
+        );
+        let product = self.require_product(&price.product_id);
+        require!(
+            product.status == CatalogStatus::Active,
+            "This product is not active; pick an active product"
+        );
+        (price, product)
+    }
+
+    pub(crate) fn require_recurring_monthly_price(&self, price: &Price) {
+        require!(
+            price.price_type == PriceType::Recurring,
+            "This price is not a recurring subscription price"
+        );
+        require!(
+            price.billing_period == Some(BillingPeriod::Monthly),
+            "Only monthly billing is supported"
+        );
+    }
+
+    pub(crate) fn require_active_recurring_monthly_price(&self, price_id: &PriceId) -> Price {
+        let (price, _) = self.get_active_price_and_product(price_id);
+        self.require_recurring_monthly_price(&price);
+        price
+    }
 }

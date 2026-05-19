@@ -1,7 +1,7 @@
 use crate::internal::{effective_stake_for_share_exit, mint_shares, near_from_shares};
 use crate::*;
 use near_sdk::json_types::{U64, U128};
-use near_sdk::{AccountId, NearToken, env, is_promise_success, near, require};
+use near_sdk::{AccountId, NearToken, Promise, env, is_promise_success, near, require};
 
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
@@ -124,6 +124,28 @@ impl Contract {
 }
 
 impl Contract {
+    /// Preamble for pool-owner catalog RPCs: 1 yocto, not paused, validator allowlisted.
+    pub(crate) fn catalog_admin_entry_for_pool(
+        &self,
+        validator_id: &ValidatorId,
+    ) -> (ValidatorId, AccountId) {
+        near_sdk::assert_one_yocto();
+        self.assert_not_paused();
+        self.assert_validator_allowlisted(validator_id);
+        (validator_id.clone(), env::predecessor_account_id())
+    }
+
+    /// Pool `get_owner_id` promise chained to a catalog owner-check callback.
+    pub(crate) fn promise_pool_get_owner_id_then(
+        validator_id: ValidatorId,
+        tail: Promise,
+    ) -> Promise {
+        crate::epoch::ext_staking_pool::ext(validator_id)
+            .with_static_gas(crate::gas::staking_pool::GET_OWNER_ID)
+            .get_owner_id()
+            .then(tail)
+    }
+
     /// Pool must be on the allowlist. Catalog methods confirm the caller against the pool's
     /// `get_owner_id()` via a cross-contract call (see `products.rs` and `prices.rs`).
     pub(crate) fn assert_validator_allowlisted(&self, validator_id: &ValidatorId) {
@@ -184,6 +206,24 @@ impl Contract {
                 >= validator
                     .last_unstake_epoch
                     .saturating_add(self.config.epoch_unstake_settle_epochs)
+    }
+
+    /// NEAR `epoch_height` from which a new [`PendingUnstakeTranche`] may participate in
+    /// [`crate::Contract::withdraw`] (when `env::epoch_height() >=` this value).
+    ///
+    /// 1. `unstake_start_epoch = max(current_epoch_height, last_unstake_epoch + epoch_unstake_settle_epochs)`
+    /// 2. `available_epoch_height = unstake_start_epoch + epoch_unstake_settle_epochs`
+    ///
+    /// Uses [`crate::config::Config::epoch_unstake_settle_epochs`].
+    pub(crate) fn pending_unstake_tranche_available_epoch_height(
+        &self,
+        validator: &Validator,
+    ) -> u64 {
+        let current_epoch_height = env::epoch_height();
+        let settle = self.config.epoch_unstake_settle_epochs;
+        let unstake_start_epoch =
+            current_epoch_height.max(validator.last_unstake_epoch.saturating_add(settle));
+        unstake_start_epoch.saturating_add(settle)
     }
 
     /// Mints pool share units for `deposit`, bumps [`Validator::pending_to_stake`], and credits the buyer's

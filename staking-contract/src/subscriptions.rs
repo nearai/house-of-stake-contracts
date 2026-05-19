@@ -194,8 +194,8 @@ impl Contract {
 
 #[near]
 impl Contract {
-    #[private]
     /// **[Pipeline 5d]** Subscription upgrade after pre-user settlement (**4**).
+    #[private]
     pub fn on_subscription_upgrade_after_settle(
         &mut self,
         buyer: AccountId,
