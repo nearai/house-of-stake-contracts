@@ -291,6 +291,10 @@ impl Contract {
         self.products.insert(product_id, product);
     }
 
+    // -------------------------------------------------------------------------
+    // Public product view functions
+    // -------------------------------------------------------------------------
+
     pub fn get_product(&self, product_id: ProductId) -> Option<Product> {
         self.products.get(&product_id).cloned()
     }

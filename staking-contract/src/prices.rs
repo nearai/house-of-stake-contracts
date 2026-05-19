@@ -255,6 +255,10 @@ impl Contract {
         self.prices.insert(price_id, price);
     }
 
+    // -------------------------------------------------------------------------
+    // Public price view functions
+    // -------------------------------------------------------------------------
+
     pub fn get_price(&self, price_id: PriceId) -> Option<Price> {
         self.prices.get(&price_id).cloned()
     }
