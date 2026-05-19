@@ -12,8 +12,8 @@ use std::path::Path;
 pub const LOCK_FACTOR_DENOM: &str = "1000000000000000000000000";
 
 /// Prepaid gas for `lock_for_product`, `unlock`, `withdraw`, and `epoch_settle`.
-/// Sandbox runs of the lazy epoch pipeline burn ~3_000 TGas; keep headroom for CI.
-pub const SETTLEMENT_PIPELINE_GAS_TGAS: u64 = 4_000;
+/// Sandbox runs of the lazy epoch pipeline burn ~3_000 TGas — the NEAR per-tx prepaid cap.
+pub const SETTLEMENT_PIPELINE_GAS_TGAS: u64 = 3_000;
 
 /// Resolve WASM bytes from typical build outputs (`make …`, `cargo near`, or `cargo build --target wasm32`).
 pub fn wasm_from_candidates(rel_paths: &[&str]) -> Result<Vec<u8>, std::io::Error> {

@@ -1,6 +1,5 @@
-//! User exit payouts: NEAR sitting in the pool-scoped **withdraw bucket** ([`Validator::pending_to_withdraw`])
-//! is matched against this account’s `user_pending_unstake` tranches
-//! (epoch-gated), then sent to the user.
+//! User exit payouts: drop every epoch-eligible [`PendingUnstakeTranche`], pay their combined amount
+//! from [`Validator::pending_to_withdraw`], then transfer to the user.
 //!
 //! **Flow (WASM):** `withdraw` → shared per-epoch settlement → [`Contract::payout_user_withdraw`] (claim bucket + transfer).
 //!
@@ -93,80 +92,36 @@ impl Contract {
             .unwrap_or(0)
     }
 
-    /// Yocto the user may claim at `at_epoch`: tranches with `available_epoch_height <= at_epoch`.
-    fn sum_claimable_user_tranches_yocto(
-        &self,
-        account_validator_key: &(AccountId, ValidatorId),
-        at_epoch: u64,
-    ) -> u128 {
-        self.user_pending_unstake
-            .get(account_validator_key)
-            .map(|tranches| {
-                tranches
-                    .iter()
-                    .filter(|tranche| at_epoch >= tranche.available_epoch_height)
-                    .map(|tranche| tranche.amount.as_yoctonear())
-                    .fold(0u128, |sum, yocto| sum.saturating_add(yocto))
-            })
-            .unwrap_or(0)
-    }
-
-    /// Applies `deduct_yocto` against **claimable-at-`at_epoch`** tranches in vector order (FIFO among
-    /// eligible rows). Panics if eligible tranches cannot cover `deduct_yocto` (caller must size the claim).
-    ///
-    /// Returns `true` when the `(account, validator)` tranche list is now empty (remove from worklists).
-    fn deduct_claim_from_user_tranches_fifo(
+    /// Removes every tranche with `available_epoch_height <= at_epoch` and returns their total yocto.
+    /// Non-claimable tranches are kept. Returns `true` when no tranches remain.
+    fn remove_claimable_tranches(
         &mut self,
         account_validator_key: &(AccountId, ValidatorId),
         at_epoch: u64,
-        mut deduct_yocto: u128,
-    ) -> bool {
-        if deduct_yocto == 0 {
-            return self
-                .user_pending_unstake
-                .get(account_validator_key)
-                .map_or(true, |t| t.is_empty());
-        }
-        let mut pending_unstake_tranches = self
+    ) -> (u128, bool) {
+        let mut tranches = self
             .user_pending_unstake
             .get(account_validator_key)
             .cloned()
             .unwrap_or_default();
-        for tranche in pending_unstake_tranches.iter_mut() {
-            if at_epoch < tranche.available_epoch_height {
-                continue;
-            }
-            if deduct_yocto == 0 {
-                break;
-            }
-            let tranche_amount_yocto = tranche.amount.as_yoctonear();
-            if tranche_amount_yocto == 0 {
-                continue;
-            }
-            let take_from_tranche_yocto = tranche_amount_yocto.min(deduct_yocto);
-            tranche.amount =
-                NearToken::from_yoctonear(tranche_amount_yocto - take_from_tranche_yocto);
-            deduct_yocto -= take_from_tranche_yocto;
-        }
-        require!(
-            deduct_yocto == 0,
-            "Claim does not match your pending unstake for this withdraw (contract accounting error)"
-        );
-        pending_unstake_tranches.retain(|tranche| tranche.amount.as_yoctonear() > 0);
-        if pending_unstake_tranches.is_empty() {
+        let claimable_yocto = tranches
+            .iter()
+            .filter(|tranche| at_epoch >= tranche.available_epoch_height)
+            .map(|tranche| tranche.amount.as_yoctonear())
+            .fold(0u128, |sum, yocto| sum.saturating_add(yocto));
+        tranches.retain(|tranche| at_epoch < tranche.available_epoch_height);
+        if tranches.is_empty() {
             self.user_pending_unstake.remove(account_validator_key);
-            true
+            (claimable_yocto, true)
         } else {
             self.user_pending_unstake
-                .insert(account_validator_key.clone(), pending_unstake_tranches);
-            false
+                .insert(account_validator_key.clone(), tranches);
+            (claimable_yocto, false)
         }
     }
 
-    /// Moves up to `min(claimable user tranches at current epoch, pool withdraw bucket)` from
-    /// [`Validator::pending_to_withdraw`] into this user’s hands **as a [`NearToken`] return value**:
-    /// updates tranches, `pending_user_unstake_total`, and emits `log_withdraw`. Does **not** attach
-    /// `Promise::transfer` — use [`Contract::payout_user_withdraw`] for the full user-facing payout.
+    /// Drops all epoch-eligible tranches, debits the withdraw bucket by their sum, and returns that NEAR.
+    /// Use [`Contract::payout_user_withdraw`] to attach the transfer promise.
     pub(crate) fn claim_from_withdraw_bucket(
         &mut self,
         account_id: AccountId,
@@ -185,16 +140,14 @@ impl Contract {
         );
 
         let eh = env::epoch_height();
-        let eligible_yocto = self.sum_claimable_user_tranches_yocto(&account_validator_key, eh);
-        require!(
-            eligible_yocto > 0,
-            "Nothing to claim yet: wait until `epoch_height >=` your tranche's available epoch height"
-        );
-
-        let credit_yocto = eligible_yocto.min(pending_withdraw_bucket_yocto);
+        let (credit_yocto, user_done) = self.remove_claimable_tranches(&account_validator_key, eh);
         require!(
             credit_yocto > 0,
-            "Nothing to claim for this call (zero credit after bucket cap)"
+            "Nothing to claim yet: wait until `epoch_height >=` your tranche's available epoch height"
+        );
+        require!(
+            pending_withdraw_bucket_yocto >= credit_yocto,
+            "Withdraw bucket cannot cover all claimable tranches yet; call withdraw again after more pool funds arrive"
         );
 
         validator.pending_to_withdraw = validator
@@ -208,21 +161,7 @@ impl Contract {
                 "pending_user_unstake_total accounting mismatch; contact the contract maintainers",
             );
 
-        let user_done =
-            self.deduct_claim_from_user_tranches_fifo(&account_validator_key, eh, credit_yocto);
         if user_done {
-            validator
-                .accounts_with_pending_unstake
-                .retain(|a| *a != account_id);
-        }
-
-        // Defensive second check: FIFO path should already clear the worklist when tranches vanish,
-        // but retain here if storage was cleared without `user_done` (should not happen in normal flows).
-        if self
-            .user_pending_unstake
-            .get(&account_validator_key)
-            .is_none()
-        {
             validator
                 .accounts_with_pending_unstake
                 .retain(|a| *a != account_id);

@@ -25,3 +25,78 @@ fn withdraw_fails_when_pool_withdraw_bucket_empty() {
     testing_env!(ctx(acct(BUYER), one_yocto()));
     let _ = c.withdraw(acct(POOL));
 }
+
+#[test]
+#[should_panic(expected = "Withdraw bucket cannot cover all claimable tranches yet")]
+fn withdraw_fails_when_bucket_smaller_than_claimable_sum() {
+    let mut c = deploy();
+    common::add_validator_allowlisted(&mut c);
+    register_buyer(&mut c);
+
+    let pool = acct(POOL);
+    let mut validator = c.require_validator(&pool).clone();
+    validator.pending_to_withdraw = NearToken::from_near(12);
+    validator.pending_user_unstake_total = NearToken::from_near(15);
+    c.validators.insert(pool.clone(), validator);
+
+    c.user_pending_unstake.insert(
+        (acct(BUYER), pool.clone()),
+        vec![
+            PendingUnstakeTranche {
+                amount: NearToken::from_near(10),
+                available_epoch_height: 0,
+            },
+            PendingUnstakeTranche {
+                amount: NearToken::from_near(5),
+                available_epoch_height: 0,
+            },
+        ],
+    );
+
+    testing_env!(ctx(acct(BUYER), one_yocto()));
+    let _ = c.claim_from_withdraw_bucket(acct(BUYER), pool);
+}
+
+#[test]
+fn withdraw_removes_all_claimable_tranches_and_pays_sum() {
+    let mut c = deploy();
+    common::add_validator_allowlisted(&mut c);
+    register_buyer(&mut c);
+
+    let pool = acct(POOL);
+    let mut validator = c.require_validator(&pool).clone();
+    validator.pending_to_withdraw = NearToken::from_near(20);
+    validator.pending_user_unstake_total = NearToken::from_near(15);
+    c.validators.insert(pool.clone(), validator);
+
+    let ukey = (acct(BUYER), pool.clone());
+    c.user_pending_unstake.insert(
+        ukey.clone(),
+        vec![
+            PendingUnstakeTranche {
+                amount: NearToken::from_near(10),
+                available_epoch_height: 0,
+            },
+            PendingUnstakeTranche {
+                amount: NearToken::from_near(5),
+                available_epoch_height: 0,
+            },
+            PendingUnstakeTranche {
+                amount: NearToken::from_near(3),
+                available_epoch_height: 999,
+            },
+        ],
+    );
+
+    testing_env!(ctx(acct(BUYER), one_yocto()));
+    let credit = c.claim_from_withdraw_bucket(acct(BUYER), pool);
+    assert_eq!(credit, NearToken::from_near(15));
+
+    let remaining = c
+        .user_pending_unstake
+        .get(&ukey)
+        .expect("future tranche remains");
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].amount, NearToken::from_near(3));
+    assert_eq!(remaining[0].available_epoch_height, 999);
+}
