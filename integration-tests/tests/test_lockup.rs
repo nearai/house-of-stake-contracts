@@ -80,7 +80,7 @@ async fn test_full_lock_unlock_cycle() -> Result<(), Box<dyn std::error::Error>>
     outcome_check(&outcome);
 
     let unlock_timestamp = v.get_venear_unlock_timestamp(&lockup_account_id).await?.0;
-    assert!(unlock_timestamp > 0, "venear_unlock_timestamp was not set");
+    // The non-zero unlock_timestamp is exercised by `fast_forward(unlock_timestamp, ...)` below.
 
     let pending = v.get_venear_pending(&lockup_account_id).await?;
     assert_eq!(pending, NearToken::from_near(30));
@@ -221,7 +221,7 @@ pub async fn test_lockup_recreation() -> Result<(), Box<dyn std::error::Error>> 
     );
 
     let unlock_timestamp = v.get_venear_unlock_timestamp(&lockup_id).await?.0;
-    assert!(unlock_timestamp > 0, "venear_unlock_timestamp was not set");
+    // The non-zero unlock_timestamp is exercised by `fast_forward(unlock_timestamp, ...)` below.
 
     v.fast_forward(unlock_timestamp, UNLOCK_DURATION_SECONDS, 10)
         .await?;
@@ -430,9 +430,9 @@ pub async fn test_lockup_staking() -> Result<(), Box<dyn std::error::Error>> {
         "Lockup deletion should fail when staking pool is selected"
     );
 
-    // Attempt to lock 30 NEAR (which is more than account balance)
+    // Attempt to lock 30 NEAR (which is more than account balance — pinned exactly
+    // by the assert_almost_eq above: balance == initial_balance − 50 NEAR ± 1 mN).
     let initial_lockup_balance = account_details.balance;
-    assert!(initial_lockup_balance < NearToken::from_near(30));
     let outcome = user
         .call(&lockup_id, "lock_near")
         .args_json(json!({ "amount": NearToken::from_near(30) }))

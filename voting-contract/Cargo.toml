@@ -44,3 +44,4 @@ serde_json.workspace = true
 
 [dev-dependencies]
 chrono = "0.4"
+near-sdk = { workspace = true, features = ["unit-testing"] }

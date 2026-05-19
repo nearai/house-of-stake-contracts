@@ -723,8 +723,6 @@ impl VenearTestWorkspace {
         proposal_id: u32,
         target: common::voting::ProposalStatus,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        use common::voting::ProposalStatus;
-
         let proposal = self.get_proposal(proposal_id).await?;
         let current_status: ProposalStatus =
             serde_json::from_value(proposal["status"].clone())?;

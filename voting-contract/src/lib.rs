@@ -7,6 +7,8 @@ mod pause;
 pub mod proposal;
 pub mod queue;
 mod reviewer;
+#[cfg(test)]
+mod test_utils;
 mod upgrade;
 mod votes;
 
@@ -55,19 +57,19 @@ enum StorageKeys {
 #[derive(PanicOnDefault)]
 #[near(contract_state)]
 pub struct Contract {
-    config: Config,
-    proposals: Vector<VProposal>,
-    proposal_metadata: Vector<VProposalMetadata>,
+    pub(crate) config: Config,
+    pub(crate) proposals: Vector<VProposal>,
+    pub(crate) proposal_metadata: Vector<VProposalMetadata>,
     /// A map from the account ID and the proposal ID to the vote option index.
-    votes: LookupMap<(AccountId, ProposalId), u8>,
+    pub(crate) votes: LookupMap<(AccountId, ProposalId), u8>,
     /// A flag indicating whether the contract is paused.
     /// The paused contract will not accept new proposals, new votes or updated votes, proposals
     /// cannot be approved or rejected.
-    paused: bool,
+    pub(crate) paused: bool,
     /// Approved proposals that are waiting for a slot.
-    pending_queue: Vector<ProposalId>,
+    pub(crate) pending_queue: Vector<ProposalId>,
     /// Set of proposals currently occupying an active slot.
-    active_proposals: IterableSet<ProposalId>,
+    pub(crate) active_proposals: IterableSet<ProposalId>,
 }
 
 #[near]

@@ -1415,7 +1415,19 @@ async fn test_voting_fst_proposal_expiration() -> Result<(), Box<dyn std::error:
 
     let fst = v.get_proposal(fst_id).await?;
     assert_eq!(fst["bond_amount"].as_str().unwrap(), "0");
-    assert!(balance_after > balance_before);
+    let tokens_burnt = outcome
+        .outcomes()
+        .iter()
+        .fold(NearToken::from_yoctonear(0), |acc, o| {
+            acc.saturating_add(o.tokens_burnt)
+        });
+    assert_eq!(
+        balance_after,
+        balance_before
+            .saturating_add(DEFAULT_BOND_AMOUNT)
+            .saturating_sub(tokens_burnt),
+        "balance grows by exactly bond − total gas fees across all receipts"
+    );
 
     // A second claim must fail — the bond has already been refunded.
     let outcome = claim_bond(&v, &user_a, fst_id).await?;
@@ -2001,7 +2013,19 @@ async fn test_bond_claim_after_rejection() -> Result<(), Box<dyn std::error::Err
         outcome.failures()
     );
     let balance_after = user.view_account().await?.balance;
-    assert!(balance_after > balance_before);
+    let tokens_burnt = outcome
+        .outcomes()
+        .iter()
+        .fold(NearToken::from_yoctonear(0), |acc, o| {
+            acc.saturating_add(o.tokens_burnt)
+        });
+    assert_eq!(
+        balance_after,
+        balance_before
+            .saturating_add(DEFAULT_BOND_AMOUNT)
+            .saturating_sub(tokens_burnt),
+        "balance grows by exactly bond − total gas fees across all receipts"
+    );
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(proposal["bond_amount"].as_str().unwrap(), "0");
