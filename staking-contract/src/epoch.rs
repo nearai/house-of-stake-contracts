@@ -11,7 +11,8 @@ use crate::*;
 use near_sdk::ext_contract;
 use near_sdk::json_types::{U64, U128};
 use near_sdk::{
-    AccountId, NearToken, Promise, PromiseOrValue, env, is_promise_success, near, require,
+    AccountId, NearToken, Promise, PromiseError, PromiseOrValue, env, is_promise_success, near,
+    require,
 };
 
 // =============================================================================
@@ -73,7 +74,7 @@ pub trait ExtSelfEpoch {
         order: OrderRef,
         validator_id: ValidatorId,
         subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
-    ) -> PromiseOrValue<()>;
+    ) -> PromiseOrValue<LockId>;
     /// **[Pipeline 5d]** Subscription upgrade after pre-user settlement (`subscriptions.rs`).
     fn on_subscription_upgrade_after_settle(
         &mut self,
@@ -93,6 +94,12 @@ pub trait ExtSelfEpoch {
     ) -> Promise;
     /// **[Pipeline 6]** After **4** tail promise completes: sets pipeline **`Idle`**.
     fn on_epoch_pipeline_terminal_release(&mut self, validator_id: ValidatorId);
+    /// **[Pipeline 6]** Same as `on_epoch_pipeline_terminal_release`, but preserves lock id return.
+    fn on_epoch_pipeline_release_with_lock_id(
+        &mut self,
+        #[callback_result] lock_id_result: Result<LockId, PromiseError>,
+        validator_id: ValidatorId,
+    ) -> LockId;
 }
 
 #[ext_contract(ext_staking_pool)]
@@ -536,8 +543,13 @@ impl Contract {
     #[private]
     /// **[Pipeline 4]** Fan-out to **5a** / **5b** / **5c**, then chain **6**.
     pub fn on_epoch_settlement_dispatch_continue(&mut self, cont: PerEpochContinue) -> Promise {
-        let validator_id = cont.validator_id().clone();
-        let tail = match cont {
+        enum ReleaseKind {
+            Terminal,
+            WithLockId,
+        }
+
+        let pipeline_validator_id = cont.validator_id().clone();
+        let (tail, release_kind) = match cont {
             // Catalog purchase: mint shares / usage after validator state is fresh for this epoch.
             PerEpochContinue::CatalogLockMint {
                 validator_id,
@@ -546,52 +558,75 @@ impl Contract {
                 duration_ns,
                 order,
                 subscription_followup,
-            } => ext_self_epoch::ext(env::current_account_id())
-                .with_static_gas(callbacks::ON_LOCK_FINALLY_MINT)
-                .resolve_lock(
-                    buyer,
-                    locked,
-                    duration_ns,
-                    order,
-                    validator_id,
-                    subscription_followup,
-                ),
+            } => (
+                ext_self_epoch::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_LOCK_FINALLY_MINT)
+                    .resolve_lock(
+                        buyer,
+                        locked,
+                        duration_ns,
+                        order,
+                        validator_id,
+                        subscription_followup,
+                    ),
+                ReleaseKind::WithLockId,
+            ),
             PerEpochContinue::SubscriptionUpgrade {
                 validator_id,
                 buyer,
                 deposit,
                 new_price_id,
                 subscription_id,
-            } => ext_self_epoch::ext(env::current_account_id())
-                .with_static_gas(callbacks::ON_SUBSCRIPTION_UPGRADE_AFTER_SETTLE)
-                .on_subscription_upgrade_after_settle(
-                    buyer,
-                    deposit,
-                    new_price_id,
-                    subscription_id,
-                    validator_id,
-                ),
+            } => (
+                ext_self_epoch::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_SUBSCRIPTION_UPGRADE_AFTER_SETTLE)
+                    .on_subscription_upgrade_after_settle(
+                        buyer,
+                        deposit,
+                        new_price_id,
+                        subscription_id,
+                        validator_id,
+                    ),
+                ReleaseKind::WithLockId,
+            ),
             // Share exit: burn shares and queue `pending_to_unstake` (pool `unstake` on a later settlement).
             PerEpochContinue::UnlockQueueUnstake {
                 lock_id,
                 account_id,
                 validator_id,
                 shares_remove,
-            } => ext_self_epoch::ext(env::current_account_id())
-                .with_static_gas(callbacks::ON_UNLOCK_TAIL_AFTER_PRE_USER)
-                .resolve_unlock(lock_id, account_id, validator_id, shares_remove),
+            } => (
+                ext_self_epoch::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_UNLOCK_TAIL_AFTER_PRE_USER)
+                    .resolve_unlock(lock_id, account_id, validator_id, shares_remove),
+                ReleaseKind::Terminal,
+            ),
             // User claim: move unlocked NEAR from `pending_to_withdraw` (see `withdraw.rs`).
             PerEpochContinue::WithdrawUserTransfer {
                 account_id,
                 validator_id,
-            } => self.payout_user_withdraw(account_id, validator_id),
-            PerEpochContinue::SettleOnly { .. } => Promise::new(env::current_account_id()),
+            } => (
+                self.payout_user_withdraw(account_id, validator_id),
+                ReleaseKind::Terminal,
+            ),
+            PerEpochContinue::SettleOnly { .. } => (
+                Promise::new(env::current_account_id()),
+                ReleaseKind::Terminal,
+            ),
         };
-        tail.then(
-            ext_self_epoch::ext(env::current_account_id())
-                .with_static_gas(callbacks::ON_EPOCH_PIPELINE_TERMINAL_RELEASE)
-                .on_epoch_pipeline_terminal_release(validator_id),
-        )
+
+        match release_kind {
+            ReleaseKind::Terminal => tail.then(
+                ext_self_epoch::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_EPOCH_PIPELINE_TERMINAL_RELEASE)
+                    .on_epoch_pipeline_terminal_release(pipeline_validator_id),
+            ),
+            ReleaseKind::WithLockId => tail.then(
+                ext_self_epoch::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_EPOCH_PIPELINE_RELEASE_WITH_LOCK_ID)
+                    .on_epoch_pipeline_release_with_lock_id(pipeline_validator_id),
+            ),
+        }
     }
 
     // --- [Pipeline 6] ---
@@ -607,5 +642,19 @@ impl Contract {
     /// **[Pipeline 6]** After **4** tail completes: clear pipeline **`Busy`**.
     pub fn on_epoch_pipeline_terminal_release(&mut self, validator_id: ValidatorId) {
         self.release_validator_pool_pipeline(&validator_id);
+    }
+
+    #[private]
+    /// **[Pipeline 6]** Release pipeline and preserve lock id from mint/upgrade tails.
+    pub fn on_epoch_pipeline_release_with_lock_id(
+        &mut self,
+        #[callback_result] lock_id_result: Result<LockId, PromiseError>,
+        validator_id: ValidatorId,
+    ) -> LockId {
+        self.release_validator_pool_pipeline(&validator_id);
+        match lock_id_result {
+            Ok(lock_id) => lock_id,
+            Err(_) => env::panic_str("Lock pipeline callback failed"),
+        }
     }
 }

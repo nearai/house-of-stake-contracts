@@ -543,6 +543,7 @@ impl Contract {
     #[private]
     /// **[Pipeline 5a]** Catalog mint after **4**. Pre-user settlement (**0–3**) already ran before
     /// mint; this lock's `pending_to_stake` is queued for a later `unlock` / `withdraw` / `epoch_settle`.
+    /// Returns `lock_id` so user lock calls can decode the minted lock id on WASM.
     pub fn resolve_lock(
         &mut self,
         buyer: AccountId,
@@ -551,8 +552,8 @@ impl Contract {
         order: OrderRef,
         validator_id: ValidatorId,
         subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
-    ) -> PromiseOrValue<()> {
-        let _lock_id = self.commit_catalog_lock(
+    ) -> PromiseOrValue<LockId> {
+        let lock_id = self.commit_catalog_lock(
             buyer,
             locked,
             duration_ns,
@@ -565,6 +566,6 @@ impl Contract {
             validator.tx_status == TransactionStatus::Busy,
             "Validator pool must be busy after per-epoch settlement"
         );
-        PromiseOrValue::Value(())
+        PromiseOrValue::Value(lock_id)
     }
 }
