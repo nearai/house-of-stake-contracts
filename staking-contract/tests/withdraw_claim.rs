@@ -34,7 +34,10 @@ fn withdraw_fails_when_bucket_smaller_than_claimable_sum() {
     register_buyer(&mut c);
 
     let pool = acct(POOL);
-    let mut validator = c.require_validator(&pool).clone();
+    let mut validator = c
+        .get_validator(pool.clone())
+        .expect("validator row")
+        .clone();
     validator.pending_to_withdraw = NearToken::from_near(12);
     validator.pending_user_unstake_total = NearToken::from_near(15);
     c.validators.insert(pool.clone(), validator);
@@ -54,7 +57,7 @@ fn withdraw_fails_when_bucket_smaller_than_claimable_sum() {
     );
 
     testing_env!(ctx(acct(BUYER), one_yocto()));
-    let _ = c.claim_from_withdraw_bucket(acct(BUYER), pool);
+    let _ = c.withdraw(pool);
 }
 
 #[test]
@@ -64,7 +67,10 @@ fn withdraw_removes_all_claimable_tranches_and_pays_sum() {
     register_buyer(&mut c);
 
     let pool = acct(POOL);
-    let mut validator = c.require_validator(&pool).clone();
+    let mut validator = c
+        .get_validator(pool.clone())
+        .expect("validator row")
+        .clone();
     validator.pending_to_withdraw = NearToken::from_near(20);
     validator.pending_user_unstake_total = NearToken::from_near(15);
     c.validators.insert(pool.clone(), validator);
@@ -89,8 +95,14 @@ fn withdraw_removes_all_claimable_tranches_and_pays_sum() {
     );
 
     testing_env!(ctx(acct(BUYER), one_yocto()));
-    let credit = c.claim_from_withdraw_bucket(acct(BUYER), pool);
-    assert_eq!(credit, NearToken::from_near(15));
+    let _ = c.withdraw(pool.clone());
+
+    let validator = c.get_validator(pool).expect("validator row");
+    assert_eq!(validator.pending_to_withdraw, NearToken::from_near(5));
+    assert_eq!(
+        validator.pending_user_unstake_total,
+        NearToken::from_near(0)
+    );
 
     let remaining = c
         .user_pending_unstake
