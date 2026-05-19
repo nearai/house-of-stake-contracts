@@ -14,14 +14,12 @@ impl Contract {
         near_sdk::assert_one_yocto();
         self.assert_not_paused();
 
-        let lock = self
-            .locks
-            .get(&lock_id)
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("Lock not found; check the lock id"));
-        require!(
-            env::predecessor_account_id() == lock.account_id,
-            "Only the lock owner can unlock"
+        let buyer = env::predecessor_account_id();
+        let lock = self.require_lock_owned_by(
+            &lock_id,
+            &buyer,
+            "Lock not found; check the lock id",
+            "Only the lock owner can unlock",
         );
         require!(lock.status == LockStatus::Active, "Lock is not active");
         require!(
@@ -66,11 +64,7 @@ impl Contract {
             "Validator pool must be busy after per-epoch settlement"
         );
 
-        let mut lock = self
-            .locks
-            .get(&lock_id)
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("Lock not found"));
+        let mut lock = self.require_lock(&lock_id, "Lock not found");
         require!(
             lock.account_id == account_id,
             "Unlock no longer matches the lock owner; retry"
@@ -95,6 +89,43 @@ impl Contract {
 }
 
 impl Contract {
+    pub(crate) fn require_lock(&self, lock_id: &LockId, not_found_msg: &str) -> Lock {
+        self.locks
+            .get(lock_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str(not_found_msg))
+    }
+
+    pub(crate) fn require_lock_owned_by(
+        &self,
+        lock_id: &LockId,
+        owner: &AccountId,
+        not_found_msg: &str,
+        owner_mismatch_msg: &str,
+    ) -> Lock {
+        let lock = self.require_lock(lock_id, not_found_msg);
+        require!(lock.account_id == *owner, owner_mismatch_msg);
+        lock
+    }
+
+    pub(crate) fn require_subscription_lock_owned_by(
+        &self,
+        sub: &Subscription,
+        buyer: &AccountId,
+    ) -> Lock {
+        let lock = self
+            .locks
+            .get(&sub.last_lock_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("No lock is linked to this subscription"));
+        require!(
+            lock.account_id == *buyer,
+            "Only the lock owner can change this subscription lock"
+        );
+        require!(lock.status == LockStatus::Active, "Lock is not active");
+        lock
+    }
+
     /// NEAR `epoch_height` from which a new [`PendingUnstakeTranche`] may participate in
     /// [`crate::Contract::withdraw`] (when `env::epoch_height() >=` this value).
     ///

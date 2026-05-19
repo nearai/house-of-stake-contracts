@@ -146,3 +146,14 @@ fn downgrade_applies_at_next_renewal() {
         "Phase B tier-gap should queue NEAR to pending unstake"
     );
 }
+
+#[test]
+#[should_panic(expected = "No subscription for this product; subscribe first")]
+fn cancel_subscription_fails_without_subscription() {
+    let mut c = deploy();
+    let (product_id, _) = setup_catalog_near_subscription(&mut c);
+    register_buyer(&mut c);
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    c.cancel_subscription(product_id);
+}

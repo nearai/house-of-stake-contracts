@@ -131,14 +131,14 @@ impl Contract {
 impl Contract {
     /// Pool must be on the allowlist. Catalog methods confirm the caller against the pool's
     /// `get_owner_id()` via a cross-contract call (see `products.rs` and `prices.rs`).
-    pub fn assert_validator_allowlisted(&self, validator_id: &ValidatorId) {
+    pub(crate) fn assert_validator_allowlisted(&self, validator_id: &ValidatorId) {
         require!(
             self.validators.get(validator_id).is_some(),
             "Validator not found on the allowlist"
         );
     }
 
-    pub fn assert_validator_active_for_lock(&self, validator_id: &ValidatorId) {
+    pub(crate) fn assert_validator_active_for_lock(&self, validator_id: &ValidatorId) {
         let validator = self.require_validator(validator_id);
         require!(
             validator.status == ValidatorStatus::Active,

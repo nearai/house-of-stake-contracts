@@ -130,14 +130,7 @@ impl Contract {
         );
 
         let (price, product) = self.get_active_price_and_product(&price_id);
-        require!(
-            price.price_type == PriceType::Recurring,
-            "This price is not a recurring subscription price"
-        );
-        require!(
-            price.billing_period == Some(BillingPeriod::Monthly),
-            "Only monthly billing is supported"
-        );
+        self.require_recurring_monthly_price(&price);
 
         let validator_id = product.validator_id.clone();
         self.assert_validator_active_for_lock(&validator_id);
@@ -150,11 +143,7 @@ impl Contract {
             self.subscription_by_account_product.get(&sub_key)
         {
             let sid = sid_ref.clone();
-            let mut sub = self
-                .subscriptions
-                .get(sid_ref.as_str())
-                .cloned()
-                .unwrap_or_else(|| env::panic_str("Subscription not found"));
+            let mut sub = self.require_subscription_row(&sid);
             require!(
                 sub.account_id == buyer,
                 "Only the subscription owner can perform this action"
@@ -304,7 +293,7 @@ impl Contract {
 }
 
 impl Contract {
-    fn get_active_price_and_product(&self, price_id: &PriceId) -> (Price, Product) {
+    pub(crate) fn get_active_price_and_product(&self, price_id: &PriceId) -> (Price, Product) {
         let price = self
             .prices
             .get(price_id)
@@ -324,6 +313,23 @@ impl Contract {
             "This product is not active; pick an active product"
         );
         (price, product)
+    }
+
+    pub(crate) fn require_recurring_monthly_price(&self, price: &Price) {
+        require!(
+            price.price_type == PriceType::Recurring,
+            "This price is not a recurring subscription price"
+        );
+        require!(
+            price.billing_period == Some(BillingPeriod::Monthly),
+            "Only monthly billing is supported"
+        );
+    }
+
+    pub(crate) fn require_active_recurring_monthly_price(&self, price_id: &PriceId) -> Price {
+        let (price, _) = self.get_active_price_and_product(price_id);
+        self.require_recurring_monthly_price(&price);
+        price
     }
 
     /// Picks the catalog price id for a lock from caller input.

@@ -33,24 +33,8 @@ impl Contract {
         assert_one_yocto();
         self.assert_not_paused();
         let buyer = env::predecessor_account_id();
-        let sid = self
-            .subscription_by_account_product
-            .get(&(buyer.clone(), product_id.clone()))
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("No subscription for this product; subscribe first"));
-        let mut sub = self
-            .subscriptions
-            .get(sid.as_str())
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("Subscription not found"));
-        require!(
-            sub.account_id == buyer,
-            "Only the subscription owner can perform this action"
-        );
-        require!(
-            sub.status == SubscriptionStatus::Active,
-            "This subscription is not active (cancelled, expired, or not yet started)"
-        );
+        let (sid, mut sub) = self.require_subscription_owned_by(&buyer, &product_id);
+        Self::assert_subscription_active(&sub);
         sub.cancel_at_period_end = true;
         self.subscriptions.insert(sid.clone(), sub.clone());
         crate::events::log_subscription_cancel(&buyer, &product_id);
@@ -63,24 +47,8 @@ impl Contract {
         assert_one_yocto();
         self.assert_not_paused();
         let buyer = env::predecessor_account_id();
-        let sid = self
-            .subscription_by_account_product
-            .get(&(buyer.clone(), product_id.clone()))
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("No subscription for this product; subscribe first"));
-        let mut sub = self
-            .subscriptions
-            .get(sid.as_str())
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("Subscription not found"));
-        require!(
-            sub.account_id == buyer,
-            "Only the subscription owner can perform this action"
-        );
-        require!(
-            sub.status == SubscriptionStatus::Active,
-            "This subscription is not active (cancelled, expired, or not yet started)"
-        );
+        let (sid, mut sub) = self.require_subscription_owned_by(&buyer, &product_id);
+        Self::assert_subscription_active(&sub);
         require!(
             sub.cancel_at_period_end,
             "Subscription is not scheduled to cancel at period end"
@@ -105,48 +73,10 @@ impl Contract {
             "Attached NEAR is below the contract minimum lock amount (min_lock_amount)"
         );
 
-        let new_price = self
-            .prices
-            .get(&new_price_id)
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("Price not found in the catalog"));
-        require!(
-            new_price.status == CatalogStatus::Active,
-            "This price is not active; pick an active price"
-        );
-        require!(
-            new_price.price_type == PriceType::Recurring,
-            "This price is not a recurring subscription price"
-        );
-        require!(
-            new_price.billing_period == Some(BillingPeriod::Monthly),
-            "Only monthly billing is supported"
-        );
+        let (new_price, product) = self.get_active_price_and_product(&new_price_id);
+        self.require_recurring_monthly_price(&new_price);
 
-        let product = self
-            .products
-            .get(&new_price.product_id)
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("Product not found in the catalog"));
-        require!(
-            product.status == CatalogStatus::Active,
-            "This product is not active; pick an active product"
-        );
-
-        let sid = self
-            .subscription_by_account_product
-            .get(&(buyer.clone(), new_price.product_id.clone()))
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("No subscription for this product; subscribe first"));
-        let sub = self
-            .subscriptions
-            .get(sid.as_str())
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("Subscription not found"));
-        require!(
-            sub.account_id == buyer,
-            "Only the subscription owner can perform this action"
-        );
+        let (sid, sub) = self.require_subscription_owned_by(&buyer, &new_price.product_id);
 
         let old_price = self.prices.get(&sub.price_id).cloned().unwrap_or_else(|| {
             env::panic_str("Current subscription price not found in the catalog")
@@ -160,16 +90,7 @@ impl Contract {
             "New tier must have a higher catalog amount than current tier"
         );
 
-        let lock = self
-            .locks
-            .get(&sub.last_lock_id)
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("No lock is linked to this subscription"));
-        require!(
-            lock.account_id == buyer,
-            "Only the lock owner can change this subscription lock"
-        );
-        require!(lock.status == LockStatus::Active, "Lock is not active");
+        let lock = self.require_subscription_lock_owned_by(&sub, &buyer);
 
         let now = env::block_timestamp();
         require!(
@@ -224,34 +145,9 @@ impl Contract {
         self.assert_not_paused();
         let buyer = env::predecessor_account_id();
 
-        let target = self
-            .prices
-            .get(&target_price_id)
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("Price not found in the catalog"));
-        require!(
-            target.status == CatalogStatus::Active,
-            "This price is not active; pick an active price"
-        );
-        require!(
-            target.price_type == PriceType::Recurring,
-            "This price is not a recurring subscription price"
-        );
+        let target = self.require_active_recurring_monthly_price(&target_price_id);
 
-        let sid = self
-            .subscription_by_account_product
-            .get(&(buyer.clone(), target.product_id.clone()))
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("No subscription for this product; subscribe first"));
-        let mut sub = self
-            .subscriptions
-            .get(sid.as_str())
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("Subscription not found"));
-        require!(
-            sub.account_id == buyer,
-            "Only the subscription owner can perform this action"
-        );
+        let (sid, mut sub) = self.require_subscription_owned_by(&buyer, &target.product_id);
         require!(
             target.product_id == sub.product_id,
             "Price must belong to this subscription product"
@@ -332,6 +228,55 @@ impl Contract {
 }
 
 impl Contract {
+    /// Index lookup + row load + caller ownership. Panics with stable user-facing messages.
+    pub(crate) fn require_subscription_owned_by(
+        &self,
+        buyer: &AccountId,
+        product_id: &ProductId,
+    ) -> (SubscriptionId, Subscription) {
+        let sid = self
+            .subscription_by_account_product
+            .get(&(buyer.clone(), product_id.clone()))
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("No subscription for this product; subscribe first"));
+        let sub = self.require_subscription_row(&sid);
+        require!(
+            sub.account_id == *buyer,
+            "Only the subscription owner can perform this action"
+        );
+        (sid, sub)
+    }
+
+    pub(crate) fn require_subscription_row(
+        &self,
+        subscription_id: &SubscriptionId,
+    ) -> Subscription {
+        self.subscriptions
+            .get(subscription_id.as_str())
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("Subscription not found"))
+    }
+
+    pub(crate) fn require_subscription_owned_by_id(
+        &self,
+        buyer: &AccountId,
+        subscription_id: &SubscriptionId,
+    ) -> Subscription {
+        let sub = self.require_subscription_row(subscription_id);
+        require!(
+            sub.account_id == *buyer,
+            "Only the subscription owner can perform this action"
+        );
+        sub
+    }
+
+    pub(crate) fn assert_subscription_active(sub: &Subscription) {
+        require!(
+            sub.status == SubscriptionStatus::Active,
+            "This subscription is not active (cancelled, expired, or not yet started)"
+        );
+    }
+
     pub(crate) fn commit_subscription_upgrade(
         &mut self,
         buyer: AccountId,
@@ -339,15 +284,7 @@ impl Contract {
         new_price_id: PriceId,
         subscription_id: SubscriptionId,
     ) -> LockId {
-        let mut sub = self
-            .subscriptions
-            .get(subscription_id.as_str())
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("Subscription not found"));
-        require!(
-            sub.account_id == buyer,
-            "Only the subscription owner can perform this action"
-        );
+        let mut sub = self.require_subscription_owned_by_id(&buyer, &subscription_id);
 
         let new_price = self
             .prices
@@ -360,16 +297,7 @@ impl Contract {
             .cloned()
             .unwrap_or_else(|| env::panic_str("Product not found in the catalog"));
 
-        let mut lock = self
-            .locks
-            .get(&sub.last_lock_id)
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("No lock is linked to this subscription"));
-        require!(
-            lock.account_id == buyer,
-            "Only the lock owner can change this subscription lock"
-        );
-        require!(lock.status == LockStatus::Active, "Lock is not active");
+        let mut lock = self.require_subscription_lock_owned_by(&sub, &buyer);
 
         let validator_id = product.validator_id.clone();
         let mut validator = self.require_validator(&validator_id);
