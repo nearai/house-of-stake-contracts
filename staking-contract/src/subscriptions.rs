@@ -166,32 +166,6 @@ impl Contract {
 
         crate::events::log_subscription_downgrade_scheduled(&buyer, &target_price_id);
     }
-
-    pub fn get_subscription(&self, subscription_id: SubscriptionId) -> Option<Subscription> {
-        self.subscriptions.get(subscription_id.as_str()).cloned()
-    }
-
-    /// Lookup subscription by account and catalog product (one row per product).
-    pub fn get_subscription_for_product(
-        &self,
-        account_id: AccountId,
-        product_id: ProductId,
-    ) -> Option<Subscription> {
-        let sid = self
-            .subscription_by_account_product
-            .get(&(account_id, product_id.clone()))?
-            .clone();
-        self.subscriptions.get(sid.as_str()).cloned()
-    }
-
-    pub fn get_subscription_for_price(
-        &self,
-        account_id: AccountId,
-        price_id: PriceId,
-    ) -> Option<Subscription> {
-        let price = self.prices.get(&price_id)?;
-        self.get_subscription_for_product(account_id, price.product_id.clone())
-    }
 }
 
 // =============================================================================
@@ -228,6 +202,32 @@ impl Contract {
 }
 
 impl Contract {
+    pub(crate) fn get_subscription(&self, subscription_id: SubscriptionId) -> Option<Subscription> {
+        self.subscriptions.get(subscription_id.as_str()).cloned()
+    }
+
+    /// Lookup subscription by account and catalog product (one row per product).
+    pub(crate) fn get_subscription_for_product(
+        &self,
+        account_id: AccountId,
+        product_id: ProductId,
+    ) -> Option<Subscription> {
+        let sid = self
+            .subscription_by_account_product
+            .get(&(account_id, product_id.clone()))?
+            .clone();
+        self.subscriptions.get(sid.as_str()).cloned()
+    }
+
+    pub(crate) fn get_subscription_for_price(
+        &self,
+        account_id: AccountId,
+        price_id: PriceId,
+    ) -> Option<Subscription> {
+        let price = self.prices.get(&price_id)?;
+        self.get_subscription_for_product(account_id, price.product_id.clone())
+    }
+
     /// Index lookup + row load + caller ownership. Panics with stable user-facing messages.
     pub(crate) fn require_subscription_owned_by(
         &self,
