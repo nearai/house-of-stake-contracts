@@ -65,7 +65,7 @@ pub trait ExtSelfEpoch {
     /// **[Pipeline 4]** Fan-out to user tail (**5a** / **5b** / **5c**), then **6**.
     fn on_epoch_settlement_dispatch_continue(&mut self, cont: PerEpochContinue) -> Promise;
     /// **[Pipeline 5a]** Catalog mint; may re-enter **3** (`lock.rs`).
-    fn on_lock_finally_mint_and_maybe_post_settle(
+    fn resolve_lock(
         &mut self,
         buyer: AccountId,
         locked: NearToken,
@@ -84,7 +84,7 @@ pub trait ExtSelfEpoch {
         validator_id: ValidatorId,
     ) -> PromiseOrValue<LockId>;
     /// **[Pipeline 5b]** Share exit after pre-user settlement (`unlock.rs`).
-    fn on_unlock_tail_after_pre_user_settle(
+    fn resolve_unlock(
         &mut self,
         lock_id: LockId,
         account_id: AccountId,
@@ -548,7 +548,7 @@ impl Contract {
                 subscription_followup,
             } => ext_self_epoch::ext(env::current_account_id())
                 .with_static_gas(callbacks::ON_LOCK_FINALLY_MINT)
-                .on_lock_finally_mint_and_maybe_post_settle(
+                .resolve_lock(
                     buyer,
                     locked,
                     duration_ns,
@@ -579,12 +579,7 @@ impl Contract {
                 shares_remove,
             } => ext_self_epoch::ext(env::current_account_id())
                 .with_static_gas(callbacks::ON_UNLOCK_TAIL_AFTER_PRE_USER)
-                .on_unlock_tail_after_pre_user_settle(
-                    lock_id,
-                    account_id,
-                    validator_id,
-                    shares_remove,
-                ),
+                .resolve_unlock(lock_id, account_id, validator_id, shares_remove),
             // User claim: move unlocked NEAR from `pending_to_withdraw` (see `withdraw.rs`).
             PerEpochContinue::WithdrawUserTransfer {
                 account_id,

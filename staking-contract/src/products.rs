@@ -2,7 +2,7 @@
 //! [`ExtSelfProducts`] pool-owner callback trait.
 //!
 //! **Auth:** Same pool-owner promise pattern as [`crate::prices`]: public RPC → `get_owner_id` on the
-//! product's validator pool → [`ExtSelfProducts`] callback with [`Contract::assert_pool_owner_callback`].
+//! product's validator pool → [`ExtSelfProducts`] callback with [`Contract::assert_validator_owner`].
 //!
 //! **Prices** live in [`crate::prices`]; this module owns [`Contract::products`], the [`Product::price_ids`]
 //! list, and [`Product::default_price_id`] (used by [`crate::lock::Contract::lock_for_product`] when callers pass
@@ -164,7 +164,7 @@ impl Contract {
         description: String,
         expected_caller: AccountId,
     ) -> ProductId {
-        self.assert_pool_owner_callback(pool_owner, &expected_caller);
+        self.assert_validator_owner(pool_owner, &expected_caller);
 
         let id = next_unique_product_id(self);
         let product = Product {
@@ -193,7 +193,7 @@ impl Contract {
         description: String,
         expected_caller: AccountId,
     ) {
-        self.assert_pool_owner_callback(pool_owner, &expected_caller);
+        self.assert_validator_owner(pool_owner, &expected_caller);
         let mut product = self.require_product(&product_id);
         product.name = name;
         product.description = description;
@@ -207,7 +207,7 @@ impl Contract {
         product_id: ProductId,
         expected_caller: AccountId,
     ) {
-        self.assert_pool_owner_callback(pool_owner, &expected_caller);
+        self.assert_validator_owner(pool_owner, &expected_caller);
         let mut product = self.require_product(&product_id);
         // Archived products cannot serve as default; clear so lock-by-product fails fast.
         product.default_price_id = None;
@@ -222,7 +222,7 @@ impl Contract {
         product_id: ProductId,
         expected_caller: AccountId,
     ) {
-        self.assert_pool_owner_callback(pool_owner, &expected_caller);
+        self.assert_validator_owner(pool_owner, &expected_caller);
         let product = self.require_product(&product_id);
         require!(
             product.usage_count == 0,
@@ -243,7 +243,7 @@ impl Contract {
         product_id: ProductId,
         expected_caller: AccountId,
     ) {
-        self.assert_pool_owner_callback(pool_owner, &expected_caller);
+        self.assert_validator_owner(pool_owner, &expected_caller);
         let mut product = self.require_product(&product_id);
         require!(
             product.status == CatalogStatus::Archived,
@@ -261,7 +261,7 @@ impl Contract {
         price_id: Option<PriceId>,
         expected_caller: AccountId,
     ) {
-        self.assert_pool_owner_callback(pool_owner, &expected_caller);
+        self.assert_validator_owner(pool_owner, &expected_caller);
         let mut product = self.require_product(&product_id);
         require!(
             product.status == CatalogStatus::Active,

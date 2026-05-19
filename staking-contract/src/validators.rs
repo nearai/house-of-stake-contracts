@@ -1,6 +1,7 @@
+use crate::internal::{effective_stake_for_share_exit, mint_shares, near_from_shares};
 use crate::*;
 use near_sdk::json_types::{U64, U128};
-use near_sdk::{AccountId, NearToken, env, near, require};
+use near_sdk::{AccountId, NearToken, env, is_promise_success, near, require};
 
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
@@ -169,5 +170,174 @@ impl Contract {
                 >= validator
                     .last_unstake_epoch
                     .saturating_add(self.config.epoch_unstake_settle_epochs)
+    }
+
+    /// Mints pool share units for `deposit`, bumps [`Validator::pending_to_stake`], and credits the buyer's
+    /// `(account, validator)` share balance. Used by catalog lock mint and subscription upgrade.
+    pub(crate) fn internal_stake(
+        &mut self,
+        buyer: &AccountId,
+        validator_id: &ValidatorId,
+        deposit: NearToken,
+    ) -> u128 {
+        let mut validator = self.require_validator(validator_id);
+        let effective_stake_yocto = effective_stake_for_share_exit(
+            validator.total_staked_balance,
+            validator.pending_to_stake,
+            validator.pending_user_unstake_total,
+        );
+        let validator_total_shares = validator.total_shares.0;
+        if validator_total_shares > 0 {
+            require!(
+                effective_stake_yocto > 0,
+                "No effective stake for share minting; wait for balance refresh or settlement"
+            );
+        }
+        let new_shares = mint_shares(
+            validator_total_shares,
+            effective_stake_yocto,
+            deposit.as_yoctonear(),
+        );
+        validator.total_shares = U128(validator_total_shares.saturating_add(new_shares));
+        validator.pending_to_stake = validator
+            .pending_to_stake
+            .checked_add(deposit)
+            .expect("pending_to_stake overflow when recording this lock");
+        let user_validator_shares_key = (buyer.clone(), validator_id.clone());
+        let user_shares_before = self
+            .user_validator_shares
+            .get(&user_validator_shares_key)
+            .copied()
+            .unwrap_or(0);
+        self.user_validator_shares.insert(
+            user_validator_shares_key,
+            user_shares_before.saturating_add(new_shares),
+        );
+        self.validators.insert(validator_id.clone(), validator);
+        new_shares
+    }
+
+    /// Commits an **internal unstake** for `account_id` on `validator_id`: burns `shares_remove` pool share
+    /// units, prices them into NEAR using the same effective backing as mints, updates validator pending
+    /// unstake buckets, and appends a [`PendingUnstakeTranche`] for later
+    /// [`Contract::withdraw`](crate::Contract::withdraw).
+    ///
+    /// Same internal path as [`Contract::unlock`] after epoch preliminaries (settlement -> claim).
+    ///
+    /// Pricing uses [`crate::internal::effective_stake_for_share_exit`]: **gross** backing minus the full
+    /// unsettled user exit liability [`Validator::pending_user_unstake_total`] (before this commit). That
+    /// keeps exits aligned with minting and prevents re-pricing after pool unstake clears
+    /// [`Validator::pending_to_unstake`] while claims are still outstanding.
+    ///
+    /// Returns the NEAR value in **yocto** that was appended as a [`PendingUnstakeTranche`] for `account_id`
+    /// on `validator_id` (same units as `near_amt` passed into `NearToken::from_yoctonear` for storage).
+    pub(crate) fn internal_unstake(
+        &mut self,
+        account_id: AccountId,
+        validator_id: ValidatorId,
+        shares_remove: u128,
+    ) -> u128 {
+        require!(
+            shares_remove > 0,
+            "Cannot exit shares: amount must be greater than zero"
+        );
+        let mut validator = self.require_validator(&validator_id);
+
+        // Pool must have enough outstanding share units to burn.
+        let validator_total_shares = validator.total_shares.0;
+        require!(
+            validator_total_shares > 0 && validator_total_shares >= shares_remove,
+            "Cannot exit shares: validator pool has no shares or amount exceeds pool total"
+        );
+
+        // Exit price: same effective backing as mint paths (`pending_user_unstake_total` in the divisor).
+        let effective_stake_yocto = effective_stake_for_share_exit(
+            validator.total_staked_balance,
+            validator.pending_to_stake,
+            validator.pending_user_unstake_total,
+        );
+        require!(
+            effective_stake_yocto > 0,
+            "Cannot price this exit: no effective stake left for remaining shares; wait for stake or withdraw steps to finish, then retry"
+        );
+
+        // NEAR value of this exit when priced; also returned (yocto) for callers that log or chain.
+        let near_amt =
+            near_from_shares(shares_remove, effective_stake_yocto, validator_total_shares);
+        let near_token = NearToken::from_yoctonear(near_amt);
+
+        // Validator: burn pool shares, queue NEAR for `try_epoch_stake_or_unstake` / pool `unstake`, and track
+        // gross user-exit liability until claims drain `user_pending_unstake`.
+        validator.total_shares = U128(validator_total_shares - shares_remove);
+        validator.pending_to_unstake = validator
+            .pending_to_unstake
+            .checked_add(near_token)
+            .expect("pending_to_unstake overflow");
+        validator.pending_user_unstake_total = validator
+            .pending_user_unstake_total
+            .checked_add(near_token)
+            .expect("pending_user_unstake_total overflow");
+
+        // User position on this pool: decrement or drop the `(account, validator)` share balance.
+        let account_validator_shares_key = (account_id.clone(), validator_id.clone());
+        let user_shares_on_validator = self
+            .user_validator_shares
+            .get(&account_validator_shares_key)
+            .copied()
+            .unwrap_or(0);
+        require!(
+            user_shares_on_validator >= shares_remove,
+            "Cannot exit shares: account does not hold enough shares on this validator"
+        );
+        if user_shares_on_validator == shares_remove {
+            self.user_validator_shares
+                .remove(&account_validator_shares_key);
+        } else {
+            self.user_validator_shares.insert(
+                account_validator_shares_key.clone(),
+                user_shares_on_validator - shares_remove,
+            );
+        }
+
+        // Epoch gate for `withdraw`: see [`Contract::pending_unstake_tranche_available_epoch_height`].
+        let available_epoch_height =
+            self.pending_unstake_tranche_available_epoch_height(&validator);
+        let mut pending_unstake_tranches = self
+            .user_pending_unstake
+            .get(&account_validator_shares_key)
+            .cloned()
+            .unwrap_or_default();
+        pending_unstake_tranches.push(PendingUnstakeTranche {
+            amount: near_token,
+            available_epoch_height,
+        });
+        self.user_pending_unstake
+            .insert(account_validator_shares_key, pending_unstake_tranches);
+
+        // Validator-level index of accounts that still have queued or claimable exit NEAR.
+        if !validator
+            .accounts_with_pending_unstake
+            .contains(&account_id)
+        {
+            validator
+                .accounts_with_pending_unstake
+                .push(account_id.clone());
+        }
+
+        self.validators.insert(validator_id, validator);
+        near_amt
+    }
+
+    /// After pool `get_owner_id`: promise ok, not paused, caller is pool owner.
+    pub(crate) fn assert_validator_owner(&self, pool_owner: AccountId, caller: &AccountId) {
+        require!(
+            is_promise_success(),
+            "Could not read the validator pool owner; try again later"
+        );
+        self.assert_not_paused();
+        require!(
+            pool_owner == *caller,
+            "Only the validator owner can call this method"
+        );
     }
 }

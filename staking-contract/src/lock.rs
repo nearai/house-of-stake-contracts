@@ -442,7 +442,7 @@ impl Contract {
     /// `product.validator_id == validator_id` so the mint matches the pool used on the lock path.
     ///
     /// **When to call:** Stake figures passed into [`mint_shares`] must match pool reality. Production
-    /// invokes this from [`crate::epoch::Contract::on_lock_finally_mint_and_maybe_post_settle`] after
+    /// invokes this from [`crate::epoch::Contract::resolve_lock`] after
     /// the shared per-epoch pre-user settlement pipeline (**0–3**) on the lock promise chain.
     pub(crate) fn commit_catalog_lock(
         &mut self,
@@ -464,7 +464,7 @@ impl Contract {
             "Catalog validator for this price does not match the pool used for this lock"
         );
 
-        let new_shares = self.mint_shares_for_deposit(&buyer, &validator_id, locked);
+        let new_shares = self.internal_stake(&buyer, &validator_id, locked);
 
         // Persist the lock (duration → `end_ns`); `order` ties billing/catalog to this stake.
         let lock_id = crate::ids::next_lock_id(&mut self.id_nonce);
@@ -543,7 +543,7 @@ impl Contract {
     #[private]
     /// **[Pipeline 5a]** Catalog mint after **4**. Pre-user settlement (**0–3**) already ran before
     /// mint; this lock's `pending_to_stake` is queued for a later `unlock` / `withdraw` / `epoch_settle`.
-    pub fn on_lock_finally_mint_and_maybe_post_settle(
+    pub fn resolve_lock(
         &mut self,
         buyer: AccountId,
         locked: NearToken,

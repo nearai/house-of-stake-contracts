@@ -2,7 +2,7 @@
 //!
 //! **Auth:** Every mutating entrypoint is **validator-pool-owner** gated. The public method resolves the
 //! price's product → pool, calls `get_owner_id` on that pool, then continues in [`ExtSelfPrices`] callbacks
-//! via [`Contract::assert_pool_owner_callback`]. Contract owner/guardians cannot edit catalog entries directly.
+//! via [`Contract::assert_validator_owner`]. Contract owner/guardians cannot edit catalog entries directly.
 //!
 //! **Lifecycle:** Archive hides a tier from new locks; delete requires `usage_count == 0`. Archiving or
 //! deleting clears [`Product::default_price_id`] when this price was the product default
@@ -159,7 +159,7 @@ impl Contract {
         lock_factor_near_months: U128,
         expected_caller: AccountId,
     ) -> PriceId {
-        self.assert_pool_owner_callback(pool_owner, &expected_caller);
+        self.assert_validator_owner(pool_owner, &expected_caller);
         let mut product = self.require_product(&product_id);
         require!(
             product.status == CatalogStatus::Active,
@@ -194,7 +194,7 @@ impl Contract {
         description: String,
         expected_caller: AccountId,
     ) {
-        self.assert_pool_owner_callback(pool_owner, &expected_caller);
+        self.assert_validator_owner(pool_owner, &expected_caller);
         let mut price = self.require_price(&price_id);
         price.name = name;
         price.description = description;
@@ -208,7 +208,7 @@ impl Contract {
         price_id: PriceId,
         expected_caller: AccountId,
     ) {
-        self.assert_pool_owner_callback(pool_owner, &expected_caller);
+        self.assert_validator_owner(pool_owner, &expected_caller);
         let mut price = self.require_price(&price_id);
         let product_id = price.product_id.clone();
         price.status = CatalogStatus::Archived;
@@ -224,7 +224,7 @@ impl Contract {
         price_id: PriceId,
         expected_caller: AccountId,
     ) {
-        self.assert_pool_owner_callback(pool_owner, &expected_caller);
+        self.assert_validator_owner(pool_owner, &expected_caller);
         let price = self.require_price(&price_id);
         require!(
             price.usage_count == 0,
@@ -245,7 +245,7 @@ impl Contract {
         price_id: PriceId,
         expected_caller: AccountId,
     ) {
-        self.assert_pool_owner_callback(pool_owner, &expected_caller);
+        self.assert_validator_owner(pool_owner, &expected_caller);
         let mut price = self.require_price(&price_id);
         require!(
             price.status == CatalogStatus::Archived,

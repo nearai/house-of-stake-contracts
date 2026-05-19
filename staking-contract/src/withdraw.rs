@@ -32,7 +32,7 @@ impl Contract {
         self.ensure_min_base_storage(&account_id);
 
         let account_validator_key = (account_id.clone(), validator_id.clone());
-        // Must have tranches from a prior `commit_share_exit` / unlock on this pool.
+        // Must have tranches from a prior `internal_unstake` / unlock on this pool.
         let user_pending_tranches_yocto =
             self.sum_user_unstake_tranches_yocto(&account_validator_key);
         require!(

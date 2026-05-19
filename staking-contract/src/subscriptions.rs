@@ -287,7 +287,7 @@ impl Contract {
         let mut lock = self.require_subscription_lock_owned_by(&sub, &buyer);
 
         let validator_id = product.validator_id.clone();
-        let add_shares = self.mint_shares_for_deposit(&buyer, &validator_id, deposit);
+        let add_shares = self.internal_stake(&buyer, &validator_id, deposit);
 
         lock.amount_near = lock
             .amount_near
@@ -364,7 +364,7 @@ impl Contract {
             return;
         }
 
-        let near_amt = self.commit_share_exit(buyer.clone(), validator_id, shares_remove);
+        let near_amt = self.internal_unstake(buyer.clone(), validator_id, shares_remove);
         lock.shares = U128(lock.shares.0.saturating_sub(shares_remove));
         let new_amt = lock.amount_near.as_yoctonear().saturating_sub(near_amt);
         lock.amount_near = NearToken::from_yoctonear(new_amt);
