@@ -5,9 +5,9 @@ use near_sdk::{AccountId, NearToken, env, near, require};
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
 pub struct Validator {
-    /// Staking pool contract account for this validator row (= catalog `validator_id` / lock `validator_id`).
+    /// Staking pool contract account (= catalog `validator_id` / lock `validator_id`).
     pub validator_id: ValidatorId,
-    /// Whether new locks are allowed (**`Active`**) or blocked (**`Paused`**), or the row is **`Removed`**.
+    /// Whether new locks are allowed (**`Active`**) or blocked (**`Paused`**), or this pool is **`Removed`**.
     pub status: ValidatorStatus,
 
     /// Total issued stake.dao **share units** for this pool (integer; same scale as per-user shares).
@@ -16,7 +16,7 @@ pub struct Validator {
     /// pool `get_account` total balance (plus bookkeeping updates on stake/unstake/withdraw paths). Used with
     /// `pending_*` for share mint/burn pricing—not updated until the next pool read or accounting step.
     pub total_staked_balance: NearToken,
-    /// `block_timestamp` (nanoseconds) when `total_staked_balance` was last synced from the pool (or row created).
+    /// `block_timestamp` (nanoseconds) when `total_staked_balance` was last synced from the pool (or validator was added).
     pub last_balance_refresh_ns: U64,
 
     /// NEAR waiting to be sent to the pool via **`deposit_and_stake`** (aggregated locks; net-settled vs
@@ -27,7 +27,7 @@ pub struct Validator {
     /// Epoch height recorded after the last successful pool `unstake` callback; gates further unstakes
     /// (with [`crate::config::Config::epoch_unstake_settle_epochs`]).
     pub last_unstake_epoch: u64,
-    /// Last NEAR `epoch_height` for which this row completed the **pre–user-action** pipeline for a request:
+    /// Last NEAR `epoch_height` for which this validator completed the **pre–user-action** pipeline for a request:
     /// **sync** `total_staked_balance` from the pool (at most once per epoch for catalog flows), **withdraw**
     /// from the pool when eligible, then at most one **net** pool `deposit_and_stake` / `unstake` / net-zero
     /// clearance for that epoch (same mutex the staking pool enforces per account). Successful callbacks
@@ -44,7 +44,7 @@ pub struct Validator {
     /// Accounts that currently have at least one non-empty tranche in **`user_pending_unstake`** for this pool.
     pub accounts_with_pending_unstake: Vec<AccountId>,
 
-    /// At most one in-flight cross-contract **mutating** pool pipeline for this row (`Idle` vs `Busy`).
+    /// At most one in-flight cross-contract **mutating** pool pipeline for this validator (`Idle` vs `Busy`).
     pub tx_status: TransactionStatus,
 }
 

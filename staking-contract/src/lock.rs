@@ -1,7 +1,11 @@
+use crate::epoch::ext_staking_pool;
+use crate::gas::staking_pool;
 use crate::internal::{NS_PER_DAY_TIMESTAMP, check_near_price_lock};
 use crate::*;
 use near_sdk::json_types::{U64, U128};
-use near_sdk::{NearToken, PromiseOrValue, env, near, require};
+use near_sdk::{
+    AccountId, NearToken, Promise, PromiseOrValue, assert_one_yocto, env, near, require,
+};
 
 /// Stripe-style **billing anchor day** (1–31). Not the real UTC calendar day-of-month; it is a stable
 /// fingerprint from block time until civil-calendar billing is implemented (see `subscriptions` / `docs/ACTION_ITEMS.md`).
@@ -102,7 +106,7 @@ impl Contract {
         }
     }
 
-    /// Lock NEAR for a **monthly recurring** catalog price (NEAR-denominated). One subscription row per
+    /// Lock NEAR for a **monthly recurring** catalog price (NEAR-denominated). One subscription per
     /// `(account, product_id)`; [`Subscription::price_id`] is the active tier.
     ///
     /// Provide **exactly one** of **`price_id`** or **`product_id`** (same rules as [`Contract::lock_for_product`]).
@@ -141,7 +145,7 @@ impl Contract {
             self.subscription_by_account_product.get(&sub_key)
         {
             let sid = sid_ref.clone();
-            let mut sub = self.require_subscription_row(&sid);
+            let mut sub = self.require_subscription_by_id(&sid);
             require!(
                 sub.account_id == buyer,
                 "Only the subscription owner can perform this action"
@@ -155,8 +159,8 @@ impl Contract {
                 }
                 (sub, sid, false)
             } else if sub.cancel_at_period_end {
-                // Period has ended with cancel-at-end: remove stale index + row so this call creates a
-                // fresh subscription row (same path as first-time subscribe).
+                // Period has ended with cancel-at-end: remove stale index and subscription so this call
+                // creates a fresh subscription (same path as first-time subscribe).
                 self.subscription_by_account_product.remove(&sub_key);
                 self.subscriptions.remove(sid.as_str());
                 let anchor = anchor_day_from_timestamp(now);
@@ -338,10 +342,69 @@ impl Contract {
         price
     }
 
+    /// Preamble for pool-owner catalog RPCs: 1 yocto, not paused, validator allowlisted.
+    pub(crate) fn catalog_admin_entry_for_pool(
+        &self,
+        validator_id: &ValidatorId,
+    ) -> (ValidatorId, AccountId) {
+        assert_one_yocto();
+        self.assert_not_paused();
+        self.assert_validator_allowlisted(validator_id);
+        (validator_id.clone(), env::predecessor_account_id())
+    }
+
+    /// Pool `get_owner_id` promise chained to a catalog owner-check callback.
+    pub(crate) fn promise_pool_get_owner_id_then(
+        validator_id: ValidatorId,
+        tail: Promise,
+    ) -> Promise {
+        ext_staking_pool::ext(validator_id)
+            .with_static_gas(staking_pool::GET_OWNER_ID)
+            .get_owner_id()
+            .then(tail)
+    }
+
+    /// Resolve product → pool, run catalog admin preamble, then `get_owner_id` → `build_tail(caller, product_id)`.
+    pub(crate) fn promise_catalog_admin_on_product(
+        &self,
+        product_id: ProductId,
+        build_tail: impl FnOnce(AccountId, ProductId) -> Promise,
+    ) -> Promise {
+        let product = self.require_product(&product_id);
+        let (validator_id, expected_caller) =
+            self.catalog_admin_entry_for_pool(&product.validator_id);
+        Self::promise_pool_get_owner_id_then(validator_id, build_tail(expected_caller, product_id))
+    }
+
+    /// Resolve price → product → pool, run catalog admin preamble, then `get_owner_id` → `build_tail(caller, price_id)`.
+    pub(crate) fn promise_catalog_admin_on_price(
+        &self,
+        price_id: PriceId,
+        build_tail: impl FnOnce(AccountId, PriceId) -> Promise,
+    ) -> Promise {
+        let (_, product) = self.require_price_and_product(&price_id);
+        let (validator_id, expected_caller) =
+            self.catalog_admin_entry_for_pool(&product.validator_id);
+        Self::promise_pool_get_owner_id_then(validator_id, build_tail(expected_caller, price_id))
+    }
+
+    /// Catalog admin on a known allowlisted pool (e.g. `create_product` before the product exists in storage).
+    pub(crate) fn promise_catalog_admin_on_pool(
+        &self,
+        validator_id: &ValidatorId,
+        build_tail: impl FnOnce(AccountId, ValidatorId) -> Promise,
+    ) -> Promise {
+        let (validator_id, expected_caller) = self.catalog_admin_entry_for_pool(validator_id);
+        Self::promise_pool_get_owner_id_then(
+            validator_id.clone(),
+            build_tail(expected_caller, validator_id),
+        )
+    }
+
     /// Picks the catalog price id for a lock from caller input.
     ///
     /// Exactly one of `price_id` or `product_id` must be `Some`. If only `product_id` is given,
-    /// the product's default catalog price is used; that price row must reference the same product.
+    /// the product's default catalog price is used; that price must belong to the same product.
     fn resolve_price_id_for_lock(
         &self,
         price_id: Option<PriceId>,
@@ -351,7 +414,7 @@ impl Contract {
             // Use the explicitly chosen price; active-catalog checks happen when the lock is applied.
             (Some(pid), None) => pid,
             (None, Some(prod_id)) => {
-                // Resolve via the product's default_price_id, then sanity-check the price row.
+                // Resolve via the product's default_price_id, then sanity-check the price.
                 let pr_id = self
                     .products
                     .get(&prod_id)
@@ -371,9 +434,9 @@ impl Contract {
         }
     }
 
-    /// Commits catalog-lock **state**: mints pool shares for `locked` NEAR, stores the lock row,
+    /// Commits catalog-lock **state**: mints pool shares for `locked` NEAR, stores the lock,
     /// bumps catalog usage, updates validator pending stake and per-buyer share balance, then
-    /// optionally updates subscription storage (row + `(account, product)` index when new).
+    /// optionally updates subscription storage (subscription + `(account, product)` index when new).
     ///
     /// **Inputs:** Re-reads active catalog price/product from `order` and requires
     /// `product.validator_id == validator_id` so the mint matches the pool used on the lock path.
@@ -419,7 +482,7 @@ impl Contract {
         };
         self.locks.insert(lock_id.clone(), lock);
 
-        // Catalog analytics + write-through updated rows and validator map.
+        // Catalog usage counters + persist updated price, product, and validator state.
         price.usage_count = price.usage_count.saturating_add(1);
         product.usage_count = product.usage_count.saturating_add(1);
 

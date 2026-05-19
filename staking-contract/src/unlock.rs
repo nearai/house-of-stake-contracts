@@ -204,7 +204,7 @@ impl Contract {
             .checked_add(near_token)
             .expect("pending_user_unstake_total overflow");
 
-        // User position on this pool: decrement or drop the `(account, validator)` share row.
+        // User position on this pool: decrement or drop the `(account, validator)` share balance.
         let account_validator_shares_key = (account_id.clone(), validator_id.clone());
         let user_shares_on_validator = self
             .user_validator_shares

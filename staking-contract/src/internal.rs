@@ -112,7 +112,7 @@ pub fn check_near_price_lock(
 
 impl Contract {
     /// Mints pool share units for `deposit`, bumps [`Validator::pending_to_stake`], and credits the buyer's
-    /// `(account, validator)` share row. Used by catalog lock mint and subscription upgrade.
+    /// `(account, validator)` share balance. Used by catalog lock mint and subscription upgrade.
     pub(crate) fn mint_shares_for_deposit(
         &mut self,
         buyer: &AccountId,

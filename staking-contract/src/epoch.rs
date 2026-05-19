@@ -518,7 +518,7 @@ impl Contract {
     // --- [Pipeline 3′] ---
 
     #[private]
-    /// **[Pipeline 3′]** After async **3**; forwards to **4** (pool outcome already in validator row).
+    /// **[Pipeline 3′]** After async **3**; forwards to **4** (pool outcome already recorded on validator state).
     #[allow(unused_variables)]
     pub fn on_epoch_settlement_after_try_epoch_stake_or_unstake(
         &mut self,
@@ -538,7 +538,7 @@ impl Contract {
     pub fn on_epoch_settlement_dispatch_continue(&mut self, cont: PerEpochContinue) -> Promise {
         let validator_id = cont.validator_id().clone();
         let tail = match cont {
-            // Catalog purchase: mint shares / usage after pool row is fresh for this epoch.
+            // Catalog purchase: mint shares / usage after validator state is fresh for this epoch.
             PerEpochContinue::CatalogLockMint {
                 validator_id,
                 buyer,

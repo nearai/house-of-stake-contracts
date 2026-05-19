@@ -198,7 +198,7 @@ impl Contract {
         self.subscriptions.get(subscription_id.as_str()).cloned()
     }
 
-    /// Lookup subscription by account and catalog product (one row per product).
+    /// Lookup subscription by account and catalog product (at most one subscription per product).
     pub(crate) fn get_subscription_for_product(
         &self,
         account_id: AccountId,
@@ -220,7 +220,7 @@ impl Contract {
         self.get_subscription_for_product(account_id, price.product_id.clone())
     }
 
-    /// Index lookup + row load + caller ownership. Panics with stable user-facing messages.
+    /// Resolve `(account, product)` index, load subscription, verify caller ownership. Panics with stable user-facing messages.
     pub(crate) fn require_subscription_owned_by(
         &self,
         buyer: &AccountId,
@@ -231,7 +231,7 @@ impl Contract {
             .get(&(buyer.clone(), product_id.clone()))
             .cloned()
             .unwrap_or_else(|| env::panic_str("No subscription for this product; subscribe first"));
-        let sub = self.require_subscription_row(&sid);
+        let sub = self.require_subscription_by_id(&sid);
         require!(
             sub.account_id == *buyer,
             "Only the subscription owner can perform this action"
@@ -239,7 +239,7 @@ impl Contract {
         (sid, sub)
     }
 
-    pub(crate) fn require_subscription_row(
+    pub(crate) fn require_subscription_by_id(
         &self,
         subscription_id: &SubscriptionId,
     ) -> Subscription {
@@ -254,7 +254,7 @@ impl Contract {
         buyer: &AccountId,
         subscription_id: &SubscriptionId,
     ) -> Subscription {
-        let sub = self.require_subscription_row(subscription_id);
+        let sub = self.require_subscription_by_id(subscription_id);
         require!(
             sub.account_id == *buyer,
             "Only the subscription owner can perform this action"

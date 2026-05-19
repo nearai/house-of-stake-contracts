@@ -1,15 +1,20 @@
 //! Catalog **products**: create/edit/archive/delete, pagination, default price binding, and the
 //! [`ExtSelfProducts`] pool-owner callback trait.
 //!
-//! **Price** entrypoints, [`ExtSelfPrices`], and `get_price` are in [`crate::prices`].
+//! **Auth:** Same pool-owner promise pattern as [`crate::prices`]: public RPC → `get_owner_id` on the
+//! product's validator pool → [`ExtSelfProducts`] callback with [`Contract::assert_pool_owner_callback`].
+//!
+//! **Prices** live in [`crate::prices`]; this module owns [`Contract::products`], the [`Product::price_ids`]
+//! list, and [`Product::default_price_id`] (used by [`crate::lock::Contract::lock_for_product`] when callers pass
+//! `product_id` only).
 
-use crate::epoch::ext_staking_pool;
-use crate::gas::{callbacks, staking_pool};
+use crate::gas::callbacks;
 use crate::*;
 use near_sdk::ext_contract;
 use near_sdk::json_types::U64;
 use near_sdk::{AccountId, Promise, env, near, require};
 
+/// Retry id generation when a collision exists in [`Contract::products`].
 fn next_unique_product_id(contract: &mut Contract) -> ProductId {
     for _ in 0..64 {
         let id = crate::ids::next_product_id(&mut contract.id_nonce);
@@ -68,6 +73,11 @@ pub trait ExtSelfProducts {
 
 #[near]
 impl Contract {
+    // -------------------------------------------------------------------------
+    // Public catalog admin (pool-owner auth via promise chain)
+    // -------------------------------------------------------------------------
+
+    /// Register a sellable product on an allowlisted validator pool. Pool owner only; attach 1 yocto.
     #[payable]
     pub fn create_product(
         &mut self,
@@ -75,25 +85,14 @@ impl Contract {
         name: String,
         description: String,
     ) -> Promise {
-        near_sdk::assert_one_yocto();
-        self.assert_not_paused();
-        self.assert_validator_allowlisted(&validator_id);
-        let expected_caller = env::predecessor_account_id();
-        ext_staking_pool::ext(validator_id.clone())
-            .with_static_gas(staking_pool::GET_OWNER_ID)
-            .get_owner_id()
-            .then(
-                ext_self_products::ext(env::current_account_id())
-                    .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
-                    .create_product_after_get_owner(
-                        validator_id,
-                        name,
-                        description,
-                        expected_caller,
-                    ),
-            )
+        self.promise_catalog_admin_on_pool(&validator_id, |expected_caller, validator_id| {
+            ext_self_products::ext(env::current_account_id())
+                .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
+                .create_product_after_get_owner(validator_id, name, description, expected_caller)
+        })
     }
 
+    /// Update product display metadata; does not move the product to another pool.
     #[payable]
     pub fn edit_product(
         &mut self,
@@ -101,111 +100,60 @@ impl Contract {
         name: String,
         description: String,
     ) -> Promise {
-        near_sdk::assert_one_yocto();
-        self.assert_not_paused();
-        let maybe_product = self.products.get(&product_id).cloned();
-        require!(maybe_product.is_some(), "Product not found in the catalog");
-        let product = maybe_product.unwrap();
-        self.assert_validator_allowlisted(&product.validator_id);
-        let expected_caller = env::predecessor_account_id();
-        let validator_id = product.validator_id.clone();
-        ext_staking_pool::ext(validator_id)
-            .with_static_gas(staking_pool::GET_OWNER_ID)
-            .get_owner_id()
-            .then(
-                ext_self_products::ext(env::current_account_id())
-                    .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
-                    .edit_product_after_get_owner(product_id, name, description, expected_caller),
-            )
+        self.promise_catalog_admin_on_product(product_id, |expected_caller, product_id| {
+            ext_self_products::ext(env::current_account_id())
+                .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
+                .edit_product_after_get_owner(product_id, name, description, expected_caller)
+        })
     }
 
+    /// Archive: blocks new locks; clears default price; existing locks/subscriptions unchanged.
     #[payable]
     pub fn archive_product(&mut self, product_id: ProductId) -> Promise {
-        near_sdk::assert_one_yocto();
-        self.assert_not_paused();
-        let maybe_product = self.products.get(&product_id).cloned();
-        require!(maybe_product.is_some(), "Product not found in the catalog");
-        let product = maybe_product.unwrap();
-        self.assert_validator_allowlisted(&product.validator_id);
-        let expected_caller = env::predecessor_account_id();
-        let validator_id = product.validator_id.clone();
-        ext_staking_pool::ext(validator_id)
-            .with_static_gas(staking_pool::GET_OWNER_ID)
-            .get_owner_id()
-            .then(
-                ext_self_products::ext(env::current_account_id())
-                    .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
-                    .archive_product_after_get_owner(product_id, expected_caller),
-            )
+        self.promise_catalog_admin_on_product(product_id, |expected_caller, product_id| {
+            ext_self_products::ext(env::current_account_id())
+                .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
+                .archive_product_after_get_owner(product_id, expected_caller)
+        })
     }
 
+    /// Remove from storage when never locked and all prices for this product are gone.
     #[payable]
     pub fn delete_product(&mut self, product_id: ProductId) -> Promise {
-        near_sdk::assert_one_yocto();
-        self.assert_not_paused();
-        let maybe_product = self.products.get(&product_id).cloned();
-        require!(maybe_product.is_some(), "Product not found in the catalog");
-        let product = maybe_product.unwrap();
-        self.assert_validator_allowlisted(&product.validator_id);
-        let expected_caller = env::predecessor_account_id();
-        let validator_id = product.validator_id.clone();
-        ext_staking_pool::ext(validator_id)
-            .with_static_gas(staking_pool::GET_OWNER_ID)
-            .get_owner_id()
-            .then(
-                ext_self_products::ext(env::current_account_id())
-                    .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
-                    .delete_product_after_get_owner(product_id, expected_caller),
-            )
+        self.promise_catalog_admin_on_product(product_id, |expected_caller, product_id| {
+            ext_self_products::ext(env::current_account_id())
+                .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
+                .delete_product_after_get_owner(product_id, expected_caller)
+        })
     }
 
+    /// Restore an archived product for new locks and default-price binding.
     #[payable]
     pub fn unarchive_product(&mut self, product_id: ProductId) -> Promise {
-        near_sdk::assert_one_yocto();
-        self.assert_not_paused();
-        let maybe_product = self.products.get(&product_id).cloned();
-        require!(maybe_product.is_some(), "Product not found in the catalog");
-        let product = maybe_product.unwrap();
-        self.assert_validator_allowlisted(&product.validator_id);
-        let expected_caller = env::predecessor_account_id();
-        let validator_id = product.validator_id.clone();
-        ext_staking_pool::ext(validator_id)
-            .with_static_gas(staking_pool::GET_OWNER_ID)
-            .get_owner_id()
-            .then(
-                ext_self_products::ext(env::current_account_id())
-                    .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
-                    .unarchive_product_after_get_owner(product_id, expected_caller),
-            )
+        self.promise_catalog_admin_on_product(product_id, |expected_caller, product_id| {
+            ext_self_products::ext(env::current_account_id())
+                .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
+                .unarchive_product_after_get_owner(product_id, expected_caller)
+        })
     }
 
+    /// Bind or clear the tier used when users call `lock_for_*` with `product_id` only (no `price_id`).
     #[payable]
     pub fn set_product_default_price(
         &mut self,
         product_id: ProductId,
         price_id: Option<PriceId>,
     ) -> Promise {
-        near_sdk::assert_one_yocto();
-        self.assert_not_paused();
-        let maybe_product = self.products.get(&product_id).cloned();
-        require!(maybe_product.is_some(), "Product not found in the catalog");
-        let product = maybe_product.unwrap();
-        self.assert_validator_allowlisted(&product.validator_id);
-        let expected_caller = env::predecessor_account_id();
-        let validator_id = product.validator_id.clone();
-        ext_staking_pool::ext(validator_id)
-            .with_static_gas(staking_pool::GET_OWNER_ID)
-            .get_owner_id()
-            .then(
-                ext_self_products::ext(env::current_account_id())
-                    .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
-                    .set_product_default_price_after_get_owner(
-                        product_id,
-                        price_id,
-                        expected_caller,
-                    ),
-            )
+        self.promise_catalog_admin_on_product(product_id, |expected_caller, product_id| {
+            ext_self_products::ext(env::current_account_id())
+                .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
+                .set_product_default_price_after_get_owner(product_id, price_id, expected_caller)
+        })
     }
+
+    // -------------------------------------------------------------------------
+    // Private callbacks after pool `get_owner_id`
+    // -------------------------------------------------------------------------
 
     #[private]
     pub fn create_product_after_get_owner(
@@ -246,11 +194,7 @@ impl Contract {
         expected_caller: AccountId,
     ) {
         self.assert_pool_owner_callback(pool_owner, &expected_caller);
-        let mut product = self
-            .products
-            .get(&product_id)
-            .cloned()
-            .expect("Product not found in the catalog");
+        let mut product = self.require_product(&product_id);
         product.name = name;
         product.description = description;
         self.products.insert(product_id, product);
@@ -264,11 +208,8 @@ impl Contract {
         expected_caller: AccountId,
     ) {
         self.assert_pool_owner_callback(pool_owner, &expected_caller);
-        let mut product = self
-            .products
-            .get(&product_id)
-            .cloned()
-            .expect("Product not found in the catalog");
+        let mut product = self.require_product(&product_id);
+        // Archived products cannot serve as default; clear so lock-by-product fails fast.
         product.default_price_id = None;
         product.status = CatalogStatus::Archived;
         self.products.insert(product_id, product);
@@ -282,11 +223,7 @@ impl Contract {
         expected_caller: AccountId,
     ) {
         self.assert_pool_owner_callback(pool_owner, &expected_caller);
-        let product = self
-            .products
-            .get(&product_id)
-            .cloned()
-            .expect("Product not found in the catalog");
+        let product = self.require_product(&product_id);
         require!(
             product.usage_count == 0,
             "Cannot delete this product while it is in use"
@@ -307,11 +244,7 @@ impl Contract {
         expected_caller: AccountId,
     ) {
         self.assert_pool_owner_callback(pool_owner, &expected_caller);
-        let mut product = self
-            .products
-            .get(&product_id)
-            .cloned()
-            .expect("Product not found in the catalog");
+        let mut product = self.require_product(&product_id);
         require!(
             product.status == CatalogStatus::Archived,
             "Product is not archived"
@@ -329,11 +262,7 @@ impl Contract {
         expected_caller: AccountId,
     ) {
         self.assert_pool_owner_callback(pool_owner, &expected_caller);
-        let mut product = self
-            .products
-            .get(&product_id)
-            .cloned()
-            .expect("Product not found in the catalog");
+        let mut product = self.require_product(&product_id);
         require!(
             product.status == CatalogStatus::Active,
             "This product is archived or inactive"
@@ -343,11 +272,7 @@ impl Contract {
                 product.default_price_id = None;
             }
             Some(pid) => {
-                let catalog_price = self
-                    .prices
-                    .get(&pid)
-                    .cloned()
-                    .expect("Price not found in the catalog");
+                let catalog_price = self.require_price(&pid);
                 require!(
                     catalog_price.product_id == product_id,
                     "Price does not belong to this product"
@@ -376,7 +301,7 @@ impl Contract {
             .and_then(|product| product.default_price_id.clone())
     }
 
-    /// Paginated catalog rows (stable creation order in [`Contract::product_ids`]).
+    /// Paginated products (stable creation order in [`Contract::product_ids`]).
     pub fn get_products(&self, from_index: u64, limit: u64) -> Vec<Product> {
         let len_u64 = self.product_ids.len() as u64;
         let mut out = Vec::new();
@@ -392,6 +317,10 @@ impl Contract {
         out
     }
 }
+
+// ---------------------------------------------------------------------------
+// Internal helpers (also used from [`crate::prices`])
+// ---------------------------------------------------------------------------
 
 impl Contract {
     /// Clears [`Product::default_price_id`] when it references **`price_id`** (e.g. price archived/deleted).
@@ -410,17 +339,12 @@ impl Contract {
         }
     }
 
+    /// Keeps [`Contract::product_ids`] in sync when a product is removed from storage.
     fn remove_product_id_from_list(&mut self, product_id: &ProductId) {
         let len = self.product_ids.len();
         for i in 0..len {
-            if self.product_ids.get(i).is_some_and(|s| s == product_id) {
-                for j in (i + 1)..len {
-                    let id = self.product_ids.get(j).cloned().unwrap_or_else(|| {
-                        env::panic_str("Catalog index error while removing product id")
-                    });
-                    self.product_ids.set(j - 1, id);
-                }
-                let _ = self.product_ids.pop();
+            if self.product_ids.get(i).is_some_and(|id| id == product_id) {
+                self.product_ids.drain(i..i + 1);
                 return;
             }
         }

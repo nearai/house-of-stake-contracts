@@ -55,11 +55,11 @@ pub struct Contract {
     /// Allowlisted staking pools (`validator_id` = pool account). Holds share-pool and epoch pipeline state
     /// per [`Validator`].
     pub validators: LookupMap<ValidatorId, Validator>,
-    /// Insertion order of allowlisted pools; drives paginated [`crate::validators::Contract::get_validators`].
+    /// Creation order of allowlisted pools; drives paginated [`crate::validators::Contract::get_validators`].
     pub validator_ids: Vector<ValidatorId>,
     /// Creation order of catalog products; stable ordering for [`crate::products::Contract::get_products`].
     pub product_ids: Vector<ProductId>,
-    /// Product catalog rows (`prod_*` ids); validator-scoped via [`Product::validator_id`](crate::types::Product::validator_id).
+    /// Products keyed by id (`prod_*`); validator-scoped via [`Product::validator_id`](crate::types::Product::validator_id).
     pub products: LookupMap<ProductId, Product>,
     /// Price lines (`price_*` ids); [`Price::product_id`](crate::types::Price::product_id) links to a product.
     pub prices: LookupMap<PriceId, Price>,
