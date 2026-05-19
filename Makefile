@@ -8,7 +8,8 @@
 	whitelist venear lockup voting staking mock-pool \
 	check-sandbox-staking-whitelist-contract check-venear-contract check-lockup-contract \
 	check-voting-contract check-staking-contract check-mock-staking-pool-contract \
-	check-whitelist check-venear check-lockup check-voting check-staking check-mock-pool
+	check-whitelist check-venear check-lockup check-voting check-staking check-mock-pool \
+	test-staking-contract test-staking
 
 ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 RES_LOCAL := $(ROOT)res/local
@@ -25,6 +26,10 @@ help:
 	@echo ""
 	@echo "Fast compile checks (cargo check -p … from workspace root):"
 	@echo "  make check-<name>   e.g. make check-staking-contract, make check-whitelist"
+	@echo ""
+	@echo "Tests:"
+	@echo "  make test-staking-contract                 run staking-contract test suite"
+	@echo "  make test-staking                          alias"
 
 # --- WASM: same order as build_all.sh ---
 
@@ -88,3 +93,6 @@ check-staking-contract check-staking:
 
 check-mock-staking-pool-contract check-mock-pool:
 	cd "$(ROOT)" && cargo check -p mock-staking-pool-contract
+
+test-staking-contract test-staking:
+	cd "$(ROOT)" && cargo test -p staking-contract
