@@ -1,6 +1,4 @@
-use crate::internal::{
-    NS_PER_DAY_TIMESTAMP, check_near_price_lock, effective_stake_for_share_exit, mint_shares,
-};
+use crate::internal::{NS_PER_DAY_TIMESTAMP, check_near_price_lock};
 use crate::*;
 use near_sdk::json_types::{U64, U128};
 use near_sdk::{NearToken, PromiseOrValue, env, near, require};
@@ -181,12 +179,8 @@ impl Contract {
             } else {
                 // Renewal window: scheduled downgrade / extend billing period.
                 if let Some(low_id) = sub.pending_downgrade_price_id.take() {
-                    let high_price = self.prices.get(&sub.price_id).cloned().unwrap_or_else(|| {
-                        env::panic_str("High tier price not found in the catalog")
-                    });
-                    let low_price = self.prices.get(&low_id).cloned().unwrap_or_else(|| {
-                        env::panic_str("Low tier price not found in the catalog")
-                    });
+                    let high_price = self.require_price(&sub.price_id);
+                    let low_price = self.require_price(&low_id);
                     let completed_ns = u128::from(sub.end_ns.0.saturating_sub(sub.start_ns.0));
                     self.apply_downgrade_prorate_at_renewal(
                         &buyer,
@@ -293,21 +287,33 @@ impl Contract {
 }
 
 impl Contract {
-    pub(crate) fn get_active_price_and_product(&self, price_id: &PriceId) -> (Price, Product) {
-        let price = self
-            .prices
+    pub(crate) fn require_price(&self, price_id: &PriceId) -> Price {
+        self.prices
             .get(price_id)
             .cloned()
-            .unwrap_or_else(|| env::panic_str("Price not found in the catalog"));
+            .unwrap_or_else(|| env::panic_str("Price not found in the catalog"))
+    }
+
+    pub(crate) fn require_product(&self, product_id: &ProductId) -> Product {
+        self.products
+            .get(product_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("Product not found in the catalog"))
+    }
+
+    pub(crate) fn require_price_and_product(&self, price_id: &PriceId) -> (Price, Product) {
+        let price = self.require_price(price_id);
+        let product = self.require_product(&price.product_id);
+        (price, product)
+    }
+
+    pub(crate) fn get_active_price_and_product(&self, price_id: &PriceId) -> (Price, Product) {
+        let price = self.require_price(price_id);
         require!(
             price.status == CatalogStatus::Active,
             "This price is not active; pick an active price"
         );
-        let product = self
-            .products
-            .get(&price.product_id)
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("Product not found in the catalog"));
+        let product = self.require_product(&price.product_id);
         require!(
             product.status == CatalogStatus::Active,
             "This product is not active; pick an active product"
@@ -351,11 +357,7 @@ impl Contract {
                     .get(&prod_id)
                     .and_then(|p| p.default_price_id.clone())
                     .unwrap_or_else(|| env::panic_str("No default price for this product"));
-                let pr = self
-                    .prices
-                    .get(&pr_id)
-                    .cloned()
-                    .unwrap_or_else(|| env::panic_str("Price not found in the catalog"));
+                let pr = self.require_price(&pr_id);
                 require!(
                     pr.product_id == prod_id,
                     "Default price does not belong to this product"
@@ -399,46 +401,7 @@ impl Contract {
             "Catalog validator for this price does not match the pool used for this lock"
         );
 
-        let mut validator = self.require_validator(&validator_id);
-
-        // Share price uses effective pool stake; skip the strict check when this is the first mint
-        // (`total_shares == 0`) so the first tranche can mint off `locked` alone.
-        let effective_stake_yocto = effective_stake_for_share_exit(
-            validator.total_staked_balance,
-            validator.pending_to_stake,
-            validator.pending_user_unstake_total,
-        );
-        let validator_total_shares = validator.total_shares.0;
-        if validator_total_shares > 0 {
-            require!(
-                effective_stake_yocto > 0,
-                "No effective stake for share minting; wait for balance refresh or settlement"
-            );
-        }
-        let new_shares = mint_shares(
-            validator_total_shares,
-            effective_stake_yocto,
-            locked.as_yoctonear(),
-        );
-
-        // Validator pool aggregates: new shares and NEAR queued for the next `deposit_and_stake`.
-        validator.total_shares = U128(validator_total_shares.saturating_add(new_shares));
-        validator.pending_to_stake = validator
-            .pending_to_stake
-            .checked_add(locked)
-            .expect("pending_to_stake overflow when recording this lock");
-
-        // This buyer's tranche on this pool (integer share units, same scale as `Validator::total_shares`).
-        let user_validator_shares_key = (buyer.clone(), validator_id.clone());
-        let user_shares_before_lock = self
-            .user_validator_shares
-            .get(&user_validator_shares_key)
-            .copied()
-            .unwrap_or(0);
-        self.user_validator_shares.insert(
-            user_validator_shares_key,
-            user_shares_before_lock.saturating_add(new_shares),
-        );
+        let new_shares = self.mint_shares_for_deposit(&buyer, &validator_id, locked);
 
         // Persist the lock (duration → `end_ns`); `order` ties billing/catalog to this stake.
         let lock_id = crate::ids::next_lock_id(&mut self.id_nonce);
@@ -462,7 +425,6 @@ impl Contract {
 
         self.prices.insert(price.price_id.clone(), price);
         self.products.insert(product.product_id.clone(), product);
-        self.validators.insert(validator_id, validator);
 
         // Drives prepaid lock storage (`per_lock_storage_stake` × count) for this account.
         let user_lock_count_before = self.user_lock_count.get(&buyer).copied().unwrap_or(0);

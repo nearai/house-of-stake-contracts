@@ -5,7 +5,7 @@
 pub use crate::internal::AVG_MONTH_NS;
 use crate::internal::{
     check_near_price_lock, effective_stake_for_share_exit, min_locked_yocto_for_duration,
-    mint_shares, near_from_shares,
+    near_from_shares,
 };
 use crate::*;
 use common::U256;
@@ -78,9 +78,7 @@ impl Contract {
 
         let (sid, sub) = self.require_subscription_owned_by(&buyer, &new_price.product_id);
 
-        let old_price = self.prices.get(&sub.price_id).cloned().unwrap_or_else(|| {
-            env::panic_str("Current subscription price not found in the catalog")
-        });
+        let old_price = self.require_price(&sub.price_id);
         require!(
             new_price.product_id == sub.product_id,
             "Price must belong to this subscription product"
@@ -153,9 +151,7 @@ impl Contract {
             "Price must belong to this subscription product"
         );
 
-        let current = self.prices.get(&sub.price_id).cloned().unwrap_or_else(|| {
-            env::panic_str("Current subscription price not found in the catalog")
-        });
+        let current = self.require_price(&sub.price_id);
         require!(
             target.amount.0 < current.amount.0,
             "Target tier must have a lower catalog amount than current tier"
@@ -191,13 +187,9 @@ impl Contract {
             validator.tx_status == TransactionStatus::Busy,
             "Validator pool must be busy after per-epoch settlement"
         );
-        let has_p = validator.pending_to_stake.as_yoctonear() > 0
-            || validator.pending_to_unstake.as_yoctonear() > 0;
-        if has_p && validator.last_settlement_epoch < env::epoch_height() {
-            PromiseOrValue::Promise(self.try_epoch_stake_or_unstake(validator_id, None))
-        } else {
-            PromiseOrValue::Value(lock_id)
-        }
+        // Pre-user settlement (**0–3**) already ran; new `pending_to_stake` from the upgrade
+        // is queued for the next user action or `epoch_settle` (same as **5a** catalog mint).
+        PromiseOrValue::Value(lock_id)
     }
 }
 
@@ -286,56 +278,12 @@ impl Contract {
     ) -> LockId {
         let mut sub = self.require_subscription_owned_by_id(&buyer, &subscription_id);
 
-        let new_price = self
-            .prices
-            .get(&new_price_id)
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("Price not found in the catalog"));
-        let product = self
-            .products
-            .get(&new_price.product_id)
-            .cloned()
-            .unwrap_or_else(|| env::panic_str("Product not found in the catalog"));
+        let (_, product) = self.require_price_and_product(&new_price_id);
 
         let mut lock = self.require_subscription_lock_owned_by(&sub, &buyer);
 
         let validator_id = product.validator_id.clone();
-        let mut validator = self.require_validator(&validator_id);
-
-        let effective_stake_yocto = effective_stake_for_share_exit(
-            validator.total_staked_balance,
-            validator.pending_to_stake,
-            validator.pending_user_unstake_total,
-        );
-        let validator_total_shares = validator.total_shares.0;
-        if validator_total_shares > 0 {
-            require!(
-                effective_stake_yocto > 0,
-                "No effective stake for share minting; wait for balance refresh or settlement"
-            );
-        }
-        let add_shares = mint_shares(
-            validator_total_shares,
-            effective_stake_yocto,
-            deposit.as_yoctonear(),
-        );
-
-        validator.total_shares = U128(validator_total_shares.saturating_add(add_shares));
-        validator.pending_to_stake = validator
-            .pending_to_stake
-            .checked_add(deposit)
-            .expect("pending_to_stake overflow when recording this lock");
-
-        let user_validator_shares_key = (buyer.clone(), validator_id.clone());
-        let user_shares_before_upgrade = self
-            .user_validator_shares
-            .get(&user_validator_shares_key)
-            .copied()
-            .unwrap_or(0);
-        self.user_validator_shares.insert(
-            user_validator_shares_key,
-            user_shares_before_upgrade.saturating_add(add_shares),
-        );
+        let add_shares = self.mint_shares_for_deposit(&buyer, &validator_id, deposit);
 
         lock.amount_near = lock
             .amount_near
@@ -352,7 +300,6 @@ impl Contract {
         sub.price_id = new_price_id.clone();
 
         let lock_id_out = lock.lock_id.clone();
-        self.validators.insert(validator_id, validator);
         self.locks.insert(lock_id_out.clone(), lock);
         self.subscriptions.insert(subscription_id, sub);
 

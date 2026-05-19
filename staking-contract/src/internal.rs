@@ -3,8 +3,9 @@
 //! Time constants: [`NS_PER_DAY`] is `u128` for fixed-point price math; [`NS_PER_DAY_TIMESTAMP`] is the same
 //! nanosecond length as `u64` for block timestamps (subscription billing anchors in `lock.rs`).
 
-use crate::{Contract, Price};
+use crate::{Contract, Price, ValidatorId};
 use common::U256;
+use near_sdk::json_types::U128;
 use near_sdk::{AccountId, NearToken, is_promise_success, require};
 
 /// Fixed-point denominator for `Price.lock_factor_near_months`.
@@ -110,6 +111,51 @@ pub fn check_near_price_lock(
 }
 
 impl Contract {
+    /// Mints pool share units for `deposit`, bumps [`Validator::pending_to_stake`], and credits the buyer's
+    /// `(account, validator)` share row. Used by catalog lock mint and subscription upgrade.
+    pub(crate) fn mint_shares_for_deposit(
+        &mut self,
+        buyer: &AccountId,
+        validator_id: &ValidatorId,
+        deposit: NearToken,
+    ) -> u128 {
+        let mut validator = self.require_validator(validator_id);
+        let effective_stake_yocto = effective_stake_for_share_exit(
+            validator.total_staked_balance,
+            validator.pending_to_stake,
+            validator.pending_user_unstake_total,
+        );
+        let validator_total_shares = validator.total_shares.0;
+        if validator_total_shares > 0 {
+            require!(
+                effective_stake_yocto > 0,
+                "No effective stake for share minting; wait for balance refresh or settlement"
+            );
+        }
+        let new_shares = mint_shares(
+            validator_total_shares,
+            effective_stake_yocto,
+            deposit.as_yoctonear(),
+        );
+        validator.total_shares = U128(validator_total_shares.saturating_add(new_shares));
+        validator.pending_to_stake = validator
+            .pending_to_stake
+            .checked_add(deposit)
+            .expect("pending_to_stake overflow when recording this lock");
+        let user_validator_shares_key = (buyer.clone(), validator_id.clone());
+        let user_shares_before = self
+            .user_validator_shares
+            .get(&user_validator_shares_key)
+            .copied()
+            .unwrap_or(0);
+        self.user_validator_shares.insert(
+            user_validator_shares_key,
+            user_shares_before.saturating_add(new_shares),
+        );
+        self.validators.insert(validator_id.clone(), validator);
+        new_shares
+    }
+
     /// After pool `get_owner_id`: promise ok, not paused, caller is pool owner.
     pub(crate) fn assert_pool_owner_callback(
         &self,
