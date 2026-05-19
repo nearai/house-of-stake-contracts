@@ -70,13 +70,14 @@ impl Contract {
         require!(lock.validator_id == validator_id, "Lock validator mismatch");
         require!(lock.shares.0 == shares_remove, "Lock shares changed; retry");
 
-        let account_log = lock.account_id.clone();
-        let validator_log = lock.validator_id.clone();
         self.internal_unstake(account_id.clone(), validator_id.clone(), shares_remove);
         lock.status = LockStatus::UnlockRequested;
+        crate::events::log_unlock(
+            lock_id.as_str(),
+            &lock.account_id.clone(),
+            &lock.validator_id.clone(),
+        );
         self.locks.insert(lock_id.clone(), lock);
-
-        crate::events::log_unlock(lock_id.as_str(), &account_log, &validator_log);
 
         Promise::new(env::current_account_id())
     }
