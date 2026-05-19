@@ -95,4 +95,5 @@ check-mock-staking-pool-contract check-mock-pool:
 	cd "$(ROOT)" && cargo check -p mock-staking-pool-contract
 
 test-staking-contract test-staking:
+	$(MAKE) staking-contract mock-staking-pool-contract
 	cd "$(ROOT)" && cargo test -p staking-contract
