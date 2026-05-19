@@ -3,7 +3,7 @@
 //! Time constants: [`NS_PER_DAY`] is `u128` for fixed-point price math; [`NS_PER_DAY_TIMESTAMP`] is the same
 //! nanosecond length as `u64` for block timestamps (subscription billing anchors in `lock.rs`).
 
-use crate::Price;
+use crate::{Contract, Price};
 use common::U256;
 use near_sdk::NearToken;
 
@@ -106,6 +106,29 @@ pub fn check_near_price_lock(
         Ok(())
     } else {
         Err("Locked NEAR or lock duration is too low for this catalog price")
+    }
+}
+
+impl Contract {
+    pub(crate) fn collect_paginated<T, F>(
+        &self,
+        from_index: u64,
+        limit: u64,
+        total_len: u64,
+        mut fetch: F,
+    ) -> Vec<T>
+    where
+        F: FnMut(u32) -> Option<T>,
+    {
+        let mut out = Vec::new();
+        let mut i = from_index;
+        while i < total_len && (out.len() as u64) < limit {
+            if let Some(item) = fetch(i as u32) {
+                out.push(item);
+            }
+            i += 1;
+        }
+        out
     }
 }
 

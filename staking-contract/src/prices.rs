@@ -251,18 +251,6 @@ impl Contract {
     pub fn get_price(&self, price_id: PriceId) -> Option<Price> {
         self.prices.get(&price_id).cloned()
     }
-
-    /// Resolve price → product → pool, run catalog admin preamble, then `get_owner_id` → `build_tail(caller, price_id)`.
-    pub(crate) fn promise_catalog_admin_on_price(
-        &self,
-        price_id: PriceId,
-        build_tail: impl FnOnce(AccountId, PriceId) -> Promise,
-    ) -> Promise {
-        let (_, product) = self.require_price_and_product(&price_id);
-        let (validator_id, expected_caller) =
-            self.catalog_admin_entry_for_pool(&product.validator_id);
-        Self::promise_pool_get_owner_id_then(validator_id, build_tail(expected_caller, price_id))
-    }
 }
 
 impl Contract {
@@ -308,5 +296,17 @@ impl Contract {
         let (price, _) = self.get_active_price_and_product(price_id);
         self.require_recurring_monthly_price(&price);
         price
+    }
+
+    /// Resolve price → product → pool, run catalog admin preamble, then `get_owner_id` → `build_tail(caller, price_id)`.
+    pub(crate) fn promise_catalog_admin_on_price(
+        &self,
+        price_id: PriceId,
+        build_tail: impl FnOnce(AccountId, PriceId) -> Promise,
+    ) -> Promise {
+        let (_, product) = self.require_price_and_product(&price_id);
+        let (validator_id, expected_caller) =
+            self.catalog_admin_entry_for_pool(&product.validator_id);
+        Self::promise_pool_get_owner_id_then(validator_id, build_tail(expected_caller, price_id))
     }
 }

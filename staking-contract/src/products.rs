@@ -307,31 +307,6 @@ impl Contract {
                 .and_then(|id| self.products.get(id).cloned())
         })
     }
-
-    /// Resolve product → pool, run catalog admin preamble, then `get_owner_id` → `build_tail(caller, product_id)`.
-    pub(crate) fn promise_catalog_admin_on_product(
-        &self,
-        product_id: ProductId,
-        build_tail: impl FnOnce(AccountId, ProductId) -> Promise,
-    ) -> Promise {
-        let product = self.require_product(&product_id);
-        let (validator_id, expected_caller) =
-            self.catalog_admin_entry_for_pool(&product.validator_id);
-        Self::promise_pool_get_owner_id_then(validator_id, build_tail(expected_caller, product_id))
-    }
-
-    /// Catalog admin on a known allowlisted pool (e.g. `create_product` before the product exists in storage).
-    pub(crate) fn promise_catalog_admin_on_pool(
-        &self,
-        validator_id: &ValidatorId,
-        build_tail: impl FnOnce(AccountId, ValidatorId) -> Promise,
-    ) -> Promise {
-        let (validator_id, expected_caller) = self.catalog_admin_entry_for_pool(validator_id);
-        Self::promise_pool_get_owner_id_then(
-            validator_id.clone(),
-            build_tail(expected_caller, validator_id),
-        )
-    }
 }
 
 // Internal helpers (also used from [`crate::prices`]).
@@ -358,6 +333,31 @@ impl Contract {
             product.default_price_id = None;
             self.products.insert(product_id.clone(), product);
         }
+    }
+
+    /// Resolve product → pool, run catalog admin preamble, then `get_owner_id` → `build_tail(caller, product_id)`.
+    pub(crate) fn promise_catalog_admin_on_product(
+        &self,
+        product_id: ProductId,
+        build_tail: impl FnOnce(AccountId, ProductId) -> Promise,
+    ) -> Promise {
+        let product = self.require_product(&product_id);
+        let (validator_id, expected_caller) =
+            self.catalog_admin_entry_for_pool(&product.validator_id);
+        Self::promise_pool_get_owner_id_then(validator_id, build_tail(expected_caller, product_id))
+    }
+
+    /// Catalog admin on a known allowlisted pool (e.g. `create_product` before the product exists in storage).
+    pub(crate) fn promise_catalog_admin_on_pool(
+        &self,
+        validator_id: &ValidatorId,
+        build_tail: impl FnOnce(AccountId, ValidatorId) -> Promise,
+    ) -> Promise {
+        let (validator_id, expected_caller) = self.catalog_admin_entry_for_pool(validator_id);
+        Self::promise_pool_get_owner_id_then(
+            validator_id.clone(),
+            build_tail(expected_caller, validator_id),
+        )
     }
 
     /// Keeps [`Contract::product_ids`] in sync when a product is removed from storage.

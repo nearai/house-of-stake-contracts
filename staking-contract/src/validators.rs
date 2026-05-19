@@ -82,20 +82,6 @@ impl Contract {
         crate::events::log_validator_added(&validator_id);
     }
 
-    pub fn get_validator(&self, validator_id: ValidatorId) -> Option<Validator> {
-        self.validators.get(&validator_id).cloned()
-    }
-
-    /// Paginated validator records (stable allowlist order in [`Contract::validator_ids`]).
-    pub fn get_validators(&self, from_index: u64, limit: u64) -> Vec<Validator> {
-        let total_len = self.validator_ids.len() as u64;
-        self.collect_paginated(from_index, limit, total_len, |index| {
-            self.validator_ids
-                .get(index)
-                .and_then(|id| self.validators.get(id).cloned())
-        })
-    }
-
     #[payable]
     pub fn pause_validator(&mut self, validator_id: ValidatorId) {
         near_sdk::assert_one_yocto();
@@ -120,6 +106,24 @@ impl Contract {
         );
         validator.status = ValidatorStatus::Removed;
         self.validators.insert(validator_id, validator);
+    }
+
+    // -------------------------------------------------------------------------
+    // Public validator view functions
+    // -------------------------------------------------------------------------
+
+    pub fn get_validator(&self, validator_id: ValidatorId) -> Option<Validator> {
+        self.validators.get(&validator_id).cloned()
+    }
+
+    /// Paginated validator records (stable allowlist order in [`Contract::validator_ids`]).
+    pub fn get_validators(&self, from_index: u64, limit: u64) -> Vec<Validator> {
+        let total_len = self.validator_ids.len() as u64;
+        self.collect_paginated(from_index, limit, total_len, |index| {
+            self.validator_ids
+                .get(index)
+                .and_then(|id| self.validators.get(id).cloned())
+        })
     }
 }
 
