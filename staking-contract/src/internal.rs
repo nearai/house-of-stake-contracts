@@ -5,7 +5,6 @@
 
 use crate::{Contract, Price};
 use common::U256;
-use near_sdk::NearToken;
 
 /// Fixed-point denominator for `Price.lock_factor_near_months`.
 pub const LOCK_FACTOR_DENOM: u128 = 1_000_000_000_000_000_000_000_000;
@@ -17,35 +16,10 @@ pub const NS_PER_DAY_TIMESTAMP: u64 = 86_400_000_000_000;
 /// Average Gregorian month length in nanoseconds: `30.4375` days = `(487 / 16) * NS_PER_DAY`.
 pub const AVG_MONTH_NS: u128 = NS_PER_DAY * 487 / 16;
 
-pub fn gross_stake_yocto(total_staked_balance: NearToken, pending_to_stake: NearToken) -> u128 {
-    total_staked_balance
-        .as_yoctonear()
-        .saturating_add(pending_to_stake.as_yoctonear())
-}
-
-/// NEAR backing **remaining** circulating shares: gross effective stake minus **all** user exit liability
-/// ([`crate::validators::Validator::pending_user_unstake_total`]) — NEAR already allocated to burned shares
-/// until users claim, whether it still sits in `pending_to_unstake`, unstaked in the pool, or in
-/// `pending_to_withdraw`.
-///
-/// **Solvency:** [`crate::internal::near_from_shares`] must not use gross `gross_stake_yocto` alone after
-/// shares burn down. Subtracting only [`crate::validators::Validator::pending_to_unstake`] is insufficient:
-/// that field drops after a successful pool unstake while user liability remains until claims, which would
-/// let later exits re-price against the same gross. Using the full user liability total keeps exits and
-/// mints aligned with the same net backing.
-pub fn net_stake_yocto(
-    total_staked_balance: NearToken,
-    pending_to_stake: NearToken,
-    pending_user_unstake_total: NearToken,
-) -> u128 {
-    gross_stake_yocto(total_staked_balance, pending_to_stake)
-        .saturating_sub(pending_user_unstake_total.as_yoctonear())
-}
-
 /// Mint shares for a new deposit. First deposit: 1:1 shares to yocto.
 ///
 /// When `total_shares > 0`, callers must ensure `effective_total > 0` or rounding will mis-price mints
-/// (see [`net_stake_yocto`] and guards in [`crate::lock`]).
+/// (see [`crate::validators::Validator::net_stake_yocto`] and guards in [`crate::lock`]).
 pub fn mint_shares(total_shares: u128, effective_total: u128, deposit_yocto: u128) -> u128 {
     if total_shares == 0 || effective_total == 0 {
         return deposit_yocto;

@@ -3,9 +3,7 @@
 //! stays in [`crate::lock`] because it shares the pool refresh / mint pipeline with product locks.
 
 pub use crate::internal::AVG_MONTH_NS;
-use crate::internal::{
-    check_near_price_lock, min_locked_yocto_for_duration, near_from_shares, net_stake_yocto,
-};
+use crate::internal::{check_near_price_lock, min_locked_yocto_for_duration, near_from_shares};
 use crate::*;
 use common::U256;
 use near_sdk::json_types::{U64, U128};
@@ -345,11 +343,7 @@ impl Contract {
 
         let validator_id = lock.validator_id.clone();
         let validator = self.require_validator(&validator_id);
-        let net_stake = net_stake_yocto(
-            validator.total_staked_balance,
-            validator.pending_to_stake,
-            validator.pending_user_unstake_total,
-        );
+        let net_stake = validator.net_stake_yocto();
         let validator_total_shares = validator.total_shares.0;
         let lock_near_val = near_from_shares(lock.shares.0, net_stake, validator_total_shares);
         if lock_near_val == 0 {

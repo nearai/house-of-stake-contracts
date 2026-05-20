@@ -276,10 +276,6 @@ impl Contract {
                 "Recorded pool balance is less than the withdrawn amount; retry after the next successful balance refresh from the pool"
             );
             validator.total_staked_balance = NearToken::from_yoctonear(bal_y - credited_yocto);
-            require!(
-                validator.pending_user_unstake_total.as_yoctonear() > 0,
-                "Cannot record this withdraw: no user pending unstake for this pool; try withdraw to refresh accounting, then retry"
-            );
             validator.pending_to_withdraw = validator
                 .pending_to_withdraw
                 .checked_add(add)
@@ -388,6 +384,12 @@ impl Contract {
     // --- [Pipeline 3a] ---
 
     /// **[Pipeline 3a]** Inline net-zero clear (no pool `deposit` / `unstake`).
+    ///
+    /// When `pending_to_stake == pending_to_unstake`, we can net internally:
+    /// - clear `pending_to_stake`;
+    /// - move as much matched amount as possible into `pending_to_withdraw` to fund user claims
+    ///   without round-tripping through pool `unstake`/`withdraw`;
+    /// - clear the matched `pending_to_unstake` amount without pool round-trip.
     pub(crate) fn apply_net_zero_pending_matched_clear(
         &mut self,
         validator_id: &ValidatorId,
@@ -401,8 +403,15 @@ impl Contract {
             return false;
         }
         validator.pending_to_stake = NearToken::from_near(0);
-        // User tranches are unchanged; re-queue pool unstake for remaining user exit liability.
-        validator.pending_to_unstake = validator.pending_user_unstake_total;
+        validator.pending_to_unstake = NearToken::from_near(0);
+        if matched_pending_yocto > 0 {
+            validator.pending_to_withdraw = NearToken::from_yoctonear(
+                validator
+                    .pending_to_withdraw
+                    .as_yoctonear()
+                    .saturating_add(matched_pending_yocto),
+            );
+        }
         validator.last_settlement_epoch = env::epoch_height();
         self.validators.insert(validator_id.clone(), validator);
         true
@@ -442,11 +451,6 @@ impl Contract {
             validator.pending_to_unstake = NearToken::from_yoctonear(
                 pending_unstake_yocto.saturating_sub(absorbed_unstake_yocto),
             );
-            if validator.pending_to_unstake.as_yoctonear() == 0
-                && validator.pending_user_unstake_total.as_yoctonear() > 0
-            {
-                validator.pending_to_unstake = validator.pending_user_unstake_total;
-            }
             validator.total_staked_balance = validator
                 .total_staked_balance
                 .checked_add(NearToken::from_yoctonear(net_stake_yocto))

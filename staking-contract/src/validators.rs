@@ -1,4 +1,4 @@
-use crate::internal::{mint_shares, near_from_shares, net_stake_yocto};
+use crate::internal::{mint_shares, near_from_shares};
 use crate::*;
 use near_sdk::json_types::{U64, U128};
 use near_sdk::{
@@ -41,14 +41,40 @@ pub struct Validator {
     /// NEAR that has been **`withdraw`**n from the pool into this contract and sits in the claim bucket until
     /// users call **`withdraw`** (epoch-gated tranches).
     pub pending_to_withdraw: NearToken,
-    /// Sum of all user **`user_pending_unstake`** tranche amounts for this pool; must stay consistent with
-    /// claims and **`pending_to_withdraw`**.
-    pub pending_user_unstake_total: NearToken,
     /// Accounts that currently have at least one non-empty tranche in **`user_pending_unstake`** for this pool.
     pub accounts_with_pending_unstake: Vec<AccountId>,
 
     /// At most one in-flight cross-contract **mutating** pool pipeline for this validator (`Idle` vs `Busy`).
     pub tx_status: TransactionStatus,
+}
+
+impl Validator {
+    pub fn pending_user_liability_yocto(&self) -> u128 {
+        self.pending_to_unstake
+            .as_yoctonear()
+            .saturating_add(self.pending_to_withdraw.as_yoctonear())
+    }
+
+    pub fn gross_stake_yocto(&self) -> u128 {
+        self.total_staked_balance
+            .as_yoctonear()
+            .saturating_add(self.pending_to_stake.as_yoctonear())
+    }
+
+    /// NEAR backing **remaining** circulating shares: gross effective stake minus **all** user
+    /// exit liability (`pending_to_unstake + pending_to_withdraw`) — NEAR already allocated to burned shares
+    /// until users claim, whether it still sits in `pending_to_unstake`, unstaked in the pool,
+    /// or in `pending_to_withdraw`.
+    ///
+    /// **Solvency:** share pricing must not use gross backing alone after shares burn down.
+    /// Subtracting only `pending_to_unstake` is insufficient: that field drops after a successful
+    /// pool unstake while user liability remains until claims, which would let later exits
+    /// re-price against the same gross. Using the full user liability total keeps exits and
+    /// mints aligned with the same net backing.
+    pub fn net_stake_yocto(&self) -> u128 {
+        self.gross_stake_yocto()
+            .saturating_sub(self.pending_user_liability_yocto())
+    }
 }
 
 #[near]
@@ -75,7 +101,6 @@ impl Contract {
             last_unstake_epoch: 0,
             last_settlement_epoch: 0,
             pending_to_withdraw: NearToken::from_near(0),
-            pending_user_unstake_total: NearToken::from_near(0),
             accounts_with_pending_unstake: Vec::new(),
             tx_status: TransactionStatus::Idle,
         };
@@ -102,9 +127,8 @@ impl Contract {
             validator.total_shares.0 == 0
                 && validator.pending_to_stake.as_yoctonear() == 0
                 && validator.pending_to_unstake.as_yoctonear() == 0
-                && validator.pending_to_withdraw.as_yoctonear() == 0
-                && validator.pending_user_unstake_total.as_yoctonear() == 0,
-            "Cannot remove this validator: all stake, pending stake and unstake, withdraw bucket, and user claims must be cleared first"
+                && validator.pending_to_withdraw.as_yoctonear() == 0,
+            "Cannot remove this validator: all stake, pending stake/unstake, and withdraw bucket must be cleared first"
         );
         validator.status = ValidatorStatus::Removed;
         self.validators.insert(validator_id, validator);
@@ -241,11 +265,7 @@ impl Contract {
         deposit: NearToken,
     ) -> u128 {
         let mut validator = self.require_validator(validator_id);
-        let net_stake = net_stake_yocto(
-            validator.total_staked_balance,
-            validator.pending_to_stake,
-            validator.pending_user_unstake_total,
-        );
+        let net_stake = validator.net_stake_yocto();
         let validator_total_shares = validator.total_shares.0;
         if validator_total_shares > 0 {
             require!(
@@ -280,8 +300,8 @@ impl Contract {
     ///
     /// Same internal path as [`Contract::unlock`] after epoch preliminaries (settlement -> claim).
     ///
-    /// Pricing uses [`crate::internal::net_stake_yocto`]: **gross** backing minus the full
-    /// unsettled user exit liability [`Validator::pending_user_unstake_total`] (before this commit). That
+    /// Pricing uses [`Validator::net_stake_yocto`]: **gross** backing minus unsettled user exit liability
+    /// (`pending_to_unstake + pending_to_withdraw`) before this commit. That
     /// keeps exits aligned with minting and prevents re-pricing after pool unstake clears
     /// [`Validator::pending_to_unstake`] while claims are still outstanding.
     ///
@@ -306,12 +326,8 @@ impl Contract {
             "Cannot exit shares: validator pool has no shares or amount exceeds pool total"
         );
 
-        // Exit price: same effective backing as mint paths (`pending_user_unstake_total` in the divisor).
-        let net_stake = net_stake_yocto(
-            validator.total_staked_balance,
-            validator.pending_to_stake,
-            validator.pending_user_unstake_total,
-        );
+        // Exit price: same effective backing as mint paths (unsettled user liability in the divisor).
+        let net_stake = validator.net_stake_yocto();
         require!(
             net_stake > 0,
             "Cannot price this exit: no effective stake left for remaining shares; wait for stake or withdraw steps to finish, then retry"
@@ -328,10 +344,6 @@ impl Contract {
             .pending_to_unstake
             .checked_add(near_token)
             .expect("pending_to_unstake overflow");
-        validator.pending_user_unstake_total = validator
-            .pending_user_unstake_total
-            .checked_add(near_token)
-            .expect("pending_user_unstake_total overflow");
 
         // User position on this pool: decrement or drop the `(account, validator)` share balance.
         let account_validator_shares_key = (account_id.clone(), validator_id.clone());

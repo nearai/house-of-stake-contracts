@@ -140,11 +140,6 @@ impl Contract {
             pending_withdraw_bucket_yocto > 0,
             "No NEAR is in the withdraw bucket yet; wait until unstaked funds are moved from the pool (e.g. call withdraw again after epochs settle), or retry later"
         );
-        require!(
-            validator.pending_user_unstake_total.as_yoctonear() > 0,
-            "Nothing to claim: total user liability for this pool is zero (no tranches left to match the withdraw bucket)"
-        );
-
         let eh = env::epoch_height();
         let (credit_yocto, user_done) = self.remove_claimable_tranches(&account_validator_key, eh);
         require!(
@@ -160,13 +155,6 @@ impl Contract {
             .pending_to_withdraw
             .checked_sub(NearToken::from_yoctonear(credit_yocto))
             .expect("pending_to_withdraw accounting mismatch; contact the contract maintainers");
-        validator.pending_user_unstake_total = validator
-            .pending_user_unstake_total
-            .checked_sub(NearToken::from_yoctonear(credit_yocto))
-            .expect(
-                "pending_user_unstake_total accounting mismatch; contact the contract maintainers",
-            );
-
         if user_done {
             validator
                 .accounts_with_pending_unstake

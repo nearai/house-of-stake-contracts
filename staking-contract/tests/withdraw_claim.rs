@@ -39,7 +39,7 @@ fn withdraw_fails_when_bucket_smaller_than_claimable_sum() {
         .expect("validator row")
         .clone();
     validator.pending_to_withdraw = NearToken::from_near(12);
-    validator.pending_user_unstake_total = NearToken::from_near(15);
+    validator.pending_to_unstake = NearToken::from_near(3);
     c.validators.insert(pool.clone(), validator);
 
     c.user_pending_unstake.insert(
@@ -72,7 +72,7 @@ fn withdraw_removes_all_claimable_tranches_and_pays_sum() {
         .expect("validator row")
         .clone();
     validator.pending_to_withdraw = NearToken::from_near(20);
-    validator.pending_user_unstake_total = NearToken::from_near(15);
+    validator.pending_to_unstake = NearToken::from_near(0);
     c.validators.insert(pool.clone(), validator);
 
     let ukey = (acct(BUYER), pool.clone());
@@ -99,10 +99,7 @@ fn withdraw_removes_all_claimable_tranches_and_pays_sum() {
 
     let validator = c.get_validator(pool).expect("validator row");
     assert_eq!(validator.pending_to_withdraw, NearToken::from_near(5));
-    assert_eq!(
-        validator.pending_user_unstake_total,
-        NearToken::from_near(0)
-    );
+    assert_eq!(validator.pending_to_unstake, NearToken::from_near(0));
 
     let remaining = c
         .user_pending_unstake
