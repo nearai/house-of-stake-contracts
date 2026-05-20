@@ -17,6 +17,7 @@ use mock_pool::{
     pool_total_balance_yocto, setup_staking_fixture,
     setup_staking_fixture_with_unstake_settle_epochs,
 };
+use near_workspaces::types::NearToken;
 use serde_json::json;
 use std::time::Instant;
 
@@ -344,6 +345,12 @@ async fn epoch_settle_net_zero_when_stake_and_unstake_pending_match()
     fast_forward_until_timestamp(&worker, end_ns.saturating_add(1)).await?;
 
     // Same NEAR epoch: unlock queues unstake; a second lock queues matching stake (no pool op yet).
+    let top_up = worker
+        .root_account()
+        .expect("sandbox root account")
+        .transfer_near(buyer.id(), NearToken::from_near(50))
+        .await?;
+    assert!(top_up.is_success(), "buyer balance top-up must succeed");
     buyer_unlock(&buyer, staking.id(), &lock_id).await?;
     buyer_lock_for_product(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
 

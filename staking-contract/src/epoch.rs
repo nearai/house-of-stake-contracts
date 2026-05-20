@@ -24,7 +24,7 @@ pub trait ExtSelfEpoch {
     /// **[Pipeline 1]** After pool `get_account`: refresh balance, optional **2a–2c**, then **3**.
     fn on_epoch_settlement_after_pool_account(
         &mut self,
-        #[callback] pool_account: PoolAccountView,
+        #[callback_result] pool_account_result: Result<PoolAccountView, PromiseError>,
         validator_id: ValidatorId,
         cont: PerEpochContinue,
     ) -> Promise;
@@ -170,16 +170,19 @@ impl Contract {
     #[private]
     pub fn on_epoch_settlement_after_pool_account(
         &mut self,
-        #[callback] pool_account: PoolAccountView,
+        #[callback_result] pool_account_result: Result<PoolAccountView, PromiseError>,
         validator_id: ValidatorId,
         cont: PerEpochContinue,
     ) -> Promise {
-        if !is_promise_success() {
-            events::log_epoch_operation("epoch_get_account_failed_release", &validator_id);
-            return ext_self_epoch::ext(env::current_account_id())
-                .with_static_gas(callbacks::ON_EPOCH_PIPELINE_TERMINAL_RELEASE)
-                .on_epoch_pipeline_terminal_release(validator_id);
-        }
+        let pool_account = match pool_account_result {
+            Ok(pool_account) => pool_account,
+            Err(_) => {
+                events::log_epoch_operation("epoch_get_account_failed_release", &validator_id);
+                return ext_self_epoch::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_EPOCH_PIPELINE_TERMINAL_RELEASE)
+                    .on_epoch_pipeline_terminal_release(validator_id);
+            }
+        };
         let mut validator = self.require_validator(&validator_id);
         self.assert_validator_busy(
             &validator,
