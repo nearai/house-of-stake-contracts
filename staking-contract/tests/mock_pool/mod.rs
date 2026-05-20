@@ -277,15 +277,24 @@ pub async fn buyer_withdraw(
     staking_id: &near_workspaces::AccountId,
     pool_id: &near_workspaces::AccountId,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    buyer_withdraw_result(buyer, staking_id, pool_id)
+        .await?
+        .into_result()?;
+    Ok(())
+}
+
+pub async fn buyer_withdraw_result(
+    buyer: &near_workspaces::Account,
+    staking_id: &near_workspaces::AccountId,
+    pool_id: &near_workspaces::AccountId,
+) -> Result<near_workspaces::result::ExecutionFinalResult, near_workspaces::error::Error> {
     buyer
         .call(staking_id, "withdraw")
         .args_json(json!({ "validator_id": pool_id }))
         .deposit(NearToken::from_yoctonear(1))
         .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
-        .await?
-        .into_result()?;
-    Ok(())
+        .await
 }
 
 pub async fn call_epoch_settle(

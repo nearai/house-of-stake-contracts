@@ -9,14 +9,14 @@
 mod mock_pool;
 
 use mock_pool::{
-    SETTLEMENT_PIPELINE_GAS_TGAS, buyer_cancel_subscription, buyer_lock_for_product,
-    buyer_lock_for_subscription, buyer_storage_deposit, buyer_unlock, buyer_withdraw,
-    call_epoch_settle, create_subscription_product_and_price, fast_forward_until_epoch_delta,
-    fast_forward_until_timestamp, fetch_validator, json_near_token_yocto, json_tx_status,
-    json_u64_field, pool_set_fail_get_account, pool_total_balance_yocto, setup_staking_fixture,
+    buyer_cancel_subscription, buyer_lock_for_product, buyer_lock_for_subscription,
+    buyer_storage_deposit, buyer_unlock, buyer_withdraw, buyer_withdraw_result, call_epoch_settle,
+    create_subscription_product_and_price, fast_forward_blocks_chunked,
+    fast_forward_until_epoch_delta, fast_forward_until_timestamp, fetch_validator,
+    json_near_token_yocto, json_tx_status, json_u64_field, pool_set_fail_get_account,
+    pool_total_balance_yocto, setup_staking_fixture,
     setup_staking_fixture_with_unstake_settle_epochs,
 };
-use near_workspaces::types::{Gas as WsGas, NearToken};
 use serde_json::json;
 use std::time::Instant;
 
@@ -450,14 +450,8 @@ async fn early_withdraw_failure_still_releases_busy_and_later_retry_succeeds()
     buyer_unlock(&buyer, staking.id(), &lock_id).await?;
 
     // Too early for tranche claimability; withdraw should fail but must not wedge Busy.
-    worker.fast_forward(50).await?;
-    let early = buyer
-        .call(staking.id(), "withdraw")
-        .args_json(json!({ "validator_id": pool.id() }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
-        .transact()
-        .await?;
+    fast_forward_blocks_chunked(&worker, 50).await?;
+    let early = buyer_withdraw_result(&buyer, staking.id(), pool.id()).await?;
     assert!(
         early.is_failure(),
         "early withdraw should fail before claim epoch"
@@ -470,8 +464,15 @@ async fn early_withdraw_failure_still_releases_busy_and_later_retry_succeeds()
         "failed withdraw tail must still release pipeline Busy"
     );
 
-    // After enough blocks, withdraw should succeed.
-    worker.fast_forward(8_000).await?;
+    // Drive settlement deterministically: one epoch to run pool unstake, one more to pull unstaked funds.
+    fast_forward_until_epoch_delta(&worker, 1).await?;
+    call_epoch_settle(&buyer, staking.id(), pool.id())
+        .await?
+        .into_result()?;
+    fast_forward_until_epoch_delta(&worker, 1).await?;
+    call_epoch_settle(&buyer, staking.id(), pool.id())
+        .await?
+        .into_result()?;
     buyer_withdraw(&buyer, staking.id(), pool.id()).await?;
 
     let v_after_retry = fetch_validator(&worker, staking.id(), pool.id()).await?;
