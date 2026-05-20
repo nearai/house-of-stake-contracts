@@ -45,6 +45,10 @@ pub struct MockStakingPoolContract {
     unstaked: LookupMap<AccountId, NearToken>,
     /// NEAR attributed as staked for each pool participant (here: usually the staking contract id).
     staked: LookupMap<AccountId, NearToken>,
+    /// Test hook: force `get_account` to fail while enabled.
+    fail_get_account: bool,
+    /// Test hook: force next `withdraw` to fail.
+    fail_next_withdraw: bool,
 }
 
 #[near]
@@ -55,12 +59,32 @@ impl MockStakingPoolContract {
             owner_id,
             unstaked: LookupMap::new(StorageKey::Unstaked),
             staked: LookupMap::new(StorageKey::Staked),
+            fail_get_account: false,
+            fail_next_withdraw: false,
         }
     }
 
     /// View used by staking catalog (`products.rs`) and epoch logic to authorize validator-owner actions.
     pub fn get_owner_id(&self) -> AccountId {
         self.owner_id.clone()
+    }
+
+    /// Test-only control: make `get_account` panic while enabled.
+    pub fn set_fail_get_account(&mut self, fail: bool) {
+        require!(
+            env::predecessor_account_id() == self.owner_id,
+            "Only pool owner can set test failure flags"
+        );
+        self.fail_get_account = fail;
+    }
+
+    /// Test-only control: make next `withdraw` panic.
+    pub fn set_fail_next_withdraw(&mut self, fail: bool) {
+        require!(
+            env::predecessor_account_id() == self.owner_id,
+            "Only pool owner can set test failure flags"
+        );
+        self.fail_next_withdraw = fail;
     }
 
     /// Consumes attached NEAR and credits `staked[predecessor]`.
@@ -102,6 +126,9 @@ impl MockStakingPoolContract {
 
     /// Staked + unstaked snapshot (production pools expose the same via `get_account`).
     pub fn get_account(&self, account_id: AccountId) -> PoolAccountView {
+        if self.fail_get_account {
+            env::panic_str("mock pool forced get_account failure");
+        }
         PoolAccountView {
             unstaked_balance: U128(self.get_unstaked(&account_id).as_yoctonear()),
             staked_balance: U128(self.get_staked(&account_id).as_yoctonear()),
@@ -124,6 +151,10 @@ impl MockStakingPoolContract {
     ///
     /// Must return [`Promise`] so the caller’s `.then` callback (`on_epoch_withdraw_transfer_done`) fires.
     pub fn withdraw(&mut self, amount: NearToken) -> Promise {
+        if self.fail_next_withdraw {
+            self.fail_next_withdraw = false;
+            env::panic_str("mock pool forced withdraw failure");
+        }
         let account_id = env::predecessor_account_id();
         let us = self.get_unstaked(&account_id);
         require!(

@@ -257,6 +257,36 @@ pub async fn call_epoch_settle(
         .await
 }
 
+pub async fn pool_set_fail_get_account(
+    validator_owner: &near_workspaces::Account,
+    pool_id: &near_workspaces::AccountId,
+    fail: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    validator_owner
+        .call(pool_id, "set_fail_get_account")
+        .args_json(json!({ "fail": fail }))
+        .gas(WsGas::from_tgas(50))
+        .transact()
+        .await?
+        .into_result()?;
+    Ok(())
+}
+
+pub async fn pool_set_fail_next_withdraw(
+    validator_owner: &near_workspaces::Account,
+    pool_id: &near_workspaces::AccountId,
+    fail: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    validator_owner
+        .call(pool_id, "set_fail_next_withdraw")
+        .args_json(json!({ "fail": fail }))
+        .gas(WsGas::from_tgas(50))
+        .transact()
+        .await?
+        .into_result()?;
+    Ok(())
+}
+
 pub async fn pool_total_balance_yocto(
     worker: &Worker<Sandbox>,
     pool_id: &near_workspaces::AccountId,

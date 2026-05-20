@@ -90,6 +90,12 @@ pub trait ExtSelfEpoch {
         validator_id: ValidatorId,
         shares_remove: u128,
     );
+    /// **[Pipeline 5c]** User withdraw transfer after pre-user settlement (`withdraw.rs`).
+    fn on_withdraw_user_transfer_after_settle(
+        &mut self,
+        account_id: AccountId,
+        validator_id: ValidatorId,
+    ) -> Promise;
     /// **[Pipeline 6]** After **4** tail promise completes: sets pipeline **`Idle`**.
     fn on_epoch_pipeline_terminal_release(&mut self, validator_id: ValidatorId);
     /// **[Pipeline 6]** Same as `on_epoch_pipeline_terminal_release`, but preserves lock id return.
@@ -176,9 +182,10 @@ impl Contract {
         cont: PerEpochContinue,
     ) -> Promise {
         if !is_promise_success() {
-            env::panic_str(
-                "Could not refresh validator balance from the pool; retry in a few blocks",
-            );
+            events::log_epoch_operation("epoch_get_account_failed_release", &validator_id);
+            return ext_self_epoch::ext(env::current_account_id())
+                .with_static_gas(callbacks::ON_EPOCH_PIPELINE_TERMINAL_RELEASE)
+                .on_epoch_pipeline_terminal_release(validator_id);
         }
         let mut validator = self.require_validator(&validator_id);
         self.assert_validator_busy(
@@ -582,7 +589,9 @@ impl Contract {
                 account_id,
                 validator_id,
             } => (
-                self.payout_user_withdraw(account_id, validator_id),
+                ext_self_epoch::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_WITHDRAW_TAIL_AFTER_PRE_USER)
+                    .on_withdraw_user_transfer_after_settle(account_id, validator_id),
                 ReleaseKind::Terminal,
             ),
             PerEpochContinue::SettleOnly { .. } => {

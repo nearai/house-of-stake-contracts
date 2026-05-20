@@ -9,12 +9,13 @@
 mod mock_pool;
 
 use mock_pool::{
-    buyer_cancel_subscription, buyer_lock_for_product, buyer_lock_for_subscription,
-    buyer_storage_deposit, buyer_unlock, buyer_withdraw, call_epoch_settle,
-    create_subscription_product_and_price, fast_forward_until_timestamp, fetch_validator,
-    json_near_token_yocto, json_tx_status, json_u64_field, pool_total_balance_yocto,
-    setup_staking_fixture,
+    SETTLEMENT_PIPELINE_GAS_TGAS, buyer_cancel_subscription, buyer_lock_for_product,
+    buyer_lock_for_subscription, buyer_storage_deposit, buyer_unlock, buyer_withdraw,
+    call_epoch_settle, create_subscription_product_and_price, fast_forward_until_timestamp,
+    fetch_validator, json_near_token_yocto, json_tx_status, json_u64_field,
+    pool_set_fail_get_account, pool_total_balance_yocto, setup_staking_fixture,
 };
+use near_workspaces::types::{Gas as WsGas, NearToken};
 use serde_json::json;
 
 const SHORT_LOCK_NS: &str = "1000000000";
@@ -64,6 +65,39 @@ async fn epoch_settle_fast_path_succeeds_when_slot_already_consumed()
 
     let v = fetch_validator(&worker, staking.id(), pool.id()).await?;
     assert_eq!(json_tx_status(&v["tx_status"]), Some("Idle"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn epoch_settle_get_account_failure_releases_busy_and_allows_retry()
+-> Result<(), Box<dyn std::error::Error>> {
+    let worker = near_workspaces::sandbox().await?;
+    let (staking, pool, owner, _product_id, _price_id) = setup_staking_fixture(&worker).await?;
+    let buyer = worker.dev_create_account().await?;
+
+    pool_set_fail_get_account(&owner, pool.id(), true).await?;
+
+    let failed = call_epoch_settle(&buyer, staking.id(), pool.id()).await?;
+    assert!(
+        failed.is_failure(),
+        "forced pool get_account failure should fail this epoch_settle call"
+    );
+
+    let v_after_fail = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    assert_eq!(
+        json_tx_status(&v_after_fail["tx_status"]),
+        Some("Idle"),
+        "failed get_account callback must still release pipeline Busy"
+    );
+
+    pool_set_fail_get_account(&owner, pool.id(), false).await?;
+    call_epoch_settle(&buyer, staking.id(), pool.id())
+        .await?
+        .into_result()?;
+
+    let v_after_retry = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    assert_eq!(json_tx_status(&v_after_retry["tx_status"]), Some("Idle"));
 
     Ok(())
 }
@@ -288,6 +322,57 @@ async fn withdraw_runs_settlement_prefetch_before_payout() -> Result<(), Box<dyn
         balance_after > balance_before,
         "withdraw should transfer NEAR after settlement prefetch and tranche payout"
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn early_withdraw_failure_still_releases_busy_and_later_retry_succeeds()
+-> Result<(), Box<dyn std::error::Error>> {
+    let worker = near_workspaces::sandbox().await?;
+    let (staking, pool, _owner, _product_id, price_id) = setup_staking_fixture(&worker).await?;
+    let buyer = worker.dev_create_account().await?;
+
+    buyer_storage_deposit(&buyer, staking.id()).await?;
+    let lock_id =
+        buyer_lock_for_product(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
+
+    let lock: serde_json::Value = worker
+        .view(staking.id(), "get_lock")
+        .args_json(json!({ "lock_id": lock_id }))
+        .await?
+        .json()?;
+    let end_ns = json_u64_field(&lock["end_ns"]).expect("lock.end_ns");
+    fast_forward_until_timestamp(&worker, end_ns.saturating_add(1)).await?;
+    buyer_unlock(&buyer, staking.id(), &lock_id).await?;
+
+    // Too early for tranche claimability; withdraw should fail but must not wedge Busy.
+    worker.fast_forward(50).await?;
+    let early = buyer
+        .call(staking.id(), "withdraw")
+        .args_json(json!({ "validator_id": pool.id() }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
+        .transact()
+        .await?;
+    assert!(
+        early.is_failure(),
+        "early withdraw should fail before claim epoch"
+    );
+
+    let v_after_fail = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    assert_eq!(
+        json_tx_status(&v_after_fail["tx_status"]),
+        Some("Idle"),
+        "failed withdraw tail must still release pipeline Busy"
+    );
+
+    // After enough blocks, withdraw should succeed.
+    worker.fast_forward(8_000).await?;
+    buyer_withdraw(&buyer, staking.id(), pool.id()).await?;
+
+    let v_after_retry = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    assert_eq!(json_tx_status(&v_after_retry["tx_status"]), Some("Idle"));
 
     Ok(())
 }

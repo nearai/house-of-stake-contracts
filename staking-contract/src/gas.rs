@@ -41,6 +41,8 @@ pub mod callbacks {
     pub const ON_LOCK_FINALLY_MINT: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// Unlock tail after pre-user settlement.
     pub const ON_UNLOCK_TAIL_AFTER_PRE_USER: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
+    /// Withdraw tail after pre-user settlement.
+    pub const ON_WITHDRAW_TAIL_AFTER_PRE_USER: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// Subscription upgrade after pre-user settlement.
     pub const ON_SUBSCRIPTION_UPGRADE_AFTER_SETTLE: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// After user-flow tail promise completes: release pipeline `Busy`.

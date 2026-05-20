@@ -66,6 +66,16 @@ impl Contract {
             )
         }
     }
+
+    /// **[Pipeline 5c]** User transfer tail after shared pre-user settlement (**0–4**).
+    #[private]
+    pub fn on_withdraw_user_transfer_after_settle(
+        &mut self,
+        account_id: AccountId,
+        validator_id: ValidatorId,
+    ) -> Promise {
+        self.payout_user_withdraw(account_id, validator_id)
+    }
 }
 
 // Tranche math, bucket claim (no transfer), and payout orchestration.
