@@ -261,8 +261,9 @@ async fn repeated_unstake_wait_window_does_not_wedge_busy() -> Result<(), Box<dy
         .into_result()?;
     let v_after_first_settle = fetch_validator(&worker, staking.id(), pool.id()).await?;
     eprintln!(
-        "[timing][wait-window] after first settle last_unstake_epoch={} pending_to_unstake={} pending_to_withdraw={}",
+        "[timing][wait-window] after first settle last_unstake_epoch={} pending_to_stake={} pending_to_unstake={} pending_to_withdraw={}",
         json_u64_field(&v_after_first_settle["last_unstake_epoch"]).unwrap_or(0),
+        yocto(&v_after_first_settle, "pending_to_stake"),
         yocto(&v_after_first_settle, "pending_to_unstake"),
         yocto(&v_after_first_settle, "pending_to_withdraw")
     );
@@ -282,8 +283,9 @@ async fn repeated_unstake_wait_window_does_not_wedge_busy() -> Result<(), Box<dy
     buyer_unlock(&buyer_a, staking.id(), &lock_a).await?;
     let v_after_unlock_a = fetch_validator(&worker, staking.id(), pool.id()).await?;
     eprintln!(
-        "[timing][wait-window] after unlock A last_unstake_epoch={} pending_to_unstake={} pending_to_withdraw={}",
+        "[timing][wait-window] after unlock A last_unstake_epoch={} pending_to_stake={} pending_to_unstake={} pending_to_withdraw={}",
         json_u64_field(&v_after_unlock_a["last_unstake_epoch"]).unwrap_or(0),
+        yocto(&v_after_unlock_a, "pending_to_stake"),
         yocto(&v_after_unlock_a, "pending_to_unstake"),
         yocto(&v_after_unlock_a, "pending_to_withdraw")
     );
@@ -303,8 +305,9 @@ async fn repeated_unstake_wait_window_does_not_wedge_busy() -> Result<(), Box<dy
         .into_result()?;
     let v_after_second_settle = fetch_validator(&worker, staking.id(), pool.id()).await?;
     eprintln!(
-        "[timing][wait-window] after second settle last_unstake_epoch={} pending_to_unstake={} pending_to_withdraw={}",
+        "[timing][wait-window] after second settle last_unstake_epoch={} pending_to_stake={} pending_to_unstake={} pending_to_withdraw={}",
         json_u64_field(&v_after_second_settle["last_unstake_epoch"]).unwrap_or(0),
+        yocto(&v_after_second_settle, "pending_to_stake"),
         yocto(&v_after_second_settle, "pending_to_unstake"),
         yocto(&v_after_second_settle, "pending_to_withdraw")
     );
@@ -313,8 +316,9 @@ async fn repeated_unstake_wait_window_does_not_wedge_busy() -> Result<(), Box<dy
     buyer_unlock(&buyer_b, staking.id(), &lock_b).await?;
     let v_after_unlock_b = fetch_validator(&worker, staking.id(), pool.id()).await?;
     eprintln!(
-        "[timing][wait-window] after unlock B last_unstake_epoch={} pending_to_unstake={} pending_to_withdraw={}",
+        "[timing][wait-window] after unlock B last_unstake_epoch={} pending_to_stake={} pending_to_unstake={} pending_to_withdraw={}",
         json_u64_field(&v_after_unlock_b["last_unstake_epoch"]).unwrap_or(0),
+        yocto(&v_after_unlock_b, "pending_to_stake"),
         yocto(&v_after_unlock_b, "pending_to_unstake"),
         yocto(&v_after_unlock_b, "pending_to_withdraw")
     );
@@ -337,8 +341,9 @@ async fn repeated_unstake_wait_window_does_not_wedge_busy() -> Result<(), Box<dy
 
     let v = fetch_validator(&worker, staking.id(), pool.id()).await?;
     eprintln!(
-        "[timing][wait-window] final last_unstake_epoch={} pending_to_unstake={} pending_to_withdraw={}",
+        "[timing][wait-window] final last_unstake_epoch={} pending_to_stake={} pending_to_unstake={} pending_to_withdraw={}",
         json_u64_field(&v["last_unstake_epoch"]).unwrap_or(0),
+        yocto(&v, "pending_to_stake"),
         yocto(&v, "pending_to_unstake"),
         yocto(&v, "pending_to_withdraw")
     );
