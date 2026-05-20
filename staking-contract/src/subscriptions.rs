@@ -9,7 +9,7 @@ use crate::internal::{
 };
 use crate::*;
 use common::U256;
-use near_sdk::json_types::U128;
+use near_sdk::json_types::{U64, U128};
 use near_sdk::{AccountId, NearToken, PromiseOrValue, assert_one_yocto, env, near, require};
 
 /// Extend `from_ns` by `months` × average Gregorian months (linear approximation).
@@ -30,7 +30,10 @@ impl Contract {
         assert_one_yocto();
         self.assert_not_paused();
         let buyer = env::predecessor_account_id();
-        let (sid, mut sub) = self.require_subscription_owned_by(&buyer, &product_id);
+        let (sid, sub) = self.require_subscription_owned_by(&buyer, &product_id);
+        // Normalize stale active windows before marking cancel-at-end so stored `end_ns`
+        // represents the current virtual billing period boundary.
+        let mut sub = self.project_subscription_view_now(sub);
         Self::assert_subscription_active(&sub);
         sub.cancel_at_period_end = true;
         self.subscriptions.insert(sid.clone(), sub.clone());
@@ -164,7 +167,10 @@ impl Contract {
     // -------------------------------------------------------------------------
 
     pub fn get_subscription(&self, subscription_id: SubscriptionId) -> Option<Subscription> {
-        self.subscriptions.get(subscription_id.as_str()).cloned()
+        self.subscriptions
+            .get(subscription_id.as_str())
+            .cloned()
+            .map(|sub| self.project_subscription_view_now(sub))
     }
 
     /// Lookup subscription by account and catalog product (at most one subscription per product).
@@ -177,7 +183,10 @@ impl Contract {
             .subscription_by_account_product
             .get(&(account_id, product_id.clone()))?
             .clone();
-        self.subscriptions.get(sid.as_str()).cloned()
+        self.subscriptions
+            .get(sid.as_str())
+            .cloned()
+            .map(|sub| self.project_subscription_view_now(sub))
     }
 
     pub fn get_subscription_for_price(
@@ -367,6 +376,20 @@ impl Contract {
         self.locks.insert(lock.lock_id.clone(), lock);
 
         crate::events::log_subscription_downgrade_prorate(buyer, &sub.product_id, near_amt);
+    }
+
+    fn project_subscription_view_now(&self, mut sub: Subscription) -> Subscription {
+        if sub.status != SubscriptionStatus::Active || sub.cancel_at_period_end {
+            return sub;
+        }
+        let now = env::block_timestamp();
+        while now >= sub.end_ns.0 {
+            let next_start = sub.end_ns.0;
+            let next_end = add_months_stripe_style(sub.anchor_day, 1, next_start);
+            sub.start_ns = U64(next_start);
+            sub.end_ns = U64(next_end);
+        }
+        sub
     }
 }
 
