@@ -335,6 +335,69 @@ pub async fn setup_staking_fixture(
     Ok((staking, pool, validator_owner, product_id, price_id))
 }
 
+/// Same as [`setup_staking_fixture`] but allows overriding `epoch_unstake_settle_epochs`.
+pub async fn setup_staking_fixture_with_unstake_settle_epochs(
+    worker: &Worker<Sandbox>,
+    epoch_unstake_settle_epochs: u64,
+) -> Result<
+    (
+        near_workspaces::Account,
+        near_workspaces::Account,
+        near_workspaces::Account,
+        String,
+        String,
+    ),
+    Box<dyn std::error::Error>,
+> {
+    let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
+    let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
+
+    let staking = worker.dev_create_account().await?;
+    let pool = worker.dev_create_account().await?;
+    let validator_owner = worker.dev_create_account().await?;
+
+    staking
+        .batch(staking.id())
+        .deploy(&staking_wasm)
+        .call(
+            Function::new("new")
+                .args_json(json!({
+                    "config": {
+                        "owner_account_id": staking.id(),
+                        "proposed_new_owner_account_id": null,
+                        "guardians": [],
+                        "min_lock_duration_ns": "1",
+                        "max_lock_duration_ns": "10000000000000000000",
+                        "epoch_unstake_settle_epochs": epoch_unstake_settle_epochs,
+                        "min_storage_deposit": "10000000000000000000000",
+                        "per_lock_storage_stake": "0",
+                        "min_lock_amount": "1000000000000000000000000",
+                    }
+                }))
+                .gas(WsGas::from_tgas(50)),
+        )
+        .transact()
+        .await?
+        .into_result()?;
+
+    pool.batch(pool.id())
+        .deploy(&pool_wasm)
+        .call(
+            Function::new("new")
+                .args_json(json!({ "owner_id": validator_owner.id() }))
+                .gas(WsGas::from_tgas(30)),
+        )
+        .transact()
+        .await?
+        .into_result()?;
+
+    add_validator_pair(&staking, &pool).await?;
+    let (product_id, price_id) =
+        create_one_off_product_and_price(&staking, &pool, &validator_owner).await?;
+
+    Ok((staking, pool, validator_owner, product_id, price_id))
+}
+
 /// Deploy staking contract on `staking`, mock pool on `pool`; pool owner = `validator_owner`.
 pub async fn deploy_staking_and_mock_pool(
     staking: &near_workspaces::Account,

@@ -14,6 +14,7 @@ use mock_pool::{
     call_epoch_settle, create_subscription_product_and_price, fast_forward_until_timestamp,
     fetch_validator, json_near_token_yocto, json_tx_status, json_u64_field,
     pool_set_fail_get_account, pool_total_balance_yocto, setup_staking_fixture,
+    setup_staking_fixture_with_unstake_settle_epochs,
 };
 use near_workspaces::types::{Gas as WsGas, NearToken};
 use serde_json::json;
@@ -220,6 +221,70 @@ async fn unlock_queues_unstake_then_epoch_settle_next_epoch_clears_pending()
         json_near_token_yocto(&v_settled["pending_to_unstake"]).unwrap_or(0),
         0,
         "epoch_settle should run pool unstake and clear pending_to_unstake"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn repeated_unstake_wait_window_does_not_wedge_busy() -> Result<(), Box<dyn std::error::Error>>
+{
+    let worker = near_workspaces::sandbox().await?;
+    let (staking, pool, _owner, _product_id, price_id) =
+        setup_staking_fixture_with_unstake_settle_epochs(&worker, 3).await?;
+    let buyer_a = worker.dev_create_account().await?;
+    let buyer_b = worker.dev_create_account().await?;
+
+    for buyer in [&buyer_a, &buyer_b] {
+        buyer_storage_deposit(buyer, staking.id()).await?;
+    }
+    let lock_a =
+        buyer_lock_for_product(&buyer_a, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
+    let lock_b =
+        buyer_lock_for_product(&buyer_b, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
+
+    // Stake both locks first.
+    worker.fast_forward(100_000).await?;
+    call_epoch_settle(&buyer_a, staking.id(), pool.id())
+        .await?
+        .into_result()?;
+
+    // Both locks become unlockable.
+    for lock_id in [&lock_a, &lock_b] {
+        let lock: serde_json::Value = worker
+            .view(staking.id(), "get_lock")
+            .args_json(json!({ "lock_id": lock_id }))
+            .await?
+            .json()?;
+        let end_ns = json_u64_field(&lock["end_ns"]).expect("lock.end_ns");
+        fast_forward_until_timestamp(&worker, end_ns.saturating_add(1)).await?;
+    }
+
+    // First unlock + settle performs one pool unstake and records last_unstake_epoch.
+    buyer_unlock(&buyer_a, staking.id(), &lock_a).await?;
+    worker.fast_forward(100_000).await?;
+    call_epoch_settle(&buyer_a, staking.id(), pool.id())
+        .await?
+        .into_result()?;
+
+    // Queue another unstake while unstake-wait window is still active.
+    buyer_unlock(&buyer_b, staking.id(), &lock_b).await?;
+
+    // Fresh epoch but still inside unstake wait window: should skip unstake safely and release Busy.
+    worker.fast_forward(100_000).await?;
+    call_epoch_settle(&buyer_b, staking.id(), pool.id())
+        .await?
+        .into_result()?;
+
+    let v = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    assert_eq!(
+        json_tx_status(&v["tx_status"]),
+        Some("Idle"),
+        "too-early repeated unstake settle must not wedge validator in Busy"
+    );
+    assert!(
+        json_near_token_yocto(&v["pending_to_unstake"]).unwrap_or(0) > 0,
+        "pending_to_unstake should remain queued until unstake wait window finishes"
     );
 
     Ok(())

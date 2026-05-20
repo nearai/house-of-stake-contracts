@@ -343,14 +343,9 @@ impl Contract {
 
         if pending_stake_yocto == pending_unstake_yocto && pending_stake_yocto > 0 {
             events::log_epoch_operation("epoch_settle_net_zero", &validator_id);
-            self.apply_net_zero_pending_matched_clear(&validator_id, pending_stake_yocto);
+            let _ = self.apply_net_zero_pending_matched_clear(&validator_id, pending_stake_yocto);
             return self.promise_epoch_settlement_dispatch(dispatch_after);
         }
-
-        require!(
-            can_settle,
-            "This pool already completed a stake or unstake this epoch; try again next epoch"
-        );
 
         let pool_settle = if pending_stake_yocto > pending_unstake_yocto {
             let net = NearToken::from_yoctonear(pending_stake_yocto - pending_unstake_yocto);
@@ -371,10 +366,10 @@ impl Contract {
                 )
         } else {
             if validator.last_unstake_epoch > 0 {
-                require!(
-                    self.validator_unstake_waiting_finished(&validator),
-                    "Wait until the previous unstake has finished its settle period before unstaking again"
-                );
+                if !self.validator_unstake_waiting_finished(&validator) {
+                    events::log_epoch_operation("epoch_settle_unstake_waiting", &validator_id);
+                    return self.promise_epoch_settlement_dispatch(dispatch_after);
+                }
             }
             let net = NearToken::from_yoctonear(pending_unstake_yocto - pending_stake_yocto);
             events::log_epoch_operation("epoch_settle_unstake", &validator_id);
@@ -402,18 +397,20 @@ impl Contract {
         &mut self,
         validator_id: &ValidatorId,
         matched_pending_yocto: u128,
-    ) {
+    ) -> bool {
         let mut validator = self.require_validator(validator_id);
-        require!(
-            validator.pending_to_stake.as_yoctonear() == matched_pending_yocto
-                && validator.pending_to_unstake.as_yoctonear() == matched_pending_yocto,
-            "Net zero settle state changed; retry next epoch"
-        );
+        if validator.pending_to_stake.as_yoctonear() != matched_pending_yocto
+            || validator.pending_to_unstake.as_yoctonear() != matched_pending_yocto
+        {
+            events::log_epoch_operation("epoch_settle_net_zero_state_changed", validator_id);
+            return false;
+        }
         validator.pending_to_stake = NearToken::from_near(0);
         // User tranches are unchanged; re-queue pool unstake for remaining user exit liability.
         validator.pending_to_unstake = validator.pending_user_unstake_total;
         validator.last_settlement_epoch = env::epoch_height();
         self.validators.insert(validator_id.clone(), validator);
+        true
     }
 
     // --- [Pipeline 3b] ---
@@ -615,6 +612,8 @@ impl Contract {
         }
     }
 
+    // Pipeline 5 tails are dispatched in [Pipeline 4] and implemented in:
+    // `lock.rs` (5a), `unlock.rs` (5b), `withdraw.rs` (5c), `subscriptions.rs` (5d).
     // --- [Pipeline 6] ---
 
     /// Used by **6** (and error paths in `unlock.rs`).
