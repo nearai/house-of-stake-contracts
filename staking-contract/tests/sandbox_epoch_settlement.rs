@@ -229,7 +229,7 @@ async fn repeated_unstake_wait_window_does_not_wedge_busy() -> Result<(), Box<dy
 {
     let worker = near_workspaces::sandbox().await?;
     let (staking, pool, _owner, _product_id, price_id) =
-        setup_staking_fixture_with_unstake_settle_epochs(&worker, 3).await?;
+        setup_staking_fixture_with_unstake_settle_epochs(&worker, 20).await?;
     let buyer_a = worker.dev_create_account().await?;
     let buyer_b = worker.dev_create_account().await?;
 
@@ -482,9 +482,17 @@ async fn cancel_subscription_after_long_idle_normalizes_end_and_renews_from_fres
     eprintln!("[timing] fixture+catalog ready: {:?}", t0.elapsed());
     let buyer = worker.dev_create_account().await?;
 
+    let t_step = Instant::now();
     buyer_storage_deposit(&buyer, staking.id()).await?;
+    eprintln!("[timing] buyer_storage_deposit: {:?}", t_step.elapsed());
+    let t_step = Instant::now();
     let _first_lock = buyer_lock_for_subscription(&buyer, staking.id(), &sub_price_id, 50).await?;
+    eprintln!(
+        "[timing] first buyer_lock_for_subscription: {:?}",
+        t_step.elapsed()
+    );
 
+    let t_step = Instant::now();
     let sub_initial: serde_json::Value = worker
         .view(staking.id(), "get_subscription_for_product")
         .args_json(json!({
@@ -493,6 +501,10 @@ async fn cancel_subscription_after_long_idle_normalizes_end_and_renews_from_fres
         }))
         .await?
         .json()?;
+    eprintln!(
+        "[timing] first get_subscription_for_product view: {:?}",
+        t_step.elapsed()
+    );
     let sid_initial = sub_initial["subscription_id"]
         .as_str()
         .expect("subscription_id")
