@@ -125,6 +125,8 @@ impl Contract {
     /// Public entry → **[Pipeline 0]** with [`PerEpochContinue::SettleOnly`] (tail **5** = no-op, then **6**).
     pub fn epoch_settle(&mut self, validator_id: ValidatorId) -> Promise {
         self.assert_not_paused();
+        #[cfg(target_arch = "wasm32")]
+        self.require_enough_gas_for_epoch_settlement();
         self.promise_validator_per_epoch_settlement_then(
             validator_id.clone(),
             PerEpochContinue::SettleOnly { validator_id },

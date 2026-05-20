@@ -1,6 +1,8 @@
-use near_sdk::Gas;
+use crate::*;
+use near_sdk::{Gas, env, require};
 
-pub const BASE_GAS: Gas = Gas::from_gas(25_000_000_000_000);
+pub const BASE_GAS: Gas = Gas::from_gas(10_000_000_000_000);
+pub const EPOCH_SETTLEMENT_MIN_GAS: Gas = Gas::from_gas(BASE_GAS.as_gas() * 30);
 
 pub mod staking_pool {
     use near_sdk::Gas;
@@ -17,10 +19,38 @@ pub mod staking_pool {
 pub mod callbacks {
     use super::BASE_GAS;
     use near_sdk::Gas;
+
+    // Epoch settlement invocation chain (A -> B) and attached gas budget.
+    //
+    // Chain overview:
+    // 0) promise_validator_per_epoch_settlement_then
+    //    -> ON_EPOCH_SETTLEMENT_AFTER_POOL_ACCOUNT (24 * BASE)
+    //       -> (optional) ON_GET_UNSTAKED_FOR_WITHDRAW (17 * BASE)
+    //          -> ON_WITHDRAW_TRANSFER (2 * BASE)
+    //          -> ON_EPOCH_SETTLEMENT_AFTER_TRY_EPOCH_STAKE_OR_UNSTAKE (11 * BASE)
+    //             -> ON_EPOCH_SETTLEMENT_DISPATCH (10 * BASE)
+    //                -> one of Pipeline-5 tails (8 * BASE):
+    //                   ON_LOCK_FINALLY_MINT | ON_UNLOCK_TAIL_AFTER_PRE_USER
+    //                   | ON_WITHDRAW_TAIL_AFTER_PRE_USER | ON_SUBSCRIPTION_UPGRADE_AFTER_SETTLE
+    //                -> release callback:
+    //                   ON_EPOCH_PIPELINE_TERMINAL_RELEASE (1 * BASE)
+    //                   or ON_EPOCH_PIPELINE_RELEASE_WITH_LOCK_ID (1 * BASE)
+    //
+    // Fast path:
+    // 0) promise_validator_per_epoch_settlement_then
+    //    -> ON_EPOCH_SETTLEMENT_DISPATCH (10 * BASE)
+    //       -> Pipeline-5 tail (8 * BASE) -> Pipeline-6 release (1 * BASE)
+    //
+    // Gas budgeting rule used here:
+    // If function A attaches gas for function B, budget A >= (gas attached to B) + A's own execution overhead.
+    // All constants below follow this rule with a safety margin where callbacks fan out or chain release.
     pub const ON_DEPOSIT_AND_STAKE: Gas = BASE_GAS;
     pub const ON_UNSTAKE: Gas = BASE_GAS;
-    /// After pool `withdraw`: tail settle (`None`) or settlement `try_epoch_stake_or_unstake` + dispatch (`Some(cont)`).
-    pub const ON_GET_UNSTAKED_FOR_WITHDRAW: Gas = Gas::from_gas(BASE_GAS.as_gas() * 6);
+    /// After pool `withdraw`: continue into settlement `try_epoch_stake_or_unstake` + dispatch.
+    ///
+    /// Worst case in this callback is routing through `try_epoch_stake_or_unstake`, which may attach:
+    /// `3 * BASE (pool settle)` + `1 * BASE (pool callback)` + `11 * BASE (3' bridge)` + callback overhead.
+    pub const ON_GET_UNSTAKED_FOR_WITHDRAW: Gas = Gas::from_gas(BASE_GAS.as_gas() * 17);
     pub const ON_WITHDRAW_TRANSFER: Gas = Gas::from_gas(BASE_GAS.as_gas() * 2);
     pub const ON_TOTAL_BALANCE: Gas = BASE_GAS;
     /// Balance refresh then catalog mint, usage bumps, subscription index, and `try_epoch_stake_or_unstake`.
@@ -28,15 +58,25 @@ pub mod callbacks {
     /// After `get_owner_id`: callback does a few storage writes (catalog or owner cache refresh).
     pub const ON_VALIDATOR_OWNER_CHECK: Gas = Gas::from_gas(BASE_GAS.as_gas() * 2);
     /// Tail dispatch after shared per-epoch settlement (`PerEpochContinue`).
-    pub const ON_EPOCH_SETTLEMENT_DISPATCH: Gas = Gas::from_gas(BASE_GAS.as_gas() * 6);
+    ///
+    /// This callback fans out into Pipeline 5 tails (currently `8 * BASE_GAS`) and then chains
+    /// Pipeline 6 release (`1 * BASE_GAS`), plus its own execution overhead.
+    ///
+    /// Budget formula: `8 * BASE (tail) + 1 * BASE (release) + 1 * BASE (dispatch overhead)`.
+    pub const ON_EPOCH_SETTLEMENT_DISPATCH: Gas = Gas::from_gas(BASE_GAS.as_gas() * 10);
     /// After pool `get_account` during shared settlement (balance refresh + withdraw-if-ready).
-    pub const ON_EPOCH_SETTLEMENT_AFTER_POOL_ACCOUNT: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
+    ///
+    /// Worst case branch here schedules:
+    /// `3 * BASE (pool withdraw)` + `2 * BASE (withdraw transfer callback)` +
+    /// `17 * BASE (post-withdraw settle callback)` + callback overhead.
+    pub const ON_EPOCH_SETTLEMENT_AFTER_POOL_ACCOUNT: Gas = Gas::from_gas(BASE_GAS.as_gas() * 24);
     /// After `try_epoch_stake_or_unstake` pool call during shared settlement.
     ///
-    /// This callback only bridges into the dispatch callback, so keep this budget tight.
-    /// A smaller value here avoids exhausting gas in the preceding settlement callback
-    /// when it schedules `deposit_and_stake/unstake` plus follow-up callbacks.
-    pub const ON_EPOCH_SETTLEMENT_AFTER_TRY_EPOCH_STAKE_OR_UNSTAKE: Gas = BASE_GAS;
+    /// This callback bridges Pipeline 3' -> 4 and must fund the dispatch callback plus its own overhead.
+    ///
+    /// Budget formula: `10 * BASE (dispatch) + 1 * BASE (bridge overhead)`.
+    pub const ON_EPOCH_SETTLEMENT_AFTER_TRY_EPOCH_STAKE_OR_UNSTAKE: Gas =
+        Gas::from_gas(BASE_GAS.as_gas() * 11);
     /// Mint lock after shared pre-user settlement pipeline.
     pub const ON_LOCK_FINALLY_MINT: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// Unlock tail after pre-user settlement.
@@ -49,4 +89,13 @@ pub mod callbacks {
     pub const ON_EPOCH_PIPELINE_TERMINAL_RELEASE: Gas = BASE_GAS;
     /// Release pipeline `Busy` and pass lock id through to caller.
     pub const ON_EPOCH_PIPELINE_RELEASE_WITH_LOCK_ID: Gas = BASE_GAS;
+}
+
+impl Contract {
+    pub(crate) fn require_enough_gas_for_epoch_settlement(&self) {
+        require!(
+            env::prepaid_gas() >= EPOCH_SETTLEMENT_MIN_GAS,
+            "Insufficient gas"
+        );
+    }
 }

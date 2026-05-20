@@ -1,8 +1,7 @@
 //! `EVENT_JSON` logs for indexers (NEP-297-style payload; standard `stake.dao`).
 
 use crate::ValidatorId;
-use near_sdk::AccountId;
-use near_sdk::log;
+use near_sdk::{AccountId, log};
 
 fn emit(event: &str, data: serde_json::Value) {
     let payload = serde_json::json!({

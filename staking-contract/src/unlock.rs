@@ -27,6 +27,8 @@ impl Contract {
 
         let validator_id = lock.validator_id.clone();
         let _validator = self.require_validator_idle(&validator_id);
+        #[cfg(target_arch = "wasm32")]
+        self.require_enough_gas_for_epoch_settlement();
 
         self.promise_validator_per_epoch_settlement_then(
             validator_id.clone(),
