@@ -6,7 +6,7 @@
 //! **Non-WASM:** `testing_env!` skips promise chains; [`Contract::payout_user_withdraw`] runs directly from [`Contract::withdraw`].
 
 use crate::*;
-use near_sdk::{AccountId, NearToken, Promise, env, near, require};
+use near_sdk::{AccountId, NearToken, Promise, assert_one_yocto, env, near, require};
 
 // Public `withdraw` + private promise callback (WASM continuation).
 
@@ -23,7 +23,7 @@ impl Contract {
     /// see `lock.rs`).
     #[payable]
     pub fn withdraw(&mut self, validator_id: ValidatorId) -> Promise {
-        near_sdk::assert_one_yocto();
+        assert_one_yocto();
         self.require_enough_gas_for_epoch_settlement();
         self.assert_not_paused();
 

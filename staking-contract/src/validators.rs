@@ -1,7 +1,9 @@
 use crate::internal::{mint_shares, near_from_shares, net_stake_yocto};
 use crate::*;
 use near_sdk::json_types::{U64, U128};
-use near_sdk::{AccountId, NearToken, Promise, env, is_promise_success, near, require};
+use near_sdk::{
+    AccountId, NearToken, Promise, assert_one_yocto, env, is_promise_success, near, require,
+};
 
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
@@ -55,7 +57,7 @@ impl Contract {
     /// always verified via `get_owner_id()` on the pool ([`crate::products`]).
     #[payable]
     pub fn add_validator(&mut self, validator_id: ValidatorId) {
-        near_sdk::assert_one_yocto();
+        assert_one_yocto();
         self.assert_owner();
         require!(
             self.validators.get(&validator_id).is_none(),
@@ -84,7 +86,7 @@ impl Contract {
 
     #[payable]
     pub fn pause_validator(&mut self, validator_id: ValidatorId) {
-        near_sdk::assert_one_yocto();
+        assert_one_yocto();
         self.assert_owner();
         let mut validator = self.require_validator(&validator_id);
         validator.status = ValidatorStatus::Paused;
@@ -93,7 +95,7 @@ impl Contract {
 
     #[payable]
     pub fn remove_validator(&mut self, validator_id: ValidatorId) {
-        near_sdk::assert_one_yocto();
+        assert_one_yocto();
         self.assert_owner();
         let mut validator = self.require_validator(&validator_id);
         require!(
@@ -133,7 +135,7 @@ impl Contract {
         &self,
         validator_id: &ValidatorId,
     ) -> (ValidatorId, AccountId) {
-        near_sdk::assert_one_yocto();
+        assert_one_yocto();
         self.assert_not_paused();
         self.assert_validator_allowlisted(validator_id);
         (validator_id.clone(), env::predecessor_account_id())

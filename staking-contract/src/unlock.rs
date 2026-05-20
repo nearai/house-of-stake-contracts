@@ -1,5 +1,5 @@
 use crate::*;
-use near_sdk::{Promise, env, near, require};
+use near_sdk::{Promise, assert_one_yocto, env, near, require};
 
 #[near]
 impl Contract {
@@ -10,7 +10,7 @@ impl Contract {
     #[payable]
     pub fn unlock(&mut self, lock_id: LockId) -> Promise {
         self.require_enough_gas_for_epoch_settlement();
-        near_sdk::assert_one_yocto();
+        assert_one_yocto();
         self.assert_not_paused();
 
         let buyer = env::predecessor_account_id();

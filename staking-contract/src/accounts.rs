@@ -1,5 +1,5 @@
 use crate::*;
-use near_sdk::{NearToken, Promise, env, near, require};
+use near_sdk::{NearToken, Promise, assert_one_yocto, env, near, require};
 
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
@@ -38,7 +38,7 @@ impl Contract {
     /// Withdraw prepaid storage above [`crate::config::Config::min_storage_deposit`].
     #[payable]
     pub fn storage_withdraw(&mut self, amount: NearToken) -> Promise {
-        near_sdk::assert_one_yocto();
+        assert_one_yocto();
         self.assert_not_paused();
         require!(
             amount.as_yoctonear() > 0,
