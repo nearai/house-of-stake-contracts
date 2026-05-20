@@ -33,6 +33,7 @@ impl Contract {
         price_id: PriceId,
         lock_duration_ns: U64,
     ) -> PromiseOrValue<LockId> {
+        self.require_enough_gas_for_epoch_settlement();
         let (buyer, locked) = self.lock_entry_preamble();
 
         let dur = lock_duration_ns.0;
@@ -76,7 +77,6 @@ impl Contract {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            self.require_enough_gas_for_epoch_settlement();
             return self
                 .promise_validator_per_epoch_settlement_then(
                     validator_id.clone(),
@@ -108,6 +108,7 @@ impl Contract {
     }
 
     fn lock_for_subscription_with_price_id(&mut self, price_id: PriceId) -> PromiseOrValue<LockId> {
+        self.require_enough_gas_for_epoch_settlement();
         let (buyer, locked) = self.lock_entry_preamble();
 
         let (price, product) = self.get_active_price_and_product(&price_id);
@@ -247,7 +248,6 @@ impl Contract {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            self.require_enough_gas_for_epoch_settlement();
             return self
                 .promise_validator_per_epoch_settlement_then(
                     validator_id.clone(),

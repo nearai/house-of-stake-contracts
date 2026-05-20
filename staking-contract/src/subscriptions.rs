@@ -63,6 +63,7 @@ impl Contract {
     /// additional shares (same as [`crate::lock::Contract::lock_for_subscription`] on WASM).
     #[payable]
     pub fn upgrade_subscription(&mut self, new_price_id: PriceId) -> PromiseOrValue<LockId> {
+        self.require_enough_gas_for_epoch_settlement();
         self.assert_not_paused();
         let buyer = env::predecessor_account_id();
 
@@ -119,7 +120,6 @@ impl Contract {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            self.require_enough_gas_for_epoch_settlement();
             return self
                 .promise_validator_per_epoch_settlement_then(
                     validator_id.clone(),

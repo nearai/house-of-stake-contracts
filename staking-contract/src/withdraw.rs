@@ -24,6 +24,7 @@ impl Contract {
     #[payable]
     pub fn withdraw(&mut self, validator_id: ValidatorId) -> Promise {
         near_sdk::assert_one_yocto();
+        self.require_enough_gas_for_epoch_settlement();
         self.assert_not_paused();
 
         let account_id = env::predecessor_account_id();
@@ -57,7 +58,6 @@ impl Contract {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            self.require_enough_gas_for_epoch_settlement();
             self.promise_validator_per_epoch_settlement_then(
                 validator_id.clone(),
                 PerEpochContinue::WithdrawUserTransfer {

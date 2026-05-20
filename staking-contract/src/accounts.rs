@@ -123,7 +123,7 @@ impl Contract {
     }
 
     /// Full prepaid requirement including `per_lock_storage_stake` × locks recorded in [`crate::Contract::user_lock_count`].
-    pub fn ensure_min_storage(&self, account_id: &AccountId) {
+    pub(crate) fn ensure_min_storage(&self, account_id: &AccountId) {
         let account = self.require_registered_account(account_id);
         let need = self.required_storage_deposit_yocto(account_id, 0);
         self.assert_storage_deposit_at_least(
