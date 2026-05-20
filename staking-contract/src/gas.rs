@@ -27,8 +27,7 @@ pub mod callbacks {
     //    -> ON_EPOCH_SETTLEMENT_AFTER_POOL_ACCOUNT (24 * BASE)
     //       -> (optional) ON_GET_UNSTAKED_FOR_WITHDRAW (17 * BASE)
     //          -> ON_WITHDRAW_TRANSFER (2 * BASE)
-    //          -> ON_EPOCH_SETTLEMENT_AFTER_TRY_EPOCH_STAKE_OR_UNSTAKE (11 * BASE)
-    //             -> ON_EPOCH_SETTLEMENT_DISPATCH (10 * BASE)
+    //          -> ON_EPOCH_SETTLEMENT_DISPATCH (10 * BASE)
     //                -> one of Pipeline-5 tails (8 * BASE):
     //                   ON_LOCK_FINALLY_MINT | ON_UNLOCK_TAIL_AFTER_PRE_USER
     //                   | ON_WITHDRAW_TAIL_AFTER_PRE_USER | ON_SUBSCRIPTION_UPGRADE_AFTER_SETTLE
@@ -70,13 +69,6 @@ pub mod callbacks {
     /// `3 * BASE (pool withdraw)` + `2 * BASE (withdraw transfer callback)` +
     /// `17 * BASE (post-withdraw settle callback)` + callback overhead.
     pub const ON_EPOCH_SETTLEMENT_AFTER_POOL_ACCOUNT: Gas = Gas::from_gas(BASE_GAS.as_gas() * 24);
-    /// After `try_epoch_stake_or_unstake` pool call during shared settlement.
-    ///
-    /// This callback bridges Pipeline 3' -> 4 and must fund the dispatch callback plus its own overhead.
-    ///
-    /// Budget formula: `10 * BASE (dispatch) + 1 * BASE (bridge overhead)`.
-    pub const ON_EPOCH_SETTLEMENT_AFTER_TRY_EPOCH_STAKE_OR_UNSTAKE: Gas =
-        Gas::from_gas(BASE_GAS.as_gas() * 11);
     /// Mint lock after shared pre-user settlement pipeline.
     pub const ON_LOCK_FINALLY_MINT: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// Unlock tail after pre-user settlement.

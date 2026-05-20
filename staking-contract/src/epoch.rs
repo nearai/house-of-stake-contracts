@@ -54,13 +54,6 @@ pub trait ExtSelfEpoch {
         amount: NearToken,
         absorb_stake_yocto: U128,
     ) -> bool;
-    /// **[Pipeline 3′]** After async **3**; forwards to **4** (ignores `_settle_ok` for routing).
-    fn on_epoch_settlement_after_try_epoch_stake_or_unstake(
-        &mut self,
-        #[callback] _settle_ok: bool,
-        validator_id: ValidatorId,
-        cont: PerEpochContinue,
-    ) -> Promise;
     /// **[Pipeline 4]** Fan-out to user tail (**5a** / **5b** / **5c**), then **6**.
     fn on_epoch_settlement_dispatch_continue(&mut self, cont: PerEpochContinue) -> Promise;
     /// **[Pipeline 5a]** Catalog mint; may re-enter **3** (`lock.rs`).
@@ -153,9 +146,8 @@ impl Contract {
         self.validators.insert(validator_id.clone(), validator);
 
         if !needs_pre_user_settlement_pipeline {
-            return ext_self_epoch::ext(env::current_account_id())
-                .with_static_gas(callbacks::ON_EPOCH_SETTLEMENT_DISPATCH)
-                .on_epoch_settlement_dispatch_continue(cont);
+            // Same-contract fast-path dispatch: no cross-contract boundary is needed here.
+            return self.on_epoch_settlement_dispatch_continue(cont);
         }
         self.promise_get_validator_pool_account(validator_id.clone())
             .then(
@@ -314,10 +306,9 @@ impl Contract {
 
     // --- [Pipeline 3 / 3a] ---
 
-    fn promise_epoch_settlement_dispatch(&self, cont: PerEpochContinue) -> Promise {
-        ext_self_epoch::ext(env::current_account_id())
-            .with_static_gas(callbacks::ON_EPOCH_SETTLEMENT_DISPATCH)
-            .on_epoch_settlement_dispatch_continue(cont)
+    fn promise_epoch_settlement_dispatch(&mut self, cont: PerEpochContinue) -> Promise {
+        // Same-contract dispatch continuation does not need an extra self-promise hop.
+        self.on_epoch_settlement_dispatch_continue(cont)
     }
 
     /// **[Pipeline 3]** At most one pool `deposit_and_stake` or `unstake` per NEAR epoch (**3a** net-zero inline).
@@ -386,8 +377,8 @@ impl Contract {
 
         pool_settle.then(
             ext_self_epoch::ext(env::current_account_id())
-                .with_static_gas(callbacks::ON_EPOCH_SETTLEMENT_AFTER_TRY_EPOCH_STAKE_OR_UNSTAKE)
-                .on_epoch_settlement_after_try_epoch_stake_or_unstake(validator_id, dispatch_after),
+                .with_static_gas(callbacks::ON_EPOCH_SETTLEMENT_DISPATCH)
+                .on_epoch_settlement_dispatch_continue(dispatch_after),
         )
     }
 
@@ -501,22 +492,6 @@ impl Contract {
         }
         self.validators.insert(validator_id, validator);
         ok
-    }
-
-    // --- [Pipeline 3′] ---
-
-    /// **[Pipeline 3′]** After async **3**; forwards to **4** (pool outcome already recorded on validator state).
-    #[private]
-    #[allow(unused_variables)]
-    pub fn on_epoch_settlement_after_try_epoch_stake_or_unstake(
-        &mut self,
-        #[callback] _settle_ok: bool,
-        validator_id: ValidatorId,
-        cont: PerEpochContinue,
-    ) -> Promise {
-        ext_self_epoch::ext(env::current_account_id())
-            .with_static_gas(callbacks::ON_EPOCH_SETTLEMENT_DISPATCH)
-            .on_epoch_settlement_dispatch_continue(cont)
     }
 
     // --- [Pipeline 4] ---
