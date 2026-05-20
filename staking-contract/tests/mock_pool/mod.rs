@@ -66,44 +66,51 @@ pub fn staking_new_args_e2e(owner: &near_workspaces::AccountId) -> serde_json::V
 
 /// Advance sandbox blocks until the chain timestamp reaches `target_ns` (used for `unlock` after `lock.end_ns`).
 ///
-/// Uses larger `fast_forward` steps when far behind so multi-day lock windows remain reachable in CI.
+/// Uses adaptive bounded steps so very large jumps do not stall on one long `fast_forward` call.
 pub async fn fast_forward_until_timestamp(
     worker: &Worker<Sandbox>,
     target_ns: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    const MAX_ROUNDS: u32 = 600;
+    // Conservative defaults for sandbox stability; tune by observed timestamp deltas.
+    const DEFAULT_NS_PER_BLOCK: u64 = 1_000_000_000;
+    const MIN_STEP_BLOCKS: u64 = 50;
+    const MAX_STEP_BLOCKS: u64 = 20_000;
+    const MAX_ROUNDS: u32 = 5_000;
+    const MAX_STALLED_ROUNDS: u32 = 12;
+
+    let mut ns_per_block = DEFAULT_NS_PER_BLOCK;
+    let mut stalled_rounds = 0u32;
     for round in 0..MAX_ROUNDS {
-        let ts = worker.view_block().await?.timestamp();
-        if ts >= target_ns {
+        let ts_before = worker.view_block().await?.timestamp();
+        if ts_before >= target_ns {
             return Ok(());
         }
-        let gap = target_ns.saturating_sub(ts);
-        // Keep each individual fast-forward bounded. Very large single jumps can appear "hung"
-        // in CI/local runs because no logs are printed until the call returns.
-        let blocks = if gap > 5_000_000_000_000_000 {
-            120_000u64
-        } else if gap > 1_500_000_000_000_000 {
-            100_000
-        } else if gap > 500_000_000_000_000 {
-            80_000
-        } else if gap > 50_000_000_000_000 {
-            40_000
-        } else if gap > 5_000_000_000_000 {
-            10_000
-        } else if gap > 500_000_000_000 {
-            1_000
-        } else if gap > 50_000_000_000 {
-            200
-        } else {
-            25
-        };
-        if round % 20 == 0 {
+        let gap = target_ns.saturating_sub(ts_before);
+        let blocks_guess = (gap / ns_per_block).max(1);
+        let blocks = blocks_guess.clamp(MIN_STEP_BLOCKS, MAX_STEP_BLOCKS);
+        if round % 10 == 0 {
             eprintln!(
-                "[timing][ff-ts] round={} gap_ns={} step_blocks={}",
-                round, gap, blocks
+                "[timing][ff-ts] round={} gap_ns={} step_blocks={} est_ns_per_block={}",
+                round, gap, blocks, ns_per_block
             );
         }
         worker.fast_forward(blocks).await?;
+        let ts_after = worker.view_block().await?.timestamp();
+        let advanced_ns = ts_after.saturating_sub(ts_before);
+
+        if advanced_ns == 0 {
+            stalled_rounds = stalled_rounds.saturating_add(1);
+            if stalled_rounds >= MAX_STALLED_ROUNDS {
+                return Err(format!(
+                    "timestamp did not advance after {MAX_STALLED_ROUNDS} rounds (target={target_ns}, last={ts_after})"
+                )
+                .into());
+            }
+            continue;
+        }
+
+        stalled_rounds = 0;
+        ns_per_block = (advanced_ns / blocks).max(1);
     }
     let last = worker.view_block().await?.timestamp();
     Err(format!("timestamp {target_ns} not reached after fast_forward (last {last:?})",).into())
