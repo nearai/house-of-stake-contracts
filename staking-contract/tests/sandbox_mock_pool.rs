@@ -6,9 +6,9 @@ mod mock_pool;
 
 use mock_pool::{
     SETTLEMENT_PIPELINE_GAS_TGAS, add_validator_pair, call_epoch_settle,
-    create_one_off_product_and_price, deploy_staking_and_mock_pool, fast_forward_until_timestamp,
-    json_near_token_yocto, json_u64_field, mock_pool_wasm_bytes, near_token_yocto_from_view,
-    staking_wasm_bytes,
+    create_one_off_product_and_price, deploy_staking_and_mock_pool, fast_forward_until_epoch_delta,
+    fast_forward_until_timestamp, json_near_token_yocto, json_u64_field, mock_pool_wasm_bytes,
+    near_token_yocto_from_view, staking_wasm_bytes,
 };
 use near_workspaces::types::{Gas as WsGas, NearToken};
 use serde_json::json;
@@ -165,7 +165,7 @@ async fn staking_two_locks_aggregate_then_epoch_settle_next_epoch_clears_pending
         "second lock in the same NEAR epoch should leave stake pending until a later epoch can settle"
     );
 
-    worker.fast_forward(100_000).await?;
+    fast_forward_until_epoch_delta(&worker, 1).await?;
 
     let settle = call_epoch_settle(&buyer_a, staking.id(), pool.id()).await?;
     settle.into_result()?;

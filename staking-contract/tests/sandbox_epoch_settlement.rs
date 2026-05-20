@@ -11,9 +11,9 @@ mod mock_pool;
 use mock_pool::{
     SETTLEMENT_PIPELINE_GAS_TGAS, buyer_cancel_subscription, buyer_lock_for_product,
     buyer_lock_for_subscription, buyer_storage_deposit, buyer_unlock, buyer_withdraw,
-    call_epoch_settle, create_subscription_product_and_price, fast_forward_until_timestamp,
-    fetch_validator, json_near_token_yocto, json_tx_status, json_u64_field,
-    pool_set_fail_get_account, pool_total_balance_yocto, setup_staking_fixture,
+    call_epoch_settle, create_subscription_product_and_price, fast_forward_until_epoch_delta,
+    fast_forward_until_timestamp, fetch_validator, json_near_token_yocto, json_tx_status,
+    json_u64_field, pool_set_fail_get_account, pool_total_balance_yocto, setup_staking_fixture,
     setup_staking_fixture_with_unstake_settle_epochs,
 };
 use near_workspaces::types::{Gas as WsGas, NearToken};
@@ -154,7 +154,7 @@ async fn two_locks_then_epoch_settle_next_epoch_stakes_on_pool()
 
     let pool_before = pool_total_balance_yocto(&worker, pool.id(), staking.id()).await?;
 
-    worker.fast_forward(100_000).await?;
+    fast_forward_until_epoch_delta(&worker, 1).await?;
     call_epoch_settle(&buyer_a, staking.id(), pool.id())
         .await?
         .into_result()?;
@@ -192,8 +192,11 @@ async fn unlock_queues_unstake_then_epoch_settle_next_epoch_clears_pending()
     eprintln!("[timing] lock created: {:?}", t0.elapsed());
 
     let t_step = Instant::now();
-    worker.fast_forward(100_000).await?;
-    eprintln!("[timing] first fast_forward(100_000): {:?}", t_step.elapsed());
+    fast_forward_until_epoch_delta(&worker, 1).await?;
+    eprintln!(
+        "[timing] first fast_forward_until_epoch_delta(1): {:?}",
+        t_step.elapsed()
+    );
     let t_step = Instant::now();
     call_epoch_settle(&buyer, staking.id(), pool.id())
         .await?
@@ -229,8 +232,11 @@ async fn unlock_queues_unstake_then_epoch_settle_next_epoch_clears_pending()
     );
 
     let t_step = Instant::now();
-    worker.fast_forward(100_000).await?;
-    eprintln!("[timing] second fast_forward(100_000): {:?}", t_step.elapsed());
+    fast_forward_until_epoch_delta(&worker, 1).await?;
+    eprintln!(
+        "[timing] second fast_forward_until_epoch_delta(1): {:?}",
+        t_step.elapsed()
+    );
     let t_step = Instant::now();
     call_epoch_settle(&buyer, staking.id(), pool.id())
         .await?
@@ -266,7 +272,7 @@ async fn repeated_unstake_wait_window_does_not_wedge_busy() -> Result<(), Box<dy
         buyer_lock_for_product(&buyer_b, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
 
     // Stake both locks first.
-    worker.fast_forward(100_000).await?;
+    fast_forward_until_epoch_delta(&worker, 1).await?;
     call_epoch_settle(&buyer_a, staking.id(), pool.id())
         .await?
         .into_result()?;
@@ -284,7 +290,7 @@ async fn repeated_unstake_wait_window_does_not_wedge_busy() -> Result<(), Box<dy
 
     // First unlock + settle performs one pool unstake and records last_unstake_epoch.
     buyer_unlock(&buyer_a, staking.id(), &lock_a).await?;
-    worker.fast_forward(100_000).await?;
+    fast_forward_until_epoch_delta(&worker, 1).await?;
     call_epoch_settle(&buyer_a, staking.id(), pool.id())
         .await?
         .into_result()?;
@@ -293,7 +299,7 @@ async fn repeated_unstake_wait_window_does_not_wedge_busy() -> Result<(), Box<dy
     buyer_unlock(&buyer_b, staking.id(), &lock_b).await?;
 
     // Fresh epoch but still inside unstake wait window: should skip unstake safely and release Busy.
-    worker.fast_forward(100_000).await?;
+    fast_forward_until_epoch_delta(&worker, 1).await?;
     call_epoch_settle(&buyer_b, staking.id(), pool.id())
         .await?
         .into_result()?;
@@ -324,7 +330,7 @@ async fn epoch_settle_net_zero_when_stake_and_unstake_pending_match()
         buyer_lock_for_product(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
 
     // Stake the first lock's pending queue in a fresh epoch.
-    worker.fast_forward(100_000).await?;
+    fast_forward_until_epoch_delta(&worker, 1).await?;
     call_epoch_settle(&buyer, staking.id(), pool.id())
         .await?
         .into_result()?;
@@ -355,7 +361,7 @@ async fn epoch_settle_net_zero_when_stake_and_unstake_pending_match()
 
     let pool_before = pool_total_balance_yocto(&worker, pool.id(), staking.id()).await?;
 
-    worker.fast_forward(100_000).await?;
+    fast_forward_until_epoch_delta(&worker, 1).await?;
     call_epoch_settle(&buyer, staking.id(), pool.id())
         .await?
         .into_result()?;
@@ -551,7 +557,7 @@ async fn cancel_subscription_after_long_idle_then_unlock_requests_unstake()
     let lock_id = buyer_lock_for_subscription(&buyer, staking.id(), &sub_price_id, 50).await?;
 
     // Ensure initial pending stake is settled before we run unlock later.
-    worker.fast_forward(100_000).await?;
+    fast_forward_until_epoch_delta(&worker, 1).await?;
     call_epoch_settle(&buyer, staking.id(), pool.id())
         .await?
         .into_result()?;

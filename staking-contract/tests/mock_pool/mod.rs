@@ -97,6 +97,41 @@ pub async fn fast_forward_until_timestamp(
     Err(format!("timestamp {target_ns} not reached after fast_forward (last {last:?})",).into())
 }
 
+/// Advance by many blocks in smaller chunks to avoid long single fast-forward calls.
+pub async fn fast_forward_blocks_chunked(
+    worker: &Worker<Sandbox>,
+    total_blocks: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    const STEP: u64 = 10_000;
+    let mut left = total_blocks;
+    while left > 0 {
+        let step = left.min(STEP);
+        worker.fast_forward(step).await?;
+        left = left.saturating_sub(step);
+    }
+    Ok(())
+}
+
+/// Advance until `epoch_height >= start_epoch + delta_epochs`.
+pub async fn fast_forward_until_epoch_delta(
+    worker: &Worker<Sandbox>,
+    delta_epochs: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let start_epoch = worker.view_block().await?.epoch_height();
+    let target_epoch = start_epoch.saturating_add(delta_epochs);
+    const MAX_ROUNDS: u32 = 250;
+    for _ in 0..MAX_ROUNDS {
+        let current_epoch = worker.view_block().await?.epoch_height();
+        if current_epoch >= target_epoch {
+            return Ok(());
+        }
+        // Keep each jump moderate to avoid long single fast-forward stalls.
+        worker.fast_forward(2_000).await?;
+    }
+    let last_epoch = worker.view_block().await?.epoch_height();
+    Err(format!("epoch {target_epoch} not reached after fast_forward (last {last_epoch})").into())
+}
+
 pub fn near_token_yocto_from_view(
     v: &serde_json::Value,
 ) -> Result<u128, Box<dyn std::error::Error>> {
