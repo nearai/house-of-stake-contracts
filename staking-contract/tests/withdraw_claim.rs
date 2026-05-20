@@ -1,4 +1,4 @@
-//! `withdraw(validator_id)` edge cases (VM state): withdraw bucket and epoch-gated tranches.
+//! `withdraw(validator_id)` edge cases (VM state): claim bucket and epoch-gated tranches.
 
 mod common;
 
@@ -7,7 +7,7 @@ use near_sdk::{NearToken, testing_env};
 use staking_contract::PendingUnstakeTranche;
 
 #[test]
-#[should_panic(expected = "No NEAR is in the withdraw bucket yet")]
+#[should_panic(expected = "No NEAR is claimable yet")]
 fn withdraw_fails_when_pool_withdraw_bucket_empty() {
     let mut c = deploy();
     common::add_validator_allowlisted(&mut c);
@@ -27,7 +27,7 @@ fn withdraw_fails_when_pool_withdraw_bucket_empty() {
 }
 
 #[test]
-#[should_panic(expected = "Withdraw bucket cannot cover all claimable tranches yet")]
+#[should_panic(expected = "Claim bucket cannot cover all claimable tranches yet")]
 fn withdraw_fails_when_bucket_smaller_than_claimable_sum() {
     let mut c = deploy();
     common::add_validator_allowlisted(&mut c);
@@ -38,7 +38,7 @@ fn withdraw_fails_when_bucket_smaller_than_claimable_sum() {
         .get_validator(pool.clone())
         .expect("validator row")
         .clone();
-    validator.pending_to_withdraw = NearToken::from_near(12);
+    validator.pending_to_claim = NearToken::from_near(12);
     validator.pending_to_unstake = NearToken::from_near(3);
     c.validators.insert(pool.clone(), validator);
 
@@ -71,7 +71,7 @@ fn withdraw_removes_all_claimable_tranches_and_pays_sum() {
         .get_validator(pool.clone())
         .expect("validator row")
         .clone();
-    validator.pending_to_withdraw = NearToken::from_near(20);
+    validator.pending_to_claim = NearToken::from_near(20);
     validator.pending_to_unstake = NearToken::from_near(0);
     c.validators.insert(pool.clone(), validator);
 
@@ -98,7 +98,7 @@ fn withdraw_removes_all_claimable_tranches_and_pays_sum() {
     let _ = c.withdraw(pool.clone());
 
     let validator = c.get_validator(pool).expect("validator row");
-    assert_eq!(validator.pending_to_withdraw, NearToken::from_near(5));
+    assert_eq!(validator.pending_to_claim, NearToken::from_near(5));
     assert_eq!(validator.pending_to_unstake, NearToken::from_near(0));
 
     let remaining = c

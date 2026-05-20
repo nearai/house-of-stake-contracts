@@ -28,7 +28,7 @@ pub trait ExtSelfEpoch {
         validator_id: ValidatorId,
         cont: PerEpochContinue,
     ) -> Promise;
-    /// **[Pipeline 2b]** Credits `pending_to_withdraw` after pool `withdraw` (stays **`Busy`**).
+    /// **[Pipeline 2b]** Moves `pending_to_withdraw` -> `pending_to_claim` after pool `withdraw` (stays **`Busy`**).
     fn on_epoch_withdraw_transfer_done(
         &mut self,
         validator_id: ValidatorId,
@@ -213,7 +213,7 @@ impl Contract {
 
     // --- [Pipeline 2a] ---
 
-    /// **[Pipeline 2a]** Pull unstaked NEAR into [`Validator::pending_to_withdraw`] (from **1**).
+    /// **[Pipeline 2a]** Pull unstaked NEAR from pool into this contract (from **1**).
     pub(crate) fn try_epoch_withdraw_known_unstaked(
         &mut self,
         validator_id: ValidatorId,
@@ -258,7 +258,7 @@ impl Contract {
 
     // --- [Pipeline 2b] ---
 
-    /// **[Pipeline 2b]** After pool `withdraw`: credit [`Validator::pending_to_withdraw`] (stays **`Busy`**).
+    /// **[Pipeline 2b]** After pool `withdraw`: credit [`Validator::pending_to_claim`] (stays **`Busy`**).
     #[private]
     pub fn on_epoch_withdraw_transfer_done(
         &mut self,
@@ -270,16 +270,24 @@ impl Contract {
         let credited_yocto = if ok { withdrawn.as_yoctonear() } else { 0 };
         if ok && credited_yocto > 0 {
             let add = NearToken::from_yoctonear(credited_yocto);
+            let pending_withdraw_yocto = validator.pending_to_withdraw.as_yoctonear();
             let bal_y = validator.total_staked_balance.as_yoctonear();
             require!(
                 bal_y >= credited_yocto,
                 "Recorded pool balance is less than the withdrawn amount; retry after the next successful balance refresh from the pool"
             );
             validator.total_staked_balance = NearToken::from_yoctonear(bal_y - credited_yocto);
-            validator.pending_to_withdraw = validator
-                .pending_to_withdraw
+            validator.pending_to_withdraw =
+                NearToken::from_yoctonear(pending_withdraw_yocto.saturating_sub(credited_yocto));
+            if pending_withdraw_yocto < credited_yocto {
+                env::log_str(
+                    "on_epoch_withdraw_transfer_done: pending_to_withdraw lower than withdrawn; clamped to zero",
+                );
+            }
+            validator.pending_to_claim = validator
+                .pending_to_claim
                 .checked_add(add)
-                .expect("pending_to_withdraw overflow after pool transfer");
+                .expect("pending_to_claim overflow after pool transfer");
             events::log_validator_withdraw_in(credited_yocto, &validator_id);
         }
         self.validators.insert(validator_id, validator);
@@ -387,7 +395,7 @@ impl Contract {
     ///
     /// When `pending_to_stake == pending_to_unstake`, we can net internally:
     /// - clear `pending_to_stake`;
-    /// - move as much matched amount as possible into `pending_to_withdraw` to fund user claims
+    /// - move matched amount directly into `pending_to_claim` (funded by local pending stake)
     ///   without round-tripping through pool `unstake`/`withdraw`;
     /// - clear the matched `pending_to_unstake` amount without pool round-trip.
     pub(crate) fn apply_net_zero_pending_matched_clear(
@@ -405,9 +413,9 @@ impl Contract {
         validator.pending_to_stake = NearToken::from_near(0);
         validator.pending_to_unstake = NearToken::from_near(0);
         if matched_pending_yocto > 0 {
-            validator.pending_to_withdraw = NearToken::from_yoctonear(
+            validator.pending_to_claim = NearToken::from_yoctonear(
                 validator
-                    .pending_to_withdraw
+                    .pending_to_claim
                     .as_yoctonear()
                     .saturating_add(matched_pending_yocto),
             );
@@ -494,6 +502,12 @@ impl Contract {
                     .saturating_sub(net_unstake_yocto)
                     .saturating_sub(absorbed_stake_yocto),
             );
+            validator.pending_to_withdraw = NearToken::from_yoctonear(
+                validator
+                    .pending_to_withdraw
+                    .as_yoctonear()
+                    .saturating_add(net_unstake_yocto),
+            );
             validator.pending_to_stake =
                 NearToken::from_yoctonear(pending_stake_yocto.saturating_sub(absorbed_stake_yocto));
         }
@@ -564,7 +578,7 @@ impl Contract {
                     .resolve_unlock(lock_id, account_id, validator_id, shares_remove),
                 ReleaseKind::Terminal,
             ),
-            // User claim: move unlocked NEAR from `pending_to_withdraw` (see `withdraw.rs`).
+            // User claim: move unlocked NEAR from `pending_to_claim` (see `withdraw.rs`).
             PerEpochContinue::WithdrawUserTransfer {
                 account_id,
                 validator_id,

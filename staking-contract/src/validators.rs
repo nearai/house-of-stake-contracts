@@ -38,9 +38,11 @@ pub struct Validator {
     /// current epoch, user flows **skip** another pool `get_account` refresh for this validator until the
     /// next NEAR epoch.
     pub last_settlement_epoch: u64,
-    /// NEAR that has been **`withdraw`**n from the pool into this contract and sits in the claim bucket until
-    /// users call **`withdraw`** (epoch-gated tranches).
+    /// NEAR that has been unstaked on the pool side and is expected to be moved by pool `withdraw`
+    /// into this contract.
     pub pending_to_withdraw: NearToken,
+    /// NEAR already moved from pool into this contract and now claimable by users.
+    pub pending_to_claim: NearToken,
     /// Accounts that currently have at least one non-empty tranche in **`user_pending_unstake`** for this pool.
     pub accounts_with_pending_unstake: Vec<AccountId>,
 
@@ -49,7 +51,16 @@ pub struct Validator {
 }
 
 impl Validator {
+    /// Total user-exit liability across all buckets.
     pub fn pending_user_liability_yocto(&self) -> u128 {
+        self.pending_to_unstake
+            .as_yoctonear()
+            .saturating_add(self.pending_to_withdraw.as_yoctonear())
+            .saturating_add(self.pending_to_claim.as_yoctonear())
+    }
+
+    /// Liability still outside this contract (pool stake + pool unstaked).
+    pub fn pending_not_in_contract_yocto(&self) -> u128 {
         self.pending_to_unstake
             .as_yoctonear()
             .saturating_add(self.pending_to_withdraw.as_yoctonear())
@@ -61,19 +72,14 @@ impl Validator {
             .saturating_add(self.pending_to_stake.as_yoctonear())
     }
 
-    /// NEAR backing **remaining** circulating shares: gross effective stake minus **all** user
-    /// exit liability (`pending_to_unstake + pending_to_withdraw`) — NEAR already allocated to burned shares
-    /// until users claim, whether it still sits in `pending_to_unstake`, unstaked in the pool,
-    /// or in `pending_to_withdraw`.
+    /// NEAR backing **remaining** circulating shares: gross effective stake minus user liability that
+    /// is still outside this contract (`pending_to_unstake + pending_to_withdraw`).
     ///
     /// **Solvency:** share pricing must not use gross backing alone after shares burn down.
-    /// Subtracting only `pending_to_unstake` is insufficient: that field drops after a successful
-    /// pool unstake while user liability remains until claims, which would let later exits
-    /// re-price against the same gross. Using the full user liability total keeps exits and
-    /// mints aligned with the same net backing.
+    /// `pending_to_claim` is already in-contract cash and should not reduce pool-side backing again.
     pub fn net_stake_yocto(&self) -> u128 {
         self.gross_stake_yocto()
-            .saturating_sub(self.pending_user_liability_yocto())
+            .saturating_sub(self.pending_not_in_contract_yocto())
     }
 }
 
@@ -101,6 +107,7 @@ impl Contract {
             last_unstake_epoch: 0,
             last_settlement_epoch: 0,
             pending_to_withdraw: NearToken::from_near(0),
+            pending_to_claim: NearToken::from_near(0),
             accounts_with_pending_unstake: Vec::new(),
             tx_status: TransactionStatus::Idle,
         };
@@ -127,7 +134,8 @@ impl Contract {
             validator.total_shares.0 == 0
                 && validator.pending_to_stake.as_yoctonear() == 0
                 && validator.pending_to_unstake.as_yoctonear() == 0
-                && validator.pending_to_withdraw.as_yoctonear() == 0,
+                && validator.pending_to_withdraw.as_yoctonear() == 0
+                && validator.pending_to_claim.as_yoctonear() == 0,
             "Cannot remove this validator: all stake, pending stake/unstake, and withdraw bucket must be cleared first"
         );
         validator.status = ValidatorStatus::Removed;
@@ -301,7 +309,7 @@ impl Contract {
     /// Same internal path as [`Contract::unlock`] after epoch preliminaries (settlement -> claim).
     ///
     /// Pricing uses [`Validator::net_stake_yocto`]: **gross** backing minus unsettled user exit liability
-    /// (`pending_to_unstake + pending_to_withdraw`) before this commit. That
+    /// outside this contract (`pending_to_unstake + pending_to_withdraw`) before this commit. That
     /// keeps exits aligned with minting and prevents re-pricing after pool unstake clears
     /// [`Validator::pending_to_unstake`] while claims are still outstanding.
     ///

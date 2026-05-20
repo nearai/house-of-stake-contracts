@@ -72,7 +72,7 @@ pub struct Contract {
     /// User stake position on a pool: `(AccountId, ValidatorId)` → outstanding share units (integer, same scale as [`Validator::total_shares`]). [`ValidatorId`](crate::types::ValidatorId) is the pool contract account.
     pub user_validator_shares: LookupMap<(AccountId, ValidatorId), u128>,
     /// After unlock, NEAR liability slices for this user on this pool until [`crate::Contract::withdraw`]
-    /// (epoch-gated; paid from `pending_to_withdraw` once pool funds are in the bucket).
+    /// (epoch-gated; paid from `pending_to_claim` once pool funds are in the contract claim bucket).
     pub user_pending_unstake: LookupMap<(AccountId, ValidatorId), Vec<PendingUnstakeTranche>>,
     /// Monotonic count of locks created per account; multiplied by [`Config::per_lock_storage_stake`] for prepaid lock storage.
     pub user_lock_count: LookupMap<AccountId, u32>,

@@ -80,7 +80,7 @@ pub enum TransactionStatus {
     Busy,
 }
 
-/// One slice of a user's post-unlock NEAR liability; claims from `pending_to_withdraw` are allowed
+/// One slice of a user's post-unlock NEAR liability; claims from `pending_to_claim` are allowed
 /// when `env::epoch_height() >= available_epoch_height` (see [`crate::Contract::pending_unstake_tranche_available_epoch_height`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[near(serializers = [borsh, json])]
