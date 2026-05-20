@@ -52,7 +52,7 @@ impl Contract {
         account_id: AccountId,
         validator_id: ValidatorId,
         shares_remove: u128,
-    ) -> Promise {
+    ) {
         let _validator = self.require_validator_busy(
             &validator_id,
             "Validator pool must be busy after per-epoch settlement",
@@ -78,8 +78,6 @@ impl Contract {
             &lock.validator_id.clone(),
         );
         self.locks.insert(lock_id.clone(), lock);
-
-        Promise::new(env::current_account_id())
     }
 }
 

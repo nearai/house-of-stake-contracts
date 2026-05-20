@@ -34,11 +34,11 @@ pub trait ExtSelfEpoch {
         validator_id: ValidatorId,
         withdrawn: NearToken,
     ) -> PromiseOrValue<bool>;
-    /// **[Pipeline 2c]** After pool `withdraw`: tail [`Contract::try_epoch_stake_or_unstake`] (**3**, `None`) or settlement **3** + **4** (`Some(cont)`).
+    /// **[Pipeline 2c]** After pool `withdraw`: continue through settlement **3** + **4**.
     fn on_after_pool_withdraw_maybe_settle(
         &mut self,
         validator_id: ValidatorId,
-        cont: Option<PerEpochContinue>,
+        cont: PerEpochContinue,
     ) -> PromiseOrValue<bool>;
     /// **[Pipeline 3b]** Pool `deposit_and_stake` result: updates pending queues, bumps `last_settlement_epoch`.
     fn on_deposit_and_stake(
@@ -89,7 +89,7 @@ pub trait ExtSelfEpoch {
         account_id: AccountId,
         validator_id: ValidatorId,
         shares_remove: u128,
-    ) -> Promise;
+    );
     /// **[Pipeline 6]** After **4** tail promise completes: sets pipeline **`Idle`**.
     fn on_epoch_pipeline_terminal_release(&mut self, validator_id: ValidatorId);
     /// **[Pipeline 6]** Same as `on_epoch_pipeline_terminal_release`, but preserves lock id return.
@@ -201,11 +201,11 @@ impl Contract {
                 .then(
                     ext_self_epoch::ext(env::current_account_id())
                         .with_static_gas(callbacks::ON_GET_UNSTAKED_FOR_WITHDRAW)
-                        .on_after_pool_withdraw_maybe_settle(validator_id, Some(cont)),
+                        .on_after_pool_withdraw_maybe_settle(validator_id, cont),
                 );
         }
 
-        self.try_epoch_stake_or_unstake(validator_id, Some(cont))
+        self.try_epoch_stake_or_unstake(validator_id, cont)
     }
 
     // --- [Pipeline 2a] ---
@@ -289,12 +289,12 @@ impl Contract {
 
     // --- [Pipeline 2c] ---
 
-    /// **[Pipeline 2c]** After **2b**: unlock tail runs **3** with `None` when pending; settlement runs **3** → **4** with `Some(cont)`.
+    /// **[Pipeline 2c]** After **2b**: continue through settlement **3** → **4**.
     #[private]
     pub fn on_after_pool_withdraw_maybe_settle(
         &mut self,
         validator_id: ValidatorId,
-        cont: Option<PerEpochContinue>,
+        cont: PerEpochContinue,
     ) -> PromiseOrValue<bool> {
         let validator = self.require_validator(&validator_id);
         self.assert_validator_busy(
@@ -313,12 +313,11 @@ impl Contract {
     }
 
     /// **[Pipeline 3]** At most one pool `deposit_and_stake` or `unstake` per NEAR epoch (**3a** net-zero inline).
-    /// `dispatch_after: Some(cont)` → skip to **4** when nothing pending or slot used; else pool op → **3′** → **4**.
-    /// `None` — tail-only (**2c**, **5a**); no-op when nothing queued (same as slot already used).
+    /// Skip to **4** when nothing pending or slot used; else pool op → **3′** → **4**.
     pub(crate) fn try_epoch_stake_or_unstake(
         &mut self,
         validator_id: ValidatorId,
-        dispatch_after: Option<PerEpochContinue>,
+        dispatch_after: PerEpochContinue,
     ) -> Promise {
         let validator = self.require_validator(&validator_id);
         self.assert_validator_busy(
@@ -331,24 +330,14 @@ impl Contract {
         let has_pending = pending_stake_yocto > 0 || pending_unstake_yocto > 0;
         let can_settle = validator.last_settlement_epoch < env::epoch_height();
 
-        if let Some(ref cont) = dispatch_after {
-            if !has_pending || !can_settle {
-                return self.promise_epoch_settlement_dispatch(cont.clone());
-            }
-        } else if !has_pending {
-            self.validators.insert(validator_id, validator);
-            return Promise::new(env::current_account_id());
-        } else if !can_settle {
-            return Promise::new(env::current_account_id());
+        if !has_pending || !can_settle {
+            return self.promise_epoch_settlement_dispatch(dispatch_after);
         }
 
         if pending_stake_yocto == pending_unstake_yocto && pending_stake_yocto > 0 {
             events::log_epoch_operation("epoch_settle_net_zero", &validator_id);
             self.apply_net_zero_pending_matched_clear(&validator_id, pending_stake_yocto);
-            if let Some(cont) = dispatch_after {
-                return self.promise_epoch_settlement_dispatch(cont);
-            }
-            return Promise::new(env::current_account_id());
+            return self.promise_epoch_settlement_dispatch(dispatch_after);
         }
 
         require!(
@@ -392,17 +381,11 @@ impl Contract {
                 )
         };
 
-        if let Some(cont) = dispatch_after {
-            pool_settle.then(
-                ext_self_epoch::ext(env::current_account_id())
-                    .with_static_gas(
-                        callbacks::ON_EPOCH_SETTLEMENT_AFTER_TRY_EPOCH_STAKE_OR_UNSTAKE,
-                    )
-                    .on_epoch_settlement_after_try_epoch_stake_or_unstake(validator_id, cont),
-            )
-        } else {
-            pool_settle
-        }
+        pool_settle.then(
+            ext_self_epoch::ext(env::current_account_id())
+                .with_static_gas(callbacks::ON_EPOCH_SETTLEMENT_AFTER_TRY_EPOCH_STAKE_OR_UNSTAKE)
+                .on_epoch_settlement_after_try_epoch_stake_or_unstake(validator_id, dispatch_after),
+        )
     }
 
     // --- [Pipeline 3a] ---
@@ -602,10 +585,11 @@ impl Contract {
                 self.payout_user_withdraw(account_id, validator_id),
                 ReleaseKind::Terminal,
             ),
-            PerEpochContinue::SettleOnly { .. } => (
-                Promise::new(env::current_account_id()),
-                ReleaseKind::Terminal,
-            ),
+            PerEpochContinue::SettleOnly { .. } => {
+                return ext_self_epoch::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_EPOCH_PIPELINE_TERMINAL_RELEASE)
+                    .on_epoch_pipeline_terminal_release(pipeline_validator_id);
+            }
         };
 
         match release_kind {
