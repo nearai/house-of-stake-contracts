@@ -71,32 +71,38 @@ pub async fn fast_forward_until_timestamp(
     worker: &Worker<Sandbox>,
     target_ns: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    const MAX_ROUNDS: u32 = 300;
-    for _ in 0..MAX_ROUNDS {
+    const MAX_ROUNDS: u32 = 600;
+    for round in 0..MAX_ROUNDS {
         let ts = worker.view_block().await?.timestamp();
         if ts >= target_ns {
             return Ok(());
         }
         let gap = target_ns.saturating_sub(ts);
-        // Long-idle subscription tests can require month-scale jumps.
-        // Use larger steps for huge gaps to avoid minute-long loops.
+        // Keep each individual fast-forward bounded. Very large single jumps can appear "hung"
+        // in CI/local runs because no logs are printed until the call returns.
         let blocks = if gap > 5_000_000_000_000_000 {
-            1_200_000u64
+            120_000u64
         } else if gap > 1_500_000_000_000_000 {
-            700_000
+            100_000
         } else if gap > 500_000_000_000_000 {
-            300_000
-        } else if gap > 50_000_000_000_000 {
             80_000
+        } else if gap > 50_000_000_000_000 {
+            40_000
         } else if gap > 5_000_000_000_000 {
-            20_000
+            10_000
         } else if gap > 500_000_000_000 {
-            2_000
+            1_000
         } else if gap > 50_000_000_000 {
-            300
+            200
         } else {
             25
         };
+        if round % 20 == 0 {
+            eprintln!(
+                "[timing][ff-ts] round={} gap_ns={} step_blocks={}",
+                round, gap, blocks
+            );
+        }
         worker.fast_forward(blocks).await?;
     }
     let last = worker.view_block().await?.timestamp();
