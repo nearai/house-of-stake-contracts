@@ -590,6 +590,7 @@ impl Contract {
 
     // Pipeline 5 tails are dispatched in [Pipeline 4] and implemented in:
     // `lock.rs` (5a), `unlock.rs` (5b), `withdraw.rs` (5c), `subscriptions.rs` (5d).
+
     // --- [Pipeline 6] ---
 
     /// Used by **6** (and error paths in `unlock.rs`).

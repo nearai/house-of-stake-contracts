@@ -48,7 +48,7 @@ pub mod callbacks {
     /// After pool `withdraw`: continue into settlement `try_epoch_stake_or_unstake` + dispatch.
     ///
     /// Worst case in this callback is routing through `try_epoch_stake_or_unstake`, which may attach:
-    /// `3 * BASE (pool settle)` + `1 * BASE (pool callback)` + `11 * BASE (3' bridge)` + callback overhead.
+    /// `3 * BASE (pool settle)` + `1 * BASE (pool callback)` + `10 * BASE (dispatch)` + callback overhead.
     pub const ON_GET_UNSTAKED_FOR_WITHDRAW: Gas = Gas::from_gas(BASE_GAS.as_gas() * 17);
     pub const ON_WITHDRAW_TRANSFER: Gas = Gas::from_gas(BASE_GAS.as_gas() * 2);
     pub const ON_TOTAL_BALANCE: Gas = BASE_GAS;
