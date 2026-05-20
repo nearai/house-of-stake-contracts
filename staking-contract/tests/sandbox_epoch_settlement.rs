@@ -390,6 +390,7 @@ async fn withdraw_runs_settlement_prefetch_before_payout() -> Result<(), Box<dyn
     let worker = near_workspaces::sandbox().await?;
     let (staking, pool, _owner, _product_id, price_id) = setup_staking_fixture(&worker).await?;
     let buyer = worker.dev_create_account().await?;
+    let operator = worker.dev_create_account().await?;
 
     buyer_storage_deposit(&buyer, staking.id()).await?;
     let lock_id =
@@ -405,7 +406,16 @@ async fn withdraw_runs_settlement_prefetch_before_payout() -> Result<(), Box<dyn
 
     buyer_unlock(&buyer, staking.id(), &lock_id).await?;
 
-    worker.fast_forward(8_000).await?;
+    // Unlock only queues pending_to_unstake. First fresh epoch settle performs pool `unstake`.
+    fast_forward_until_epoch_delta(&worker, 1).await?;
+    call_epoch_settle(&operator, staking.id(), pool.id())
+        .await?
+        .into_result()?;
+    // Second fresh epoch settle pulls unstaked NEAR from pool into pending_to_withdraw.
+    fast_forward_until_epoch_delta(&worker, 1).await?;
+    call_epoch_settle(&operator, staking.id(), pool.id())
+        .await?
+        .into_result()?;
 
     let balance_before = buyer.view_account().await?.balance;
     buyer_withdraw(&buyer, staking.id(), pool.id()).await?;
