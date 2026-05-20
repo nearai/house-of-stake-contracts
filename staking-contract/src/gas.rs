@@ -32,8 +32,11 @@ pub mod callbacks {
     /// After pool `get_account` during shared settlement (balance refresh + withdraw-if-ready).
     pub const ON_EPOCH_SETTLEMENT_AFTER_POOL_ACCOUNT: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// After `try_epoch_stake_or_unstake` pool call during shared settlement.
-    pub const ON_EPOCH_SETTLEMENT_AFTER_TRY_EPOCH_STAKE_OR_UNSTAKE: Gas =
-        Gas::from_gas(BASE_GAS.as_gas() * 6);
+    ///
+    /// This callback only bridges into the dispatch callback, so keep this budget tight.
+    /// A smaller value here avoids exhausting gas in the preceding settlement callback
+    /// when it schedules `deposit_and_stake/unstake` plus follow-up callbacks.
+    pub const ON_EPOCH_SETTLEMENT_AFTER_TRY_EPOCH_STAKE_OR_UNSTAKE: Gas = BASE_GAS;
     /// Mint lock after shared pre-user settlement pipeline.
     pub const ON_LOCK_FINALLY_MINT: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// Unlock tail after pre-user settlement.
