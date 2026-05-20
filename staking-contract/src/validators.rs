@@ -1,4 +1,4 @@
-use crate::internal::{effective_stake_for_share_exit, mint_shares, near_from_shares};
+use crate::internal::{mint_shares, near_from_shares, net_stake_yocto};
 use crate::*;
 use near_sdk::json_types::{U64, U128};
 use near_sdk::{AccountId, NearToken, Promise, env, is_promise_success, near, require};
@@ -239,7 +239,7 @@ impl Contract {
         deposit: NearToken,
     ) -> u128 {
         let mut validator = self.require_validator(validator_id);
-        let effective_stake_yocto = effective_stake_for_share_exit(
+        let net_stake = net_stake_yocto(
             validator.total_staked_balance,
             validator.pending_to_stake,
             validator.pending_user_unstake_total,
@@ -247,15 +247,11 @@ impl Contract {
         let validator_total_shares = validator.total_shares.0;
         if validator_total_shares > 0 {
             require!(
-                effective_stake_yocto > 0,
+                net_stake > 0,
                 "No effective stake for share minting; wait for balance refresh or settlement"
             );
         }
-        let new_shares = mint_shares(
-            validator_total_shares,
-            effective_stake_yocto,
-            deposit.as_yoctonear(),
-        );
+        let new_shares = mint_shares(validator_total_shares, net_stake, deposit.as_yoctonear());
         validator.total_shares = U128(validator_total_shares.saturating_add(new_shares));
         validator.pending_to_stake = validator
             .pending_to_stake
@@ -282,7 +278,7 @@ impl Contract {
     ///
     /// Same internal path as [`Contract::unlock`] after epoch preliminaries (settlement -> claim).
     ///
-    /// Pricing uses [`crate::internal::effective_stake_for_share_exit`]: **gross** backing minus the full
+    /// Pricing uses [`crate::internal::net_stake_yocto`]: **gross** backing minus the full
     /// unsettled user exit liability [`Validator::pending_user_unstake_total`] (before this commit). That
     /// keeps exits aligned with minting and prevents re-pricing after pool unstake clears
     /// [`Validator::pending_to_unstake`] while claims are still outstanding.
@@ -309,19 +305,18 @@ impl Contract {
         );
 
         // Exit price: same effective backing as mint paths (`pending_user_unstake_total` in the divisor).
-        let effective_stake_yocto = effective_stake_for_share_exit(
+        let net_stake = net_stake_yocto(
             validator.total_staked_balance,
             validator.pending_to_stake,
             validator.pending_user_unstake_total,
         );
         require!(
-            effective_stake_yocto > 0,
+            net_stake > 0,
             "Cannot price this exit: no effective stake left for remaining shares; wait for stake or withdraw steps to finish, then retry"
         );
 
         // NEAR value of this exit when priced; also returned (yocto) for callers that log or chain.
-        let near_amt =
-            near_from_shares(shares_remove, effective_stake_yocto, validator_total_shares);
+        let near_amt = near_from_shares(shares_remove, net_stake, validator_total_shares);
         let near_token = NearToken::from_yoctonear(near_amt);
 
         // Validator: burn pool shares, queue NEAR for `try_epoch_stake_or_unstake` / pool `unstake`, and track

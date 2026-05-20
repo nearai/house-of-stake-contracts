@@ -4,8 +4,7 @@
 
 pub use crate::internal::AVG_MONTH_NS;
 use crate::internal::{
-    check_near_price_lock, effective_stake_for_share_exit, min_locked_yocto_for_duration,
-    near_from_shares,
+    check_near_price_lock, min_locked_yocto_for_duration, near_from_shares, net_stake_yocto,
 };
 use crate::*;
 use common::U256;
@@ -345,14 +344,13 @@ impl Contract {
 
         let validator_id = lock.validator_id.clone();
         let validator = self.require_validator(&validator_id);
-        let effective_stake_yocto = effective_stake_for_share_exit(
+        let net_stake = net_stake_yocto(
             validator.total_staked_balance,
             validator.pending_to_stake,
             validator.pending_user_unstake_total,
         );
         let validator_total_shares = validator.total_shares.0;
-        let lock_near_val =
-            near_from_shares(lock.shares.0, effective_stake_yocto, validator_total_shares);
+        let lock_near_val = near_from_shares(lock.shares.0, net_stake, validator_total_shares);
         if lock_near_val == 0 {
             return;
         }

@@ -9,9 +9,11 @@
 mod mock_pool;
 
 use mock_pool::{
-    buyer_lock_for_product, buyer_storage_deposit, buyer_unlock, buyer_withdraw, call_epoch_settle,
-    fast_forward_until_timestamp, fetch_validator, json_near_token_yocto, json_tx_status,
-    json_u64_field, pool_total_balance_yocto, setup_staking_fixture,
+    buyer_cancel_subscription, buyer_lock_for_product, buyer_lock_for_subscription,
+    buyer_storage_deposit, buyer_unlock, buyer_withdraw, call_epoch_settle,
+    create_subscription_product_and_price, fast_forward_until_timestamp, fetch_validator,
+    json_near_token_yocto, json_tx_status, json_u64_field, pool_total_balance_yocto,
+    setup_staking_fixture,
 };
 use serde_json::json;
 
@@ -285,6 +287,149 @@ async fn withdraw_runs_settlement_prefetch_before_payout() -> Result<(), Box<dyn
     assert!(
         balance_after > balance_before,
         "withdraw should transfer NEAR after settlement prefetch and tranche payout"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn cancel_subscription_after_long_idle_normalizes_end_and_renews_from_fresh_subscription()
+-> Result<(), Box<dyn std::error::Error>> {
+    let worker = near_workspaces::sandbox().await?;
+    let (staking, pool, owner, _product_id_oneoff, _price_id_oneoff) =
+        setup_staking_fixture(&worker).await?;
+    let (sub_product_id, sub_price_id) =
+        create_subscription_product_and_price(&staking, &pool, &owner).await?;
+    let buyer = worker.dev_create_account().await?;
+
+    buyer_storage_deposit(&buyer, staking.id()).await?;
+    let _first_lock = buyer_lock_for_subscription(&buyer, staking.id(), &sub_price_id, 50).await?;
+
+    let sub_initial: serde_json::Value = worker
+        .view(staking.id(), "get_subscription_for_product")
+        .args_json(json!({
+            "account_id": buyer.id(),
+            "product_id": sub_product_id,
+        }))
+        .await?
+        .json()?;
+    let sid_initial = sub_initial["subscription_id"]
+        .as_str()
+        .expect("subscription_id")
+        .to_string();
+    let start_ns = json_u64_field(&sub_initial["start_ns"]).expect("start_ns");
+    let end_ns = json_u64_field(&sub_initial["end_ns"]).expect("end_ns");
+    let period_ns = end_ns.saturating_sub(start_ns);
+    let late_ts = end_ns
+        .saturating_add(period_ns.saturating_mul(2))
+        .saturating_add(1);
+    fast_forward_until_timestamp(&worker, late_ts).await?;
+
+    buyer_cancel_subscription(&buyer, staking.id(), &sub_product_id).await?;
+
+    let sub_after_cancel: serde_json::Value = worker
+        .view(staking.id(), "get_subscription_for_product")
+        .args_json(json!({
+            "account_id": buyer.id(),
+            "product_id": sub_product_id,
+        }))
+        .await?
+        .json()?;
+    let cancel_end_ns = json_u64_field(&sub_after_cancel["end_ns"]).expect("end_ns");
+    assert!(
+        cancel_end_ns > late_ts,
+        "cancel-at-period-end should normalize stale subscription window to current virtual cycle"
+    );
+    assert_eq!(sub_after_cancel["cancel_at_period_end"], json!(true));
+
+    fast_forward_until_timestamp(&worker, cancel_end_ns.saturating_add(1)).await?;
+    let _second_lock = buyer_lock_for_subscription(&buyer, staking.id(), &sub_price_id, 50).await?;
+
+    let sub_after_renew: serde_json::Value = worker
+        .view(staking.id(), "get_subscription_for_product")
+        .args_json(json!({
+            "account_id": buyer.id(),
+            "product_id": sub_product_id,
+        }))
+        .await?
+        .json()?;
+    let sid_after = sub_after_renew["subscription_id"]
+        .as_str()
+        .expect("subscription_id");
+    assert_ne!(
+        sid_after, sid_initial,
+        "after cancel-at-period-end boundary, renewal should create a fresh subscription row"
+    );
+    assert_eq!(sub_after_renew["cancel_at_period_end"], json!(false));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn cancel_subscription_after_long_idle_then_unlock_requests_unstake()
+-> Result<(), Box<dyn std::error::Error>> {
+    let worker = near_workspaces::sandbox().await?;
+    let (staking, pool, owner, _product_id_oneoff, _price_id_oneoff) =
+        setup_staking_fixture(&worker).await?;
+    let (sub_product_id, sub_price_id) =
+        create_subscription_product_and_price(&staking, &pool, &owner).await?;
+    let buyer = worker.dev_create_account().await?;
+
+    buyer_storage_deposit(&buyer, staking.id()).await?;
+    let lock_id = buyer_lock_for_subscription(&buyer, staking.id(), &sub_price_id, 50).await?;
+
+    // Ensure initial pending stake is settled before we run unlock later.
+    worker.fast_forward(100_000).await?;
+    call_epoch_settle(&buyer, staking.id(), pool.id())
+        .await?
+        .into_result()?;
+
+    let sub_initial: serde_json::Value = worker
+        .view(staking.id(), "get_subscription_for_product")
+        .args_json(json!({
+            "account_id": buyer.id(),
+            "product_id": sub_product_id,
+        }))
+        .await?
+        .json()?;
+    let start_ns = json_u64_field(&sub_initial["start_ns"]).expect("start_ns");
+    let end_ns = json_u64_field(&sub_initial["end_ns"]).expect("end_ns");
+    let period_ns = end_ns.saturating_sub(start_ns);
+    let late_ts = end_ns
+        .saturating_add(period_ns.saturating_mul(2))
+        .saturating_add(1);
+    fast_forward_until_timestamp(&worker, late_ts).await?;
+
+    buyer_cancel_subscription(&buyer, staking.id(), &sub_product_id).await?;
+    let sub_after_cancel: serde_json::Value = worker
+        .view(staking.id(), "get_subscription_for_product")
+        .args_json(json!({
+            "account_id": buyer.id(),
+            "product_id": sub_product_id,
+        }))
+        .await?
+        .json()?;
+    let cancel_end_ns = json_u64_field(&sub_after_cancel["end_ns"]).expect("end_ns");
+    fast_forward_until_timestamp(&worker, cancel_end_ns.saturating_add(1)).await?;
+
+    buyer_unlock(&buyer, staking.id(), &lock_id).await?;
+
+    let lock_after: serde_json::Value = worker
+        .view(staking.id(), "get_lock")
+        .args_json(json!({ "lock_id": lock_id }))
+        .await?
+        .json()?;
+    assert_eq!(lock_after["status"], json!("UnlockRequested"));
+
+    let v_after_unlock = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    assert!(
+        json_near_token_yocto(&v_after_unlock["pending_to_unstake"]).unwrap_or(0) > 0,
+        "unlock after cancel-at-end should queue pending_to_unstake for later settle"
+    );
+    assert_eq!(
+        json_tx_status(&v_after_unlock["tx_status"]),
+        Some("Idle"),
+        "unlock flow should release validator Busy status"
     );
 
     Ok(())

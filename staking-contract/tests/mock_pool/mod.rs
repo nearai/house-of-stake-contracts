@@ -175,6 +175,43 @@ pub async fn buyer_lock_for_product(
     Ok(lock_id)
 }
 
+pub async fn buyer_lock_for_subscription(
+    buyer: &near_workspaces::Account,
+    staking_id: &near_workspaces::AccountId,
+    price_id: &str,
+    deposit_near: u128,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let lock_id: String = buyer
+        .call(staking_id, "lock_for_subscription")
+        .args_json(json!({
+            "price_id": price_id,
+            "product_id": null,
+        }))
+        .deposit(NearToken::from_near(deposit_near))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
+        .transact()
+        .await?
+        .into_result()?
+        .json()?;
+    Ok(lock_id)
+}
+
+pub async fn buyer_cancel_subscription(
+    buyer: &near_workspaces::Account,
+    staking_id: &near_workspaces::AccountId,
+    product_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    buyer
+        .call(staking_id, "cancel_subscription")
+        .args_json(json!({ "product_id": product_id }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(WsGas::from_tgas(50))
+        .transact()
+        .await?
+        .into_result()?;
+    Ok(())
+}
+
 pub async fn buyer_unlock(
     buyer: &near_workspaces::Account,
     staking_id: &near_workspaces::AccountId,
@@ -348,6 +385,46 @@ pub async fn create_one_off_product_and_price(
             "amount": "1",
             "price_type": "OneOff",
             "billing_period": null,
+            "lock_factor_near_months": LOCK_FACTOR_DENOM,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(WsGas::from_tgas(200))
+        .transact()
+        .await?;
+    assert!(cpr.is_success(), "create_price: {:#?}", cpr.outcomes());
+    let price_id: String = cpr.into_result()?.json()?;
+    Ok((product_id, price_id))
+}
+
+/// Validator owner: create an active recurring-monthly product + price for subscription flows.
+pub async fn create_subscription_product_and_price(
+    staking: &near_workspaces::Account,
+    pool: &near_workspaces::Account,
+    validator_owner: &near_workspaces::Account,
+) -> Result<(String, String), Box<dyn std::error::Error>> {
+    let cp = validator_owner
+        .call(staking.id(), "create_product")
+        .args_json(json!({
+            "validator_id": pool.id(),
+            "name": "Fixture Sub Product",
+            "description": "sandbox-subscription",
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(WsGas::from_tgas(200))
+        .transact()
+        .await?;
+    assert!(cp.is_success(), "create_product: {:#?}", cp.outcomes());
+    let product_id: String = cp.into_result()?.json()?;
+
+    let cpr = validator_owner
+        .call(staking.id(), "create_price")
+        .args_json(json!({
+            "product_id": product_id,
+            "name": "Monthly",
+            "description": "",
+            "amount": "1",
+            "price_type": "Recurring",
+            "billing_period": "Monthly",
             "lock_factor_near_months": LOCK_FACTOR_DENOM,
         }))
         .deposit(NearToken::from_yoctonear(1))
