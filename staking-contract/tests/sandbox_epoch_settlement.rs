@@ -227,6 +227,9 @@ async fn unlock_queues_unstake_then_epoch_settle_next_epoch_clears_pending()
 #[tokio::test]
 async fn repeated_unstake_wait_window_does_not_wedge_busy() -> Result<(), Box<dyn std::error::Error>>
 {
+    fn yocto(v: &serde_json::Value, key: &str) -> u128 {
+        json_near_token_yocto(&v[key]).unwrap_or(0)
+    }
     let worker = near_workspaces::sandbox().await?;
     let (staking, pool, _owner, _product_id, price_id) =
         setup_staking_fixture_with_unstake_settle_epochs(&worker, 20).await?;
@@ -242,10 +245,27 @@ async fn repeated_unstake_wait_window_does_not_wedge_busy() -> Result<(), Box<dy
         buyer_lock_for_product(&buyer_b, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
 
     // Stake both locks first.
+    let b = worker.view_block().await?;
+    eprintln!(
+        "[timing][wait-window] before first ff epoch_id={:?}",
+        b.epoch_id()
+    );
     fast_forward_until_epoch_delta(&worker, 1).await?;
+    let b = worker.view_block().await?;
+    eprintln!(
+        "[timing][wait-window] after first ff epoch_id={:?}",
+        b.epoch_id()
+    );
     call_epoch_settle(&buyer_a, staking.id(), pool.id())
         .await?
         .into_result()?;
+    let v_after_first_settle = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    eprintln!(
+        "[timing][wait-window] after first settle last_unstake_epoch={} pending_to_unstake={} pending_to_withdraw={}",
+        json_u64_field(&v_after_first_settle["last_unstake_epoch"]).unwrap_or(0),
+        yocto(&v_after_first_settle, "pending_to_unstake"),
+        yocto(&v_after_first_settle, "pending_to_withdraw")
+    );
 
     // Both locks become unlockable.
     for lock_id in [&lock_a, &lock_b] {
@@ -260,21 +280,68 @@ async fn repeated_unstake_wait_window_does_not_wedge_busy() -> Result<(), Box<dy
 
     // First unlock + settle performs one pool unstake and records last_unstake_epoch.
     buyer_unlock(&buyer_a, staking.id(), &lock_a).await?;
+    let v_after_unlock_a = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    eprintln!(
+        "[timing][wait-window] after unlock A last_unstake_epoch={} pending_to_unstake={} pending_to_withdraw={}",
+        json_u64_field(&v_after_unlock_a["last_unstake_epoch"]).unwrap_or(0),
+        yocto(&v_after_unlock_a, "pending_to_unstake"),
+        yocto(&v_after_unlock_a, "pending_to_withdraw")
+    );
+    let b = worker.view_block().await?;
+    eprintln!(
+        "[timing][wait-window] before second ff epoch_id={:?}",
+        b.epoch_id()
+    );
     fast_forward_until_epoch_delta(&worker, 1).await?;
+    let b = worker.view_block().await?;
+    eprintln!(
+        "[timing][wait-window] after second ff epoch_id={:?}",
+        b.epoch_id()
+    );
     call_epoch_settle(&buyer_a, staking.id(), pool.id())
         .await?
         .into_result()?;
+    let v_after_second_settle = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    eprintln!(
+        "[timing][wait-window] after second settle last_unstake_epoch={} pending_to_unstake={} pending_to_withdraw={}",
+        json_u64_field(&v_after_second_settle["last_unstake_epoch"]).unwrap_or(0),
+        yocto(&v_after_second_settle, "pending_to_unstake"),
+        yocto(&v_after_second_settle, "pending_to_withdraw")
+    );
 
     // Queue another unstake while unstake-wait window is still active.
     buyer_unlock(&buyer_b, staking.id(), &lock_b).await?;
+    let v_after_unlock_b = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    eprintln!(
+        "[timing][wait-window] after unlock B last_unstake_epoch={} pending_to_unstake={} pending_to_withdraw={}",
+        json_u64_field(&v_after_unlock_b["last_unstake_epoch"]).unwrap_or(0),
+        yocto(&v_after_unlock_b, "pending_to_unstake"),
+        yocto(&v_after_unlock_b, "pending_to_withdraw")
+    );
 
     // Fresh epoch but still inside unstake wait window: should skip unstake safely and release Busy.
+    let b = worker.view_block().await?;
+    eprintln!(
+        "[timing][wait-window] before third ff epoch_id={:?}",
+        b.epoch_id()
+    );
     fast_forward_until_epoch_delta(&worker, 1).await?;
+    let b = worker.view_block().await?;
+    eprintln!(
+        "[timing][wait-window] after third ff epoch_id={:?}",
+        b.epoch_id()
+    );
     call_epoch_settle(&buyer_b, staking.id(), pool.id())
         .await?
         .into_result()?;
 
     let v = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    eprintln!(
+        "[timing][wait-window] final last_unstake_epoch={} pending_to_unstake={} pending_to_withdraw={}",
+        json_u64_field(&v["last_unstake_epoch"]).unwrap_or(0),
+        yocto(&v, "pending_to_unstake"),
+        yocto(&v, "pending_to_withdraw")
+    );
     assert_eq!(
         json_tx_status(&v["tx_status"]),
         Some("Idle"),
