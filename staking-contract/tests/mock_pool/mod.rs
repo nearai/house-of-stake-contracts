@@ -112,24 +112,33 @@ pub async fn fast_forward_blocks_chunked(
     Ok(())
 }
 
-/// Advance until `epoch_height >= start_epoch + delta_epochs`.
+/// Advance until at least `delta_epochs` epoch-id transitions are observed.
 pub async fn fast_forward_until_epoch_delta(
     worker: &Worker<Sandbox>,
     delta_epochs: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let start_epoch = worker.view_block().await?.epoch_height();
-    let target_epoch = start_epoch.saturating_add(delta_epochs);
+    if delta_epochs == 0 {
+        return Ok(());
+    }
+    let mut current_epoch_id = worker.view_block().await?.epoch_id().clone();
+    let mut crossed = 0u64;
     const MAX_ROUNDS: u32 = 250;
     for _ in 0..MAX_ROUNDS {
-        let current_epoch = worker.view_block().await?.epoch_height();
-        if current_epoch >= target_epoch {
+        let now_epoch_id = worker.view_block().await?.epoch_id().clone();
+        if now_epoch_id != current_epoch_id {
+            crossed = crossed.saturating_add(1);
+            current_epoch_id = now_epoch_id;
+        }
+        if crossed >= delta_epochs {
             return Ok(());
         }
         // Keep each jump moderate to avoid long single fast-forward stalls.
         worker.fast_forward(2_000).await?;
     }
-    let last_epoch = worker.view_block().await?.epoch_height();
-    Err(format!("epoch {target_epoch} not reached after fast_forward (last {last_epoch})").into())
+    Err(format!(
+        "did not cross {delta_epochs} epoch transitions after fast_forward rounds (crossed {crossed})"
+    )
+    .into())
 }
 
 pub fn near_token_yocto_from_view(
