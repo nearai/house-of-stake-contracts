@@ -1,3 +1,4 @@
+use crate::legacy::{ProposalV1, ProposalV2};
 use crate::metadata::ProposalMetadata;
 use crate::*;
 use common::{Bps, TimestampNs, events, near_add, near_sub};
@@ -68,11 +69,13 @@ pub struct Proposal {
     pub sandbox_threshold_bps: Bps,
 }
 
-/// Borsh-tagged proposal storage envelope. The single `Current` variant wraps `Proposal`; the
-/// enum is kept so future schema changes can append new variants without breaking reads.
+/// Borsh-tagged proposal storage envelope. `V1` (oldest) and `V2` (classic) hold legacy shapes,
+/// converted to `Proposal` on read; `Current` wraps the live `Proposal`.
 #[derive(Clone)]
 #[near(serializers=[borsh])]
 pub enum VProposal {
+    V1(ProposalV1),
+    V2(ProposalV2),
     Current(Proposal),
 }
 
@@ -85,6 +88,8 @@ impl From<Proposal> for VProposal {
 impl From<VProposal> for Proposal {
     fn from(v: VProposal) -> Self {
         match v {
+            VProposal::V1(p) => p.into(),
+            VProposal::V2(p) => p.into(),
             VProposal::Current(p) => p,
         }
     }

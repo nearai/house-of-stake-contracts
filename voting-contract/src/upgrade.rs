@@ -1,12 +1,12 @@
 use crate::config::Config;
-use crate::proposal::{is_active_status, Proposal, ProposalFlow, ProposalStatus, VProposal};
+use crate::proposal::{Proposal, VProposal, is_active_status};
 use crate::*;
 use common::Bps;
 use near_sdk::borsh::{self, BorshDeserialize};
 use near_sdk::json_types::U64;
 use near_sdk::store::{IterableSet, LookupMap, Vector};
 #[cfg(target_arch = "wasm32")]
-use near_sdk::{sys, Gas};
+use near_sdk::{Gas, sys};
 
 #[cfg(target_arch = "wasm32")]
 const MIGRATE_STATE_GAS: Gas = Gas::from_tgas(50);
@@ -48,132 +48,12 @@ struct OldConfig {
     approval_threshold_bps: u16,
 }
 
-/// Legacy classic-flow proposal shape stored under `VProposal::Current` at v1.0.3.
-#[derive(Clone, BorshDeserialize, near_sdk::borsh::BorshSerialize)]
-#[borsh(crate = "borsh")]
-struct LegacyProposalClassic {
-    id: ProposalId,
-    creation_time_ns: U64,
-    proposer_id: AccountId,
-    reviewer_id: Option<AccountId>,
-    rejecter_id: Option<AccountId>,
-    voting_start_time_ns: Option<U64>,
-    voting_duration_ns: U64,
-    timelock_duration_ns: U64,
-    expiration_ns: U64,
-    snapshot_and_state: Option<crate::proposal::SnapshotAndState>,
-    votes: Vec<crate::proposal::VoteStats>,
-    total_votes: crate::proposal::VoteStats,
-    status: ProposalStatus,
-    quorum_threshold_bps: u16,
-    quorum_floor: NearToken,
-    approval_threshold_bps: u16,
-    actions: Option<Vec<crate::proposal::ProposalAction>>,
-}
-
-/// Legacy pre-v1.0.3 proposal shape, if any are still tagged as `V1` in storage.
-#[derive(Clone, BorshDeserialize, near_sdk::borsh::BorshSerialize)]
-#[borsh(crate = "borsh")]
-struct LegacyProposalV1 {
-    id: ProposalId,
-    creation_time_ns: U64,
-    proposer_id: AccountId,
-    reviewer_id: Option<AccountId>,
-    voting_start_time_ns: Option<U64>,
-    voting_duration_ns: U64,
-    rejected: bool,
-    snapshot_and_state: Option<crate::proposal::SnapshotAndState>,
-    votes: Vec<crate::proposal::VoteStats>,
-    total_votes: crate::proposal::VoteStats,
-    status: ProposalStatus,
-}
-
-/// Legacy `VProposal` envelope as it was encoded at v1.0.3.
-#[derive(Clone, BorshDeserialize, near_sdk::borsh::BorshSerialize)]
-#[borsh(crate = "borsh")]
-enum LegacyVProposal {
-    V1(LegacyProposalV1),
-    Current(LegacyProposalClassic),
-}
-
-impl From<LegacyProposalClassic> for Proposal {
-    fn from(c: LegacyProposalClassic) -> Self {
-        Self {
-            id: c.id,
-            creation_time_ns: c.creation_time_ns,
-            proposer_id: c.proposer_id,
-            reviewer_id: c.reviewer_id,
-            rejecter_id: c.rejecter_id,
-            // Pre-queue Classic proposals were activated at approval time, so
-            // voting_start_time_ns is the best available approximation of approval_time_ns.
-            approval_time_ns: c.voting_start_time_ns,
-            voting_start_time_ns: c.voting_start_time_ns,
-            voting_duration_ns: c.voting_duration_ns,
-            timelock_duration_ns: c.timelock_duration_ns,
-            expiration_ns: c.expiration_ns,
-            snapshot_and_state: c.snapshot_and_state,
-            votes: c.votes,
-            total_votes: c.total_votes,
-            status: c.status,
-            quorum_threshold_bps: Bps::new(c.quorum_threshold_bps),
-            quorum_floor: c.quorum_floor,
-            approval_threshold_bps: Bps::new(c.approval_threshold_bps),
-            actions: c.actions,
-            sandbox_start_time_ns: None,
-            bond_amount: NearToken::from_yoctonear(0),
-            sandbox_duration_ns: U64(0),
-            sandbox_threshold_bps: Bps::ZERO,
-            flow: ProposalFlow::Classic,
-        }
-    }
-}
-
-impl From<LegacyProposalV1> for Proposal {
-    fn from(v1: LegacyProposalV1) -> Self {
-        Self {
-            id: v1.id,
-            creation_time_ns: v1.creation_time_ns,
-            proposer_id: v1.proposer_id,
-            reviewer_id: v1.reviewer_id,
-            rejecter_id: None,
-            approval_time_ns: v1.voting_start_time_ns,
-            voting_start_time_ns: v1.voting_start_time_ns,
-            voting_duration_ns: v1.voting_duration_ns,
-            timelock_duration_ns: U64(0),
-            expiration_ns: U64(0),
-            snapshot_and_state: v1.snapshot_and_state,
-            votes: v1.votes,
-            total_votes: v1.total_votes,
-            status: v1.status,
-            quorum_threshold_bps: Bps::ZERO,
-            quorum_floor: NearToken::from_yoctonear(0),
-            approval_threshold_bps: Bps::ZERO,
-            actions: None,
-            sandbox_start_time_ns: None,
-            bond_amount: NearToken::from_yoctonear(0),
-            sandbox_duration_ns: U64(0),
-            sandbox_threshold_bps: Bps::ZERO,
-            flow: ProposalFlow::Classic,
-        }
-    }
-}
-
-impl From<LegacyVProposal> for Proposal {
-    fn from(v: LegacyVProposal) -> Self {
-        match v {
-            LegacyVProposal::V1(v1) => v1.into(),
-            LegacyVProposal::Current(c) => c.into(),
-        }
-    }
-}
-
-/// Contract state from v1.0.3 (pre-merge). Proposals are tagged with
-/// `LegacyVProposal` (`V1` | `Current(LegacyProposalClassic)`).
+/// Contract state from v1.0.3.
 #[derive(BorshDeserialize)]
 #[borsh(crate = "borsh")]
 struct OldContract {
     config: OldConfig,
-    proposals: Vector<LegacyVProposal>,
+    proposals: Vector<VProposal>,
     proposal_metadata: Vector<VProposalMetadata>,
     votes: LookupMap<(AccountId, ProposalId), u8>,
     approved_proposals: Vector<ProposalId>,

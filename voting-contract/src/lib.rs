@@ -2,6 +2,7 @@ mod bond;
 mod config;
 mod execute;
 mod governance;
+pub mod legacy;
 mod metadata;
 mod pause;
 pub mod proposal;
