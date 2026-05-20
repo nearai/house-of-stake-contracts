@@ -177,30 +177,17 @@ async fn two_locks_then_epoch_settle_next_epoch_stakes_on_pool()
 #[tokio::test]
 async fn unlock_queues_unstake_then_epoch_settle_next_epoch_clears_pending()
 -> Result<(), Box<dyn std::error::Error>> {
-    let t0 = Instant::now();
-    eprintln!("[timing] start unlock_queues_unstake_then_epoch_settle_next_epoch_clears_pending");
     let worker = near_workspaces::sandbox().await?;
-    eprintln!("[timing] sandbox ready: {:?}", t0.elapsed());
     let (staking, pool, _owner, _product_id, price_id) = setup_staking_fixture(&worker).await?;
-    eprintln!("[timing] fixture ready: {:?}", t0.elapsed());
     let buyer = worker.dev_create_account().await?;
 
     buyer_storage_deposit(&buyer, staking.id()).await?;
     let lock_id =
         buyer_lock_for_product(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
-    eprintln!("[timing] lock created: {:?}", t0.elapsed());
-
-    let t_step = Instant::now();
     fast_forward_until_epoch_delta(&worker, 1).await?;
-    eprintln!(
-        "[timing] first fast_forward_until_epoch_delta(1): {:?}",
-        t_step.elapsed()
-    );
-    let t_step = Instant::now();
     call_epoch_settle(&buyer, staking.id(), pool.id())
         .await?
         .into_result()?;
-    eprintln!("[timing] first epoch_settle: {:?}", t_step.elapsed());
 
     let lock: serde_json::Value = worker
         .view(staking.id(), "get_lock")
@@ -208,16 +195,8 @@ async fn unlock_queues_unstake_then_epoch_settle_next_epoch_clears_pending()
         .await?
         .json()?;
     let end_ns = json_u64_field(&lock["end_ns"]).expect("lock.end_ns");
-    let t_step = Instant::now();
     fast_forward_until_timestamp(&worker, end_ns.saturating_add(1)).await?;
-    eprintln!(
-        "[timing] fast_forward_until_timestamp(end_ns+1): {:?}",
-        t_step.elapsed()
-    );
-
-    let t_step = Instant::now();
     buyer_unlock(&buyer, staking.id(), &lock_id).await?;
-    eprintln!("[timing] unlock call: {:?}", t_step.elapsed());
 
     let v_after_unlock = fetch_validator(&worker, staking.id(), pool.id()).await?;
     assert!(
@@ -230,17 +209,10 @@ async fn unlock_queues_unstake_then_epoch_settle_next_epoch_clears_pending()
         "unlock pipeline must release Busy after share exit"
     );
 
-    let t_step = Instant::now();
     fast_forward_until_epoch_delta(&worker, 1).await?;
-    eprintln!(
-        "[timing] second fast_forward_until_epoch_delta(1): {:?}",
-        t_step.elapsed()
-    );
-    let t_step = Instant::now();
     call_epoch_settle(&buyer, staking.id(), pool.id())
         .await?
         .into_result()?;
-    eprintln!("[timing] second epoch_settle: {:?}", t_step.elapsed());
 
     let v_settled = fetch_validator(&worker, staking.id(), pool.id()).await?;
     assert_eq!(
@@ -248,7 +220,6 @@ async fn unlock_queues_unstake_then_epoch_settle_next_epoch_clears_pending()
         0,
         "epoch_settle should run pool unstake and clear pending_to_unstake"
     );
-    eprintln!("[timing] test total: {:?}", t0.elapsed());
 
     Ok(())
 }
@@ -498,11 +469,17 @@ async fn early_withdraw_failure_still_releases_busy_and_later_retry_succeeds()
 #[tokio::test]
 async fn cancel_subscription_after_long_idle_normalizes_end_and_renews_from_fresh_subscription()
 -> Result<(), Box<dyn std::error::Error>> {
+    let t0 = Instant::now();
+    eprintln!(
+        "[timing] start cancel_subscription_after_long_idle_normalizes_end_and_renews_from_fresh_subscription"
+    );
     let worker = near_workspaces::sandbox().await?;
+    eprintln!("[timing] sandbox ready: {:?}", t0.elapsed());
     let (staking, pool, owner, _product_id_oneoff, _price_id_oneoff) =
         setup_staking_fixture(&worker).await?;
     let (sub_product_id, sub_price_id) =
         create_subscription_product_and_price(&staking, &pool, &owner).await?;
+    eprintln!("[timing] fixture+catalog ready: {:?}", t0.elapsed());
     let buyer = worker.dev_create_account().await?;
 
     buyer_storage_deposit(&buyer, staking.id()).await?;
@@ -526,7 +503,12 @@ async fn cancel_subscription_after_long_idle_normalizes_end_and_renews_from_fres
     let late_ts = end_ns
         .saturating_add(period_ns.saturating_mul(2))
         .saturating_add(1);
+    let t_step = Instant::now();
     fast_forward_until_timestamp(&worker, late_ts).await?;
+    eprintln!(
+        "[timing] first long fast_forward_until_timestamp: {:?}",
+        t_step.elapsed()
+    );
 
     buyer_cancel_subscription(&buyer, staking.id(), &sub_product_id).await?;
 
@@ -545,7 +527,12 @@ async fn cancel_subscription_after_long_idle_normalizes_end_and_renews_from_fres
     );
     assert_eq!(sub_after_cancel["cancel_at_period_end"], json!(true));
 
+    let t_step = Instant::now();
     fast_forward_until_timestamp(&worker, cancel_end_ns.saturating_add(1)).await?;
+    eprintln!(
+        "[timing] second long fast_forward_until_timestamp: {:?}",
+        t_step.elapsed()
+    );
     let _second_lock = buyer_lock_for_subscription(&buyer, staking.id(), &sub_price_id, 50).await?;
 
     let sub_after_renew: serde_json::Value = worker
@@ -564,6 +551,7 @@ async fn cancel_subscription_after_long_idle_normalizes_end_and_renews_from_fres
         "after cancel-at-period-end boundary, renewal should create a fresh subscription row"
     );
     assert_eq!(sub_after_renew["cancel_at_period_end"], json!(false));
+    eprintln!("[timing] test total: {:?}", t0.elapsed());
 
     Ok(())
 }
