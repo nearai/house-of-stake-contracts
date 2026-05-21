@@ -8,7 +8,8 @@ use mock_pool::{
     SETTLEMENT_PIPELINE_GAS_TGAS, add_validator_pair, call_epoch_settle,
     create_one_off_product_and_price, deploy_staking_and_mock_pool, fast_forward_until_epoch_delta,
     fast_forward_until_timestamp, fetch_validator, json_near_token_yocto, json_u64_field,
-    mock_pool_wasm_bytes, near_token_yocto_from_view, set_mock_epoch, staking_wasm_bytes_test,
+    json_u64_field_any, mock_pool_wasm_bytes, near_token_yocto_from_view, set_mock_epoch,
+    staking_wasm_bytes_test,
 };
 use near_workspaces::types::{Gas as WsGas, NearToken};
 use serde_json::json;
@@ -454,11 +455,15 @@ async fn staking_withdraw_fails_when_pool_withdraw_bucket_not_ready()
         .into_result()?
         .json()?;
 
-    // Pin mocked epoch after lock settlement so later unlock/withdraw stay in the same NEAR epoch
-    // (fast settlement path). Advancing chain epoch via `fast_forward` would let `withdraw`'s
-    // built-in settlement complete pool unstake → `pending_to_claim`, making this claim succeed.
-    let epoch_after_lock: u64 = buyer.view(staking.id(), "get_epoch_height").await?.json()?;
-    set_mock_epoch(&buyer, staking.id(), epoch_after_lock).await?;
+    fast_forward_until_epoch_delta(&worker, 1, Some(&buyer), Some(staking.id())).await?;
+    let v_after_lock = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    assert!(
+        json_near_token_yocto(&v_after_lock["pending_to_stake"]).unwrap_or(0) > 0,
+        "lock should leave pending_to_stake until epoch_settle moves stake onto the pool"
+    );
+    call_epoch_settle(&buyer, staking.id(), pool.id())
+        .await?
+        .into_result()?;
 
     let lock: serde_json::Value = worker
         .view(staking.id(), "get_lock")
@@ -483,9 +488,24 @@ async fn staking_withdraw_fails_when_pool_withdraw_bucket_not_ready()
         .await?
         .into_result()?;
 
-    let v_before_withdraw = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    // Keep unlock/withdraw on the validator's last settled epoch so `withdraw` cannot run a fresh
+    // net-zero or pool-withdraw prefetch in the same tx.
+    let v_after_unlock = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    let settle_epoch = json_u64_field_any(&v_after_unlock["last_settlement_epoch"])
+        .expect("last_settlement_epoch");
+    set_mock_epoch(&buyer, staking.id(), settle_epoch).await?;
+
     assert_eq!(
-        json_near_token_yocto(&v_before_withdraw["pending_to_claim"]).unwrap_or(0),
+        json_near_token_yocto(&v_after_unlock["pending_to_stake"]).unwrap_or(0),
+        0,
+        "stake must be on the pool before early withdraw; otherwise net-zero settle prefunds the claim bucket"
+    );
+    assert!(
+        json_near_token_yocto(&v_after_unlock["pending_to_unstake"]).unwrap_or(0) > 0,
+        "unlock should queue pool unstake for a later settlement"
+    );
+    assert_eq!(
+        json_near_token_yocto(&v_after_unlock["pending_to_claim"]).unwrap_or(0),
         0,
         "claim bucket must be empty before pool withdraw prefetches NEAR into the contract"
     );
