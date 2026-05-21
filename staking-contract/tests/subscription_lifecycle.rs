@@ -8,8 +8,8 @@ use common::{
 };
 use near_sdk::NearToken;
 use near_sdk::testing_env;
-use staking_contract::subscriptions::AVG_MONTH_NS;
 use staking_contract::types::{LockStatus, SubscriptionStatus};
+use staking_contract::utils::AVG_MONTH_NS;
 
 const BASE_TS: u64 = 1_700_000_000_000_000_000;
 
