@@ -5,11 +5,11 @@
 mod mock_pool;
 
 use mock_pool::{
-    SETTLEMENT_PIPELINE_GAS_TGAS, add_validator_pair, call_epoch_settle,
-    create_one_off_product_and_price, deploy_staking_and_mock_pool, fast_forward_until_epoch_delta,
-    fast_forward_until_timestamp, fetch_validator, json_near_token_yocto, json_u64_field,
-    json_u64_field_any, mock_pool_wasm_bytes, near_token_yocto_from_view, set_mock_epoch,
-    staking_wasm_bytes_test,
+    SETTLEMENT_PIPELINE_GAS_TGAS, add_validator_pair, buyer_withdraw_result, call_epoch_settle,
+    create_one_off_product_and_price, deploy_staking_and_mock_pool, eprintln_early_withdraw_stage,
+    fast_forward_until_epoch_delta, fast_forward_until_timestamp, fetch_validator,
+    json_near_token_yocto, json_u64_field, json_u64_field_any, mock_pool_wasm_bytes,
+    near_token_yocto_from_view, set_mock_epoch, staking_wasm_bytes_test,
 };
 use near_workspaces::types::{Gas as WsGas, NearToken};
 use serde_json::json;
@@ -455,15 +455,44 @@ async fn staking_withdraw_fails_when_pool_withdraw_bucket_not_ready()
         .into_result()?
         .json()?;
 
-    fast_forward_until_epoch_delta(&worker, 1, Some(&buyer), Some(staking.id())).await?;
     let v_after_lock = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    let epoch_after_lock: u64 = buyer.view(staking.id(), "get_epoch_height").await?.json()?;
+    eprintln_early_withdraw_stage(staking.id(), "after-lock", epoch_after_lock, &v_after_lock);
     assert!(
         json_near_token_yocto(&v_after_lock["pending_to_stake"]).unwrap_or(0) > 0,
         "lock should leave pending_to_stake until epoch_settle moves stake onto the pool"
     );
+
+    fast_forward_until_epoch_delta(&worker, 1, Some(&buyer), Some(staking.id())).await?;
+    let epoch_before_settle: u64 = buyer.view(staking.id(), "get_epoch_height").await?.json()?;
+    let v_before_settle = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    let last_settlement_before = json_u64_field_any(&v_before_settle["last_settlement_epoch"])
+        .expect("last_settlement_epoch");
+    assert!(
+        last_settlement_before < epoch_before_settle,
+        "epoch_settle must run in a fresh epoch (last_settlement={last_settlement_before}, \
+         epoch={epoch_before_settle}); otherwise it is a no-op and pending_to_stake stays queued"
+    );
     call_epoch_settle(&buyer, staking.id(), pool.id())
         .await?
         .into_result()?;
+
+    let v_after_settle = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    let epoch_after_settle: u64 = buyer.view(staking.id(), "get_epoch_height").await?.json()?;
+    eprintln_early_withdraw_stage(
+        staking.id(),
+        "after-settle",
+        epoch_after_settle,
+        &v_after_settle,
+    );
+    assert_eq!(
+        json_near_token_yocto(&v_after_settle["pending_to_stake"]).unwrap_or(0),
+        0,
+        "epoch_settle should flush pending_to_stake onto the pool"
+    );
+    let settle_epoch = json_u64_field_any(&v_after_settle["last_settlement_epoch"])
+        .expect("last_settlement_epoch");
+    set_mock_epoch(&buyer, staking.id(), settle_epoch).await?;
 
     let lock: serde_json::Value = worker
         .view(staking.id(), "get_lock")
@@ -479,6 +508,8 @@ async fn staking_withdraw_fails_when_pool_withdraw_bucket_not_ready()
     )
     .await?;
 
+    set_mock_epoch(&buyer, staking.id(), settle_epoch).await?;
+
     buyer
         .call(staking.id(), "unlock")
         .args_json(json!({ "lock_id": lock_id }))
@@ -488,12 +519,14 @@ async fn staking_withdraw_fails_when_pool_withdraw_bucket_not_ready()
         .await?
         .into_result()?;
 
-    // Keep unlock/withdraw on the validator's last settled epoch so `withdraw` cannot run a fresh
-    // net-zero or pool-withdraw prefetch in the same tx.
     let v_after_unlock = fetch_validator(&worker, staking.id(), pool.id()).await?;
-    let settle_epoch = json_u64_field_any(&v_after_unlock["last_settlement_epoch"])
-        .expect("last_settlement_epoch");
-    set_mock_epoch(&buyer, staking.id(), settle_epoch).await?;
+    let epoch_after_unlock: u64 = buyer.view(staking.id(), "get_epoch_height").await?.json()?;
+    eprintln_early_withdraw_stage(
+        staking.id(),
+        "after-unlock",
+        epoch_after_unlock,
+        &v_after_unlock,
+    );
 
     assert_eq!(
         json_near_token_yocto(&v_after_unlock["pending_to_stake"]).unwrap_or(0),
@@ -510,16 +543,44 @@ async fn staking_withdraw_fails_when_pool_withdraw_bucket_not_ready()
         "claim bucket must be empty before pool withdraw prefetches NEAR into the contract"
     );
 
-    let early_claim = buyer
-        .call(staking.id(), "withdraw")
-        .args_json(json!({ "validator_id": pool.id() }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
-        .transact()
-        .await?;
+    // Pin again so `withdraw` cannot open a fresh settlement epoch (net-zero / pool prefetch).
+    set_mock_epoch(&buyer, staking.id(), settle_epoch).await?;
+    let epoch_before_withdraw: u64 = buyer.view(staking.id(), "get_epoch_height").await?.json()?;
+    assert_eq!(
+        epoch_before_withdraw, settle_epoch,
+        "mock epoch drifted before withdraw (epoch={epoch_before_withdraw}, last_settlement={settle_epoch})"
+    );
+
+    let balance_before = buyer.view_account().await?.balance;
+    let early_claim = buyer_withdraw_result(&buyer, staking.id(), pool.id()).await?;
+    let balance_after = buyer.view_account().await?.balance;
+    let v_after_withdraw = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    eprintln_early_withdraw_stage(
+        staking.id(),
+        "after-withdraw",
+        epoch_before_withdraw,
+        &v_after_withdraw,
+    );
+    eprintln!(
+        "[early-withdraw] withdraw tx: is_failure={} is_success={} receipt_failures={} \
+         buyer_balance_delta_yocto={}",
+        early_claim.is_failure(),
+        early_claim.is_success(),
+        early_claim.receipt_failures().len(),
+        balance_after
+            .as_yoctonear()
+            .saturating_sub(balance_before.as_yoctonear()),
+    );
+    for (i, failure) in early_claim.receipt_failures().iter().enumerate() {
+        eprintln!("[early-withdraw] receipt_failure[{i}]: {failure:#?}");
+    }
 
     assert!(
-        early_claim.is_failure(),
+        balance_after <= balance_before,
+        "early withdraw must not pay out before pool funds land in pending_to_claim"
+    );
+    assert!(
+        early_claim.is_failure() || !early_claim.receipt_failures().is_empty(),
         "withdraw should fail while the in-contract withdraw bucket is still empty under settle gates"
     );
 

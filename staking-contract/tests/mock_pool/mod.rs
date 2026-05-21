@@ -262,6 +262,9 @@ pub fn json_near_token_yocto(v: &serde_json::Value) -> Option<u128> {
     if let Some(s) = v.get("amount").and_then(|x| x.as_str()) {
         return s.parse().ok();
     }
+    if let Some(n) = v.as_u64() {
+        return Some(n as u128);
+    }
     None
 }
 
@@ -288,6 +291,28 @@ pub async fn fetch_validator(
         .args_json(json!({ "validator_id": pool_id }))
         .await?
         .json()?)
+}
+
+/// Debug log for early-withdraw sandbox tests: epoch + validator pending buckets.
+pub async fn eprintln_early_withdraw_stage(
+    staking_id: &near_workspaces::AccountId,
+    stage: &str,
+    contract_epoch: u64,
+    v: &serde_json::Value,
+) {
+    eprintln!(
+        "[early-withdraw] {stage} contract_epoch={contract_epoch} \
+         last_settlement_epoch={} last_unstake_epoch={} tx_status={:?} \
+         pending_to_stake={} pending_to_unstake={} pending_to_withdraw={} pending_to_claim={}",
+        json_u64_field_any(&v["last_settlement_epoch"]).unwrap_or(0),
+        json_u64_field_any(&v["last_unstake_epoch"]).unwrap_or(0),
+        json_tx_status(&v["tx_status"]),
+        json_near_token_yocto(&v["pending_to_stake"]).unwrap_or(0),
+        json_near_token_yocto(&v["pending_to_unstake"]).unwrap_or(0),
+        json_near_token_yocto(&v["pending_to_withdraw"]).unwrap_or(0),
+        json_near_token_yocto(&v["pending_to_claim"]).unwrap_or(0),
+    );
+    eprintln!("[early-withdraw] {stage} staking={staking_id} validator_json={v}");
 }
 
 /// Debug log for wait-window sandbox tests: staking contract NEAR balance + validator pending buckets.
