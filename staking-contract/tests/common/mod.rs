@@ -8,8 +8,8 @@ use near_sdk::{
     AccountId, NearToken, PromiseOrValue, PromiseResult, RuntimeFeesConfig, VMContext, serde_json,
     test_vm_config, testing_env,
 };
-use staking_contract::internal::LOCK_FACTOR_DENOM;
 use staking_contract::types::{BillingPeriod, PriceId, PriceType, ProductId};
+use staking_contract::utils::LOCK_FACTOR_DENOM;
 use staking_contract::{Config, Contract, LockId};
 use std::collections::HashMap;
 use std::str::FromStr;

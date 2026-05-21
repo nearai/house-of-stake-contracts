@@ -8,7 +8,7 @@ use near_workspaces::types::{Gas as WsGas, NearToken};
 use serde_json::json;
 use std::path::Path;
 
-/// `10^24` — matches `staking_contract::internal::LOCK_FACTOR_DENOM`.
+/// `10^24` — matches `staking_contract::utils::LOCK_FACTOR_DENOM`.
 pub const LOCK_FACTOR_DENOM: &str = "1000000000000000000000000";
 
 /// Prepaid gas for `lock_for_product`, `unlock`, `withdraw`, and `epoch_settle`.
