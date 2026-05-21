@@ -14,7 +14,7 @@ use mock_pool::{
     create_subscription_product_and_price, fast_forward_blocks_chunked,
     fast_forward_until_epoch_delta, fast_forward_until_timestamp, fetch_validator,
     json_near_token_yocto, json_tx_status, json_u64_field, pool_set_fail_get_account,
-    pool_total_balance_yocto, set_mock_timestamp, setup_staking_fixture, setup_staking_fixture,
+    pool_total_balance_yocto, set_mock_timestamp, setup_staking_fixture,
     setup_staking_fixture_with_unstake_settle_epochs,
 };
 use near_workspaces::types::NearToken;
@@ -546,11 +546,11 @@ async fn early_withdraw_failure_still_releases_busy_and_later_retry_succeeds()
     );
 
     // Drive settlement deterministically: one epoch to run pool unstake, one more to pull unstaked funds.
-    fast_forward_until_epoch_delta(&worker, 1, Some(&buyer_a), Some(staking.id())).await?;
+    fast_forward_until_epoch_delta(&worker, 1, Some(&operator), Some(staking.id())).await?;
     call_epoch_settle(&operator, staking.id(), pool.id())
         .await?
         .into_result()?;
-    fast_forward_until_epoch_delta(&worker, 1, Some(&buyer_a), Some(staking.id())).await?;
+    fast_forward_until_epoch_delta(&worker, 1, Some(&operator), Some(staking.id())).await?;
     call_epoch_settle(&operator, staking.id(), pool.id())
         .await?
         .into_result()?;
