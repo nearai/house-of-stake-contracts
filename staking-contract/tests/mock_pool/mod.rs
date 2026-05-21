@@ -304,6 +304,21 @@ pub async fn buyer_storage_deposit(
     Ok(())
 }
 
+/// Transfer NEAR from the sandbox root to `buyer` (dev accounts start with ~50 NEAR).
+pub async fn top_up_buyer_near(
+    worker: &Worker<Sandbox>,
+    buyer: &near_workspaces::Account,
+    near: u128,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let outcome = worker
+        .root_account()
+        .expect("sandbox root account")
+        .transfer_near(buyer.id(), NearToken::from_near(near))
+        .await?;
+    assert!(outcome.is_success(), "buyer balance top-up must succeed");
+    Ok(())
+}
+
 pub async fn buyer_lock_for_product(
     buyer: &near_workspaces::Account,
     staking_id: &near_workspaces::AccountId,
@@ -511,7 +526,7 @@ pub async fn setup_staking_fixture_with_unstake_settle_epochs(
     ),
     Box<dyn std::error::Error>,
 > {
-    let staking_wasm = staking_wasm_bytes_test().map_err(|e| format!("staking wasm: {e}"))?;
+    let staking_wasm = staking_wasm_bytes_test().map_err(|e| format!("staking test wasm: {e}"))?;
     let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
 
     let staking = worker.dev_create_account().await?;

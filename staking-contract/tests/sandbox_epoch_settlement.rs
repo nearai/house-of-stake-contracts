@@ -15,9 +15,8 @@ use mock_pool::{
     fast_forward_until_epoch_delta, fast_forward_until_timestamp, fetch_validator,
     json_near_token_yocto, json_tx_status, json_u64_field, pool_set_fail_get_account,
     pool_total_balance_yocto, set_mock_timestamp, setup_staking_fixture,
-    setup_staking_fixture_with_unstake_settle_epochs,
+    setup_staking_fixture_with_unstake_settle_epochs, top_up_buyer_near,
 };
-use near_workspaces::types::NearToken;
 use serde_json::json;
 use std::time::Instant;
 
@@ -404,12 +403,7 @@ async fn epoch_settle_net_zero_when_stake_and_unstake_pending_match()
     .await?;
 
     // Same NEAR epoch: unlock queues unstake; a second lock queues matching stake (no pool op yet).
-    let top_up = worker
-        .root_account()
-        .expect("sandbox root account")
-        .transfer_near(buyer.id(), NearToken::from_near(50))
-        .await?;
-    assert!(top_up.is_success(), "buyer balance top-up must succeed");
+    top_up_buyer_near(&worker, &buyer, 50).await?;
     buyer_unlock(&buyer, staking.id(), &lock_id).await?;
     buyer_lock_for_product(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
 
@@ -642,6 +636,9 @@ async fn cancel_subscription_after_long_idle_normalizes_end_and_renews_from_fres
     let t_step = Instant::now();
     set_mock_timestamp(&buyer, staking.id(), cancel_end_ns.saturating_add(1)).await?;
     eprintln!("[timing] second mock timestamp set: {:?}", t_step.elapsed());
+
+    // Renewal needs another 50 NEAR attached; dev account is ~50 NEAR after the first lock + gas.
+    top_up_buyer_near(&worker, &buyer, 50).await?;
     let _second_lock = buyer_lock_for_subscription(&buyer, staking.id(), &sub_price_id, 50).await?;
 
     let sub_after_renew: serde_json::Value = worker
