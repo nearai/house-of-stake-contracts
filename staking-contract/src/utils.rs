@@ -6,9 +6,9 @@
 //! Runtime clock wrappers provide mocked `block_timestamp` and `epoch_height` when compiled with
 //! `feature = "test"`, falling back to native NEAR env values in production builds.
 
-use crate::{Contract, Price};
+use crate::*;
 use common::U256;
-use near_sdk::env;
+use near_sdk::{env, near};
 
 // =============================================================================
 // Time constants
@@ -175,6 +175,7 @@ impl Contract {
 // =============================================================================
 
 #[cfg(feature = "test")]
+#[near]
 impl Contract {
     /// Set a mocked block timestamp (nanoseconds since Unix epoch).
     /// Only available when compiled with `feature = "test"`.
