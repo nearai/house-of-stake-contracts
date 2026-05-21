@@ -1,4 +1,4 @@
-use crate::internal::{NS_PER_DAY_TIMESTAMP, check_near_price_lock};
+use crate::utils::{NS_PER_DAY_TIMESTAMP, block_timestamp, check_near_price_lock};
 use crate::*;
 use near_sdk::json_types::{U64, U128};
 use near_sdk::{AccountId, NearToken, PromiseOrValue, env, near, require};
@@ -119,7 +119,7 @@ impl Contract {
 
         let product_id = product.product_id.clone();
         let sub_key = (buyer.clone(), product_id.clone());
-        let now = env::block_timestamp();
+        let now = block_timestamp();
 
         let (subscription, sub_id, is_new_index) = if let Some(sid_ref) =
             self.subscription_by_account_product.get(&sub_key)
@@ -356,9 +356,10 @@ impl Contract {
             validator_id: validator_id.clone(),
             amount_near: locked,
             shares: U128(new_shares),
-            start_ns: U64(env::block_timestamp()),
-            end_ns: U64(env::block_timestamp()
-                .saturating_add(u64::try_from(duration_ns).unwrap_or(u64::MAX))),
+            start_ns: U64(block_timestamp()),
+            end_ns: U64(
+                block_timestamp().saturating_add(u64::try_from(duration_ns).unwrap_or(u64::MAX))
+            ),
             order: order.clone(),
             status: LockStatus::Active,
         };

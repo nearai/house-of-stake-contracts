@@ -7,6 +7,7 @@
 
 use crate::events;
 use crate::gas::{callbacks, staking_pool};
+use crate::utils::{block_timestamp, epoch_height};
 use crate::*;
 use near_sdk::ext_contract;
 use near_sdk::json_types::{U64, U128};
@@ -140,8 +141,7 @@ impl Contract {
     ) -> Promise {
         let mut validator = self.require_validator_idle(&validator_id);
         // Fast path when this pool already consumed its one settle slot for the current NEAR epoch.
-        let needs_pre_user_settlement_pipeline =
-            validator.last_settlement_epoch < env::epoch_height();
+        let needs_pre_user_settlement_pipeline = validator.last_settlement_epoch < epoch_height();
         validator.tx_status = TransactionStatus::Busy;
         self.validators.insert(validator_id.clone(), validator);
 
@@ -189,7 +189,7 @@ impl Contract {
             "Validator pool must be busy for settlement after get_account",
         );
         validator.total_staked_balance = pool_account.total_balance();
-        validator.last_balance_refresh_ns = U64(env::block_timestamp());
+        validator.last_balance_refresh_ns = U64(block_timestamp());
         self.validators.insert(validator_id.clone(), validator);
 
         let unstaked = pool_account.unstaked();
@@ -334,7 +334,7 @@ impl Contract {
         let pending_stake_yocto = validator.pending_to_stake.as_yoctonear();
         let pending_unstake_yocto = validator.pending_to_unstake.as_yoctonear();
         let has_pending = pending_stake_yocto > 0 || pending_unstake_yocto > 0;
-        let can_settle = validator.last_settlement_epoch < env::epoch_height();
+        let can_settle = validator.last_settlement_epoch < epoch_height();
 
         if !has_pending || !can_settle {
             return self.promise_epoch_settlement_dispatch(dispatch_after);
@@ -420,7 +420,7 @@ impl Contract {
                     .saturating_add(matched_pending_yocto),
             );
         }
-        validator.last_settlement_epoch = env::epoch_height();
+        validator.last_settlement_epoch = epoch_height();
         self.validators.insert(validator_id.clone(), validator);
         true
     }
@@ -463,7 +463,7 @@ impl Contract {
                 .total_staked_balance
                 .checked_add(NearToken::from_yoctonear(net_stake_yocto))
                 .expect("total_staked_balance overflow after stake");
-            validator.last_settlement_epoch = env::epoch_height();
+            validator.last_settlement_epoch = epoch_height();
         }
         self.validators.insert(validator_id, validator);
         ok
@@ -482,7 +482,7 @@ impl Contract {
         let ok = is_promise_success();
         let mut validator = self.require_validator(&validator_id);
         if ok {
-            let current_epoch = env::epoch_height();
+            let current_epoch = epoch_height();
             validator.last_unstake_epoch = current_epoch;
             validator.last_settlement_epoch = current_epoch;
             let net_unstake_yocto = amount.as_yoctonear();

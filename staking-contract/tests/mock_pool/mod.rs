@@ -39,6 +39,15 @@ pub fn staking_wasm_bytes() -> Result<Vec<u8>, std::io::Error> {
     ])
 }
 
+/// Load test-feature WASM with mocked clock controls (`set_block_timestamp`, `set_epoch_height`).
+pub fn staking_wasm_bytes_test() -> Result<Vec<u8>, std::io::Error> {
+    wasm_from_candidates(&[
+        "res/local/staking_contract_test.wasm",
+        "target/near/staking_contract/staking_contract.wasm",
+        "target/wasm32-unknown-unknown/release/staking_contract.wasm",
+    ])
+}
+
 pub fn mock_pool_wasm_bytes() -> Result<Vec<u8>, std::io::Error> {
     wasm_from_candidates(&[
         "res/local/mock_staking_pool_contract.wasm",
@@ -67,10 +76,28 @@ pub fn staking_new_args_e2e(owner: &near_workspaces::AccountId) -> serde_json::V
 /// Advance sandbox blocks until the chain timestamp reaches `target_ns` (used for `unlock` after `lock.end_ns`).
 ///
 /// Uses adaptive bounded steps so very large jumps do not stall on one long `fast_forward` call.
+///
+/// If `staking_id` and `caller` are provided, attempts to use mock timestamp first (instant),
+/// falling back to slow fast-forward if mock is unavailable.
 pub async fn fast_forward_until_timestamp(
     worker: &Worker<Sandbox>,
     target_ns: u64,
+    caller: Option<&near_workspaces::Account>,
+    staking_id: Option<&near_workspaces::AccountId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Try mock method first if staking_id and caller are provided
+    if let (Some(staking), Some(caller_acc)) = (staking_id, caller) {
+        match set_mock_timestamp(caller_acc, staking, target_ns).await {
+            Ok(()) => {
+                eprintln!("[timing] set timestamp via mock to {}", target_ns);
+                return Ok(());
+            }
+            Err(_) => {
+                eprintln!("[timing] mock unavailable, falling back to fast-forward");
+            }
+        }
+    }
+
     // Conservative defaults for sandbox stability; tune by observed timestamp deltas.
     const DEFAULT_NS_PER_BLOCK: u64 = 1_000_000_000;
     const MIN_STEP_BLOCKS: u64 = 50;
@@ -116,6 +143,42 @@ pub async fn fast_forward_until_timestamp(
     Err(format!("timestamp {target_ns} not reached after fast_forward (last {last:?})",).into())
 }
 
+/// Set mocked block timestamp directly using contract's test-feature method.
+/// This is much faster than `fast_forward_until_timestamp` for large time jumps.
+/// Requires staking contract built with `test` feature (loads `staking_contract_test.wasm`).
+pub async fn set_mock_timestamp(
+    caller: &near_workspaces::Account,
+    staking_id: &near_workspaces::AccountId,
+    target_ns: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    caller
+        .call(staking_id, "set_block_timestamp")
+        .args_json(json!({ "timestamp_ns": target_ns.to_string() }))
+        .gas(WsGas::from_tgas(50))
+        .transact()
+        .await?
+        .into_result()?;
+    Ok(())
+}
+
+/// Set mocked epoch height directly using contract's test-feature method.
+/// This is much faster than `fast_forward_until_epoch_delta` for large epoch jumps.
+/// Requires staking contract built with `test` feature (loads `staking_contract_test.wasm`).
+pub async fn set_mock_epoch(
+    caller: &near_workspaces::Account,
+    staking_id: &near_workspaces::AccountId,
+    target_epoch: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    caller
+        .call(staking_id, "set_epoch_height")
+        .args_json(json!({ "epoch": target_epoch.to_string() }))
+        .gas(WsGas::from_tgas(50))
+        .transact()
+        .await?
+        .into_result()?;
+    Ok(())
+}
+
 /// Advance by many blocks in smaller chunks to avoid long single fast-forward calls.
 pub async fn fast_forward_blocks_chunked(
     worker: &Worker<Sandbox>,
@@ -132,13 +195,39 @@ pub async fn fast_forward_blocks_chunked(
 }
 
 /// Advance until at least `delta_epochs` epoch-id transitions are observed.
+///
+/// If `staking_id` and `caller` are provided, attempts to use mock epoch advancement first (instant),
+/// falling back to slow fast-forward if mock is unavailable.
 pub async fn fast_forward_until_epoch_delta(
     worker: &Worker<Sandbox>,
     delta_epochs: u64,
+    caller: Option<&near_workspaces::Account>,
+    staking_id: Option<&near_workspaces::AccountId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if delta_epochs == 0 {
         return Ok(());
     }
+
+    // Try mock method first if staking_id and caller are provided
+    if let (Some(staking), Some(caller_acc)) = (staking_id, caller) {
+        // Get current epoch from contract
+        let current_epoch: u64 = caller_acc.view(staking, "get_epoch_height").await?.json()?;
+        let target_epoch = current_epoch.saturating_add(delta_epochs);
+
+        match set_mock_epoch(caller_acc, staking, target_epoch).await {
+            Ok(()) => {
+                eprintln!(
+                    "[timing] advanced epoch via mock from {} to {} (delta {})",
+                    current_epoch, target_epoch, delta_epochs
+                );
+                return Ok(());
+            }
+            Err(_) => {
+                eprintln!("[timing] mock unavailable, falling back to fast-forward");
+            }
+        }
+    }
+
     let mut current_epoch_id = worker.view_block().await?.epoch_id().clone();
     let mut crossed = 0u64;
     const MAX_ROUNDS: u32 = 250;
@@ -463,6 +552,42 @@ pub async fn setup_staking_fixture_with_unstake_settle_epochs(
         .await?
         .into_result()?;
 
+    add_validator_pair(&staking, &pool).await?;
+    let (product_id, price_id) =
+        create_one_off_product_and_price(&staking, &pool, &validator_owner).await?;
+
+    Ok((staking, pool, validator_owner, product_id, price_id))
+}
+
+/// Same as [`setup_staking_fixture`] but uses test-feature WASM with mocked clock controls.
+/// This allows tests to use `set_mock_timestamp` and `set_mock_epoch` for instant time advancement.
+pub async fn setup_staking_fixture_with_mock(
+    worker: &Worker<Sandbox>,
+) -> Result<
+    (
+        near_workspaces::Account,
+        near_workspaces::Account,
+        near_workspaces::Account,
+        String,
+        String,
+    ),
+    Box<dyn std::error::Error>,
+> {
+    let staking_wasm = staking_wasm_bytes_test().map_err(|e| format!("staking test wasm: {e}"))?;
+    let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
+
+    let staking = worker.dev_create_account().await?;
+    let pool = worker.dev_create_account().await?;
+    let validator_owner = worker.dev_create_account().await?;
+
+    deploy_staking_and_mock_pool(
+        &staking,
+        &pool,
+        validator_owner.id(),
+        &staking_wasm,
+        &pool_wasm,
+    )
+    .await?;
     add_validator_pair(&staking, &pool).await?;
     let (product_id, price_id) =
         create_one_off_product_and_price(&staking, &pool, &validator_owner).await?;

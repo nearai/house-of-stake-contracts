@@ -7,7 +7,6 @@ pub mod events;
 pub mod gas;
 pub mod governance;
 pub mod ids;
-pub mod internal;
 pub mod lock;
 pub mod pause;
 pub mod prices;
@@ -16,6 +15,7 @@ pub mod subscriptions;
 pub mod types;
 pub mod unlock;
 pub mod upgrade;
+pub mod utils;
 pub mod validators;
 pub mod withdraw;
 

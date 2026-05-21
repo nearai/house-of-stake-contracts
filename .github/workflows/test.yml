@@ -33,5 +33,5 @@ jobs:
       - name: Build contract wasm for integration tests
         run: bash build_all.sh
 
-      - name: cargo test
-        run: cargo test --workspace --all-features
+      - name: Run all tests
+        run: make test

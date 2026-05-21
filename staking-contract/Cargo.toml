@@ -29,6 +29,10 @@ common = { path = "../common" }
 near-sdk.workspace = true
 serde_json.workspace = true
 
+[features]
+default = []
+test = []
+
 [dev-dependencies]
 # `unit-testing` enables `testing_env!` / `VMContextBuilder` for `tests/*.rs` (host only; not in wasm).
 near-sdk = { workspace = true, features = ["unit-testing"] }

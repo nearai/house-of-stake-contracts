@@ -1,5 +1,6 @@
 //! Stripe-like deterministic IDs: `prod_*`, `price_*`, `sub_*`, `lock_*`.
 
+use crate::utils::block_timestamp;
 use near_sdk::env;
 
 /// Prefix lengths per PLAN §11 item 6 (approximate Stripe parity).
@@ -54,7 +55,7 @@ fn next_id(prefix: &str, suffix_len: usize, nonce: &mut u64) -> String {
     buf.extend_from_slice(prefix.as_bytes());
     buf.extend_from_slice(&nonce_word_for_entropy.to_be_bytes());
     buf.extend_from_slice(&env::block_height().to_be_bytes());
-    buf.extend_from_slice(&env::block_timestamp().to_be_bytes());
+    buf.extend_from_slice(&block_timestamp().to_be_bytes());
     buf.extend_from_slice(env::predecessor_account_id().as_bytes());
     let hash = env::sha256(&buf);
     let encoded = base62_from_hash(&hash, suffix_len);

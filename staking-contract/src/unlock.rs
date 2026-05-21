@@ -1,3 +1,4 @@
+use crate::utils::block_timestamp;
 use crate::*;
 use near_sdk::{Promise, assert_one_yocto, env, near, require};
 
@@ -22,7 +23,7 @@ impl Contract {
         );
         require!(lock.status == LockStatus::Active, "Lock is not active");
         require!(
-            env::block_timestamp() >= lock.end_ns.0,
+            block_timestamp() >= lock.end_ns.0,
             "Lock period has not ended yet"
         );
 

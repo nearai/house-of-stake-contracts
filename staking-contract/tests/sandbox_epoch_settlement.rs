@@ -14,8 +14,8 @@ use mock_pool::{
     create_subscription_product_and_price, fast_forward_blocks_chunked,
     fast_forward_until_epoch_delta, fast_forward_until_timestamp, fetch_validator,
     json_near_token_yocto, json_tx_status, json_u64_field, pool_set_fail_get_account,
-    pool_total_balance_yocto, setup_staking_fixture,
-    setup_staking_fixture_with_unstake_settle_epochs,
+    pool_total_balance_yocto, set_mock_timestamp, setup_staking_fixture,
+    setup_staking_fixture_with_mock, setup_staking_fixture_with_unstake_settle_epochs,
 };
 use near_workspaces::types::NearToken;
 use serde_json::json;
@@ -153,7 +153,7 @@ async fn two_locks_then_epoch_settle_next_epoch_stakes_on_pool()
 
     let pool_before = pool_total_balance_yocto(&worker, pool.id(), staking.id()).await?;
 
-    fast_forward_until_epoch_delta(&worker, 1).await?;
+    fast_forward_until_epoch_delta(&worker, 1, Some(&buyer_a), Some(staking.id())).await?;
     call_epoch_settle(&buyer_a, staking.id(), pool.id())
         .await?
         .into_result()?;
@@ -184,7 +184,7 @@ async fn unlock_queues_unstake_then_epoch_settle_next_epoch_clears_pending()
     buyer_storage_deposit(&buyer, staking.id()).await?;
     let lock_id =
         buyer_lock_for_product(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
-    fast_forward_until_epoch_delta(&worker, 1).await?;
+    fast_forward_until_epoch_delta(&worker, 1, Some(&buyer), Some(staking.id())).await?;
     call_epoch_settle(&buyer, staking.id(), pool.id())
         .await?
         .into_result()?;
@@ -195,7 +195,7 @@ async fn unlock_queues_unstake_then_epoch_settle_next_epoch_clears_pending()
         .await?
         .json()?;
     let end_ns = json_u64_field(&lock["end_ns"]).expect("lock.end_ns");
-    fast_forward_until_timestamp(&worker, end_ns.saturating_add(1)).await?;
+    fast_forward_until_timestamp(&worker, end_ns.saturating_add(1), None, None).await?;
     buyer_unlock(&buyer, staking.id(), &lock_id).await?;
 
     let v_after_unlock = fetch_validator(&worker, staking.id(), pool.id()).await?;
@@ -209,7 +209,7 @@ async fn unlock_queues_unstake_then_epoch_settle_next_epoch_clears_pending()
         "unlock pipeline must release Busy after share exit"
     );
 
-    fast_forward_until_epoch_delta(&worker, 1).await?;
+    fast_forward_until_epoch_delta(&worker, 1, Some(&buyer), Some(staking.id())).await?;
     call_epoch_settle(&buyer, staking.id(), pool.id())
         .await?
         .into_result()?;
@@ -250,7 +250,7 @@ async fn repeated_unstake_wait_window_does_not_wedge_busy() -> Result<(), Box<dy
         "[timing][wait-window] before first ff epoch_id={:?}",
         b.epoch_id()
     );
-    fast_forward_until_epoch_delta(&worker, 1).await?;
+    fast_forward_until_epoch_delta(&worker, 1, None, None).await?;
     let b = worker.view_block().await?;
     eprintln!(
         "[timing][wait-window] after first ff epoch_id={:?}",
@@ -276,7 +276,7 @@ async fn repeated_unstake_wait_window_does_not_wedge_busy() -> Result<(), Box<dy
             .await?
             .json()?;
         let end_ns = json_u64_field(&lock["end_ns"]).expect("lock.end_ns");
-        fast_forward_until_timestamp(&worker, end_ns.saturating_add(1)).await?;
+        fast_forward_until_timestamp(&worker, end_ns.saturating_add(1), None, None).await?;
     }
 
     // First unlock + settle performs one pool unstake and records last_unstake_epoch.
@@ -294,7 +294,7 @@ async fn repeated_unstake_wait_window_does_not_wedge_busy() -> Result<(), Box<dy
         "[timing][wait-window] before second ff epoch_id={:?}",
         b.epoch_id()
     );
-    fast_forward_until_epoch_delta(&worker, 1).await?;
+    fast_forward_until_epoch_delta(&worker, 1, None, None).await?;
     let b = worker.view_block().await?;
     eprintln!(
         "[timing][wait-window] after second ff epoch_id={:?}",
@@ -329,7 +329,7 @@ async fn repeated_unstake_wait_window_does_not_wedge_busy() -> Result<(), Box<dy
         "[timing][wait-window] before third ff epoch_id={:?}",
         b.epoch_id()
     );
-    fast_forward_until_epoch_delta(&worker, 1).await?;
+    fast_forward_until_epoch_delta(&worker, 1, None, None).await?;
     let b = worker.view_block().await?;
     eprintln!(
         "[timing][wait-window] after third ff epoch_id={:?}",
@@ -372,7 +372,7 @@ async fn epoch_settle_net_zero_when_stake_and_unstake_pending_match()
         buyer_lock_for_product(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
 
     // Stake the first lock's pending queue in a fresh epoch.
-    fast_forward_until_epoch_delta(&worker, 1).await?;
+    fast_forward_until_epoch_delta(&worker, 1, Some(&buyer), Some(staking.id())).await?;
     call_epoch_settle(&buyer, staking.id(), pool.id())
         .await?
         .into_result()?;
@@ -383,7 +383,7 @@ async fn epoch_settle_net_zero_when_stake_and_unstake_pending_match()
         .await?
         .json()?;
     let end_ns = json_u64_field(&lock["end_ns"]).expect("lock.end_ns");
-    fast_forward_until_timestamp(&worker, end_ns.saturating_add(1)).await?;
+    fast_forward_until_timestamp(&worker, end_ns.saturating_add(1), None, None).await?;
 
     // Same NEAR epoch: unlock queues unstake; a second lock queues matching stake (no pool op yet).
     let top_up = worker
@@ -409,7 +409,7 @@ async fn epoch_settle_net_zero_when_stake_and_unstake_pending_match()
 
     let pool_before = pool_total_balance_yocto(&worker, pool.id(), staking.id()).await?;
 
-    fast_forward_until_epoch_delta(&worker, 1).await?;
+    fast_forward_until_epoch_delta(&worker, 1, Some(&buyer), Some(staking.id())).await?;
     call_epoch_settle(&buyer, staking.id(), pool.id())
         .await?
         .into_result()?;
@@ -450,17 +450,17 @@ async fn withdraw_runs_settlement_prefetch_before_payout() -> Result<(), Box<dyn
         .await?
         .json()?;
     let end_ns = json_u64_field(&lock["end_ns"]).expect("lock.end_ns");
-    fast_forward_until_timestamp(&worker, end_ns.saturating_add(1)).await?;
+    fast_forward_until_timestamp(&worker, end_ns.saturating_add(1), None, None).await?;
 
     buyer_unlock(&buyer, staking.id(), &lock_id).await?;
 
     // Unlock only queues pending_to_unstake. First fresh epoch settle performs pool `unstake`.
-    fast_forward_until_epoch_delta(&worker, 1).await?;
+    fast_forward_until_epoch_delta(&worker, 1, Some(&operator), Some(staking.id())).await?;
     call_epoch_settle(&operator, staking.id(), pool.id())
         .await?
         .into_result()?;
     // Second fresh epoch settle pulls unstaked NEAR from pool into pending_to_withdraw.
-    fast_forward_until_epoch_delta(&worker, 1).await?;
+    fast_forward_until_epoch_delta(&worker, 1, Some(&operator), Some(staking.id())).await?;
     call_epoch_settle(&operator, staking.id(), pool.id())
         .await?
         .into_result()?;
@@ -495,7 +495,7 @@ async fn early_withdraw_failure_still_releases_busy_and_later_retry_succeeds()
         .await?
         .json()?;
     let end_ns = json_u64_field(&lock["end_ns"]).expect("lock.end_ns");
-    fast_forward_until_timestamp(&worker, end_ns.saturating_add(1)).await?;
+    fast_forward_until_timestamp(&worker, end_ns.saturating_add(1), None, None).await?;
     buyer_unlock(&buyer, staking.id(), &lock_id).await?;
 
     // Too early for tranche claimability; withdraw should fail but must not wedge Busy.
@@ -516,11 +516,11 @@ async fn early_withdraw_failure_still_releases_busy_and_later_retry_succeeds()
     );
 
     // Drive settlement deterministically: one epoch to run pool unstake, one more to pull unstaked funds.
-    fast_forward_until_epoch_delta(&worker, 1).await?;
+    fast_forward_until_epoch_delta(&worker, 1, Some(&operator), Some(staking.id())).await?;
     call_epoch_settle(&operator, staking.id(), pool.id())
         .await?
         .into_result()?;
-    fast_forward_until_epoch_delta(&worker, 1).await?;
+    fast_forward_until_epoch_delta(&worker, 1, Some(&operator), Some(staking.id())).await?;
     call_epoch_settle(&operator, staking.id(), pool.id())
         .await?
         .into_result()?;
@@ -547,8 +547,9 @@ async fn cancel_subscription_after_long_idle_normalizes_end_and_renews_from_fres
     );
     let worker = near_workspaces::sandbox().await?;
     eprintln!("[timing] sandbox ready: {:?}", t0.elapsed());
+    // Use test-feature WASM for mock clock controls (instant time advancement)
     let (staking, pool, owner, _product_id_oneoff, _price_id_oneoff) =
-        setup_staking_fixture(&worker).await?;
+        setup_staking_fixture_with_mock(&worker).await?;
     let (sub_product_id, sub_price_id) =
         create_subscription_product_and_price(&staking, &pool, &owner).await?;
     eprintln!("[timing] fixture+catalog ready: {:?}", t0.elapsed());
@@ -588,11 +589,8 @@ async fn cancel_subscription_after_long_idle_normalizes_end_and_renews_from_fres
         .saturating_add(period_ns.saturating_mul(2))
         .saturating_add(1);
     let t_step = Instant::now();
-    fast_forward_until_timestamp(&worker, late_ts).await?;
-    eprintln!(
-        "[timing] first long fast_forward_until_timestamp: {:?}",
-        t_step.elapsed()
-    );
+    set_mock_timestamp(&buyer, staking.id(), late_ts).await?;
+    eprintln!("[timing] first mock timestamp set: {:?}", t_step.elapsed());
 
     buyer_cancel_subscription(&buyer, staking.id(), &sub_product_id).await?;
 
@@ -612,11 +610,8 @@ async fn cancel_subscription_after_long_idle_normalizes_end_and_renews_from_fres
     assert_eq!(sub_after_cancel["cancel_at_period_end"], json!(true));
 
     let t_step = Instant::now();
-    fast_forward_until_timestamp(&worker, cancel_end_ns.saturating_add(1)).await?;
-    eprintln!(
-        "[timing] second long fast_forward_until_timestamp: {:?}",
-        t_step.elapsed()
-    );
+    set_mock_timestamp(&buyer, staking.id(), cancel_end_ns.saturating_add(1)).await?;
+    eprintln!("[timing] second mock timestamp set: {:?}", t_step.elapsed());
     let _second_lock = buyer_lock_for_subscription(&buyer, staking.id(), &sub_price_id, 50).await?;
 
     let sub_after_renew: serde_json::Value = worker
@@ -644,8 +639,9 @@ async fn cancel_subscription_after_long_idle_normalizes_end_and_renews_from_fres
 async fn cancel_subscription_after_long_idle_then_unlock_requests_unstake()
 -> Result<(), Box<dyn std::error::Error>> {
     let worker = near_workspaces::sandbox().await?;
+    // Use test-feature WASM for mock clock controls (instant time advancement)
     let (staking, pool, owner, _product_id_oneoff, _price_id_oneoff) =
-        setup_staking_fixture(&worker).await?;
+        setup_staking_fixture_with_mock(&worker).await?;
     let (sub_product_id, sub_price_id) =
         create_subscription_product_and_price(&staking, &pool, &owner).await?;
     let buyer = worker.dev_create_account().await?;
@@ -654,7 +650,7 @@ async fn cancel_subscription_after_long_idle_then_unlock_requests_unstake()
     let lock_id = buyer_lock_for_subscription(&buyer, staking.id(), &sub_price_id, 50).await?;
 
     // Ensure initial pending stake is settled before we run unlock later.
-    fast_forward_until_epoch_delta(&worker, 1).await?;
+    fast_forward_until_epoch_delta(&worker, 1, Some(&buyer), Some(staking.id())).await?;
     call_epoch_settle(&buyer, staking.id(), pool.id())
         .await?
         .into_result()?;
@@ -673,7 +669,7 @@ async fn cancel_subscription_after_long_idle_then_unlock_requests_unstake()
     let late_ts = end_ns
         .saturating_add(period_ns.saturating_mul(2))
         .saturating_add(1);
-    fast_forward_until_timestamp(&worker, late_ts).await?;
+    set_mock_timestamp(&buyer, staking.id(), late_ts).await?;
 
     buyer_cancel_subscription(&buyer, staking.id(), &sub_product_id).await?;
     let sub_after_cancel: serde_json::Value = worker
@@ -685,7 +681,7 @@ async fn cancel_subscription_after_long_idle_then_unlock_requests_unstake()
         .await?
         .json()?;
     let cancel_end_ns = json_u64_field(&sub_after_cancel["end_ns"]).expect("end_ns");
-    fast_forward_until_timestamp(&worker, cancel_end_ns.saturating_add(1)).await?;
+    set_mock_timestamp(&buyer, staking.id(), cancel_end_ns.saturating_add(1)).await?;
 
     buyer_unlock(&buyer, staking.id(), &lock_id).await?;
 

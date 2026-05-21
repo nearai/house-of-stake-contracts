@@ -1,10 +1,18 @@
-//! Share minting math and lock pricing helpers.
+//! Utilities: share minting math, lock pricing helpers, and runtime clock wrappers.
 //!
 //! Time constants: [`NS_PER_DAY`] is `u128` for fixed-point price math; [`NS_PER_DAY_TIMESTAMP`] is the same
 //! nanosecond length as `u64` for block timestamps (subscription billing anchors in `lock.rs`).
+//!
+//! Runtime clock wrappers provide mocked `block_timestamp` and `epoch_height` when compiled with
+//! `feature = "test"`, falling back to native NEAR env values in production builds.
 
 use crate::{Contract, Price};
 use common::U256;
+use near_sdk::env;
+
+// =============================================================================
+// Time constants
+// =============================================================================
 
 /// Fixed-point denominator for `Price.lock_factor_near_months`.
 pub const LOCK_FACTOR_DENOM: u128 = 1_000_000_000_000_000_000_000_000;
@@ -15,6 +23,10 @@ pub const NS_PER_DAY: u128 = 86_400_000_000_000;
 pub const NS_PER_DAY_TIMESTAMP: u64 = 86_400_000_000_000;
 /// Average Gregorian month length in nanoseconds: `30.4375` days = `(487 / 16) * NS_PER_DAY`.
 pub const AVG_MONTH_NS: u128 = NS_PER_DAY * 487 / 16;
+
+// =============================================================================
+// Share minting math
+// =============================================================================
 
 /// Mint shares for a new deposit. First deposit: 1:1 shares to yocto.
 ///
@@ -37,6 +49,10 @@ pub fn near_from_shares(shares: u128, effective_total: u128, total_shares: u128)
     let den = U256::from(total_shares);
     (num / den).as_u128()
 }
+
+// =============================================================================
+// Lock pricing helpers
+// =============================================================================
 
 /// Enforces `locked_yocto * duration_ns >= required_near_months * AVG_MONTH_NS`
 /// where `required_near_months = amount * lock_factor / LOCK_FACTOR_DENOM`.
@@ -83,6 +99,54 @@ pub fn check_near_price_lock(
     }
 }
 
+// =============================================================================
+// Runtime clock wrappers with test-feature storage overrides
+// =============================================================================
+
+// Storage keys for mocked values (test builds only)
+pub const TEST_TIMESTAMP_KEY: &[u8] = b"_test_block_timestamp_";
+pub const TEST_EPOCH_KEY: &[u8] = b"_test_epoch_height_";
+
+/// Returns the current block timestamp.
+#[cfg(not(feature = "test"))]
+pub fn block_timestamp() -> u64 {
+    env::block_timestamp()
+}
+
+/// Returns the current block timestamp (mocked in test builds).
+#[cfg(feature = "test")]
+pub fn block_timestamp() -> u64 {
+    match env::storage_read(TEST_TIMESTAMP_KEY) {
+        Some(raw) if raw.len() == 8 => {
+            let bytes: [u8; 8] = raw.as_slice().try_into().unwrap_or([0u8; 8]);
+            u64::from_be_bytes(bytes)
+        }
+        _ => env::block_timestamp(),
+    }
+}
+
+/// Returns the current epoch height.
+#[cfg(not(feature = "test"))]
+pub fn epoch_height() -> u64 {
+    env::epoch_height()
+}
+
+/// Returns the current epoch height (mocked in test builds).
+#[cfg(feature = "test")]
+pub fn epoch_height() -> u64 {
+    match env::storage_read(TEST_EPOCH_KEY) {
+        Some(raw) if raw.len() == 8 => {
+            let bytes: [u8; 8] = raw.as_slice().try_into().unwrap_or([0u8; 8]);
+            u64::from_be_bytes(bytes)
+        }
+        _ => env::epoch_height(),
+    }
+}
+
+// =============================================================================
+// Contract utilities
+// =============================================================================
+
 impl Contract {
     pub(crate) fn collect_paginated<T, F>(
         &self,
@@ -105,6 +169,67 @@ impl Contract {
         out
     }
 }
+
+// =============================================================================
+// Test-only methods for controlling mocked clock (only when feature = "test")
+// =============================================================================
+
+#[cfg(feature = "test")]
+impl Contract {
+    /// Set a mocked block timestamp (nanoseconds since Unix epoch).
+    /// Only available when compiled with `feature = "test"`.
+    pub fn set_block_timestamp(&mut self, timestamp_ns: u64) {
+        use near_sdk::env;
+        let bytes = timestamp_ns.to_be_bytes();
+        env::storage_write(TEST_TIMESTAMP_KEY, &bytes);
+    }
+
+    /// Read the currently mocked block timestamp, or actual env value if not set.
+    /// Only available when compiled with `feature = "test"`.
+    pub fn get_block_timestamp(&self) -> u64 {
+        block_timestamp()
+    }
+
+    /// Set a mocked epoch height.
+    /// Only available when compiled with `feature = "test"`.
+    pub fn set_epoch_height(&mut self, epoch: u64) {
+        use near_sdk::env;
+        let bytes = epoch.to_be_bytes();
+        env::storage_write(TEST_EPOCH_KEY, &bytes);
+    }
+
+    /// Read the currently mocked epoch height, or actual env value if not set.
+    /// Only available when compiled with `feature = "test"`.
+    pub fn get_epoch_height(&self) -> u64 {
+        epoch_height()
+    }
+
+    /// Clear all mocked clock values, reverting to actual env values.
+    /// Only available when compiled with `feature = "test"`.
+    pub fn clear_test_clock(&mut self) {
+        use near_sdk::env;
+        env::storage_remove(TEST_TIMESTAMP_KEY);
+        env::storage_remove(TEST_EPOCH_KEY);
+    }
+
+    /// Advance mocked timestamp by a delta (convenience for tests).
+    /// Only available when compiled with `feature = "test"`.
+    pub fn advance_block_timestamp(&mut self, delta_ns: u64) {
+        let current = block_timestamp();
+        self.set_block_timestamp(current.saturating_add(delta_ns));
+    }
+
+    /// Advance mocked epoch by a delta (convenience for tests).
+    /// Only available when compiled with `feature = "test"`.
+    pub fn advance_epoch_height(&mut self, delta: u64) {
+        let current = epoch_height();
+        self.set_epoch_height(current.saturating_add(delta));
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

@@ -141,7 +141,7 @@ pub struct Price {
     pub amount: U128,
     pub price_type: PriceType,
     pub billing_period: Option<BillingPeriod>,
-    /// Fixed-point lock-weight; see [`crate::internal::LOCK_FACTOR_DENOM`] and [`crate::internal::check_near_price_lock`].
+    /// Fixed-point lock-weight; see [`crate::utils::LOCK_FACTOR_DENOM`] and [`crate::utils::check_near_price_lock`].
     pub lock_factor_near_months: U128,
     pub status: CatalogStatus,
     pub usage_count: u64,

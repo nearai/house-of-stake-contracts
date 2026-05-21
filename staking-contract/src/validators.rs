@@ -1,4 +1,4 @@
-use crate::internal::{mint_shares, near_from_shares};
+use crate::utils::{block_timestamp, epoch_height, mint_shares, near_from_shares};
 use crate::*;
 use near_sdk::json_types::{U64, U128};
 use near_sdk::{
@@ -101,7 +101,7 @@ impl Contract {
             status: ValidatorStatus::Active,
             total_shares: U128(0),
             total_staked_balance: NearToken::from_near(0),
-            last_balance_refresh_ns: U64(env::block_timestamp()),
+            last_balance_refresh_ns: U64(block_timestamp()),
             pending_to_stake: NearToken::from_near(0),
             pending_to_unstake: NearToken::from_near(0),
             last_unstake_epoch: 0,
@@ -240,7 +240,7 @@ impl Contract {
     /// have passed since [`Validator::last_unstake_epoch`] (gates withdraw-from-pool and further unstakes).
     pub(crate) fn validator_unstake_waiting_finished(&self, validator: &Validator) -> bool {
         validator.last_unstake_epoch > 0
-            && env::epoch_height()
+            && epoch_height()
                 >= validator
                     .last_unstake_epoch
                     .saturating_add(self.config.epoch_unstake_settle_epochs)
@@ -257,7 +257,7 @@ impl Contract {
         &self,
         validator: &Validator,
     ) -> u64 {
-        let current_epoch_height = env::epoch_height();
+        let current_epoch_height = epoch_height();
         let settle = self.config.epoch_unstake_settle_epochs;
         let unstake_start_epoch =
             current_epoch_height.max(validator.last_unstake_epoch.saturating_add(settle));

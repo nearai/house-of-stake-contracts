@@ -2,8 +2,10 @@
 //! (`cancel_subscription`, `upgrade_subscription`, …). Subscription **locking** (`lock_for_subscription`)
 //! stays in [`crate::lock`] because it shares the pool refresh / mint pipeline with product locks.
 
-pub use crate::internal::AVG_MONTH_NS;
-use crate::internal::{check_near_price_lock, min_locked_yocto_for_duration, near_from_shares};
+use crate::utils::{
+    AVG_MONTH_NS, block_timestamp, check_near_price_lock, min_locked_yocto_for_duration,
+    near_from_shares,
+};
 use crate::*;
 use common::U256;
 use near_sdk::json_types::{U64, U128};
@@ -88,7 +90,7 @@ impl Contract {
 
         let lock = self.require_subscription_lock_owned_by(&sub, &buyer);
 
-        let now = env::block_timestamp();
+        let now = block_timestamp();
         require!(
             now < lock.end_ns.0,
             "Current period already ended; renew instead"
@@ -375,7 +377,7 @@ impl Contract {
         if sub.status != SubscriptionStatus::Active || sub.cancel_at_period_end {
             return sub;
         }
-        let now = env::block_timestamp();
+        let now = block_timestamp();
         while now >= sub.end_ns.0 {
             let next_start = sub.end_ns.0;
             let next_end = add_months_stripe_style(sub.anchor_day, 1, next_start);

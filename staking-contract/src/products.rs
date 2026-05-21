@@ -3,6 +3,7 @@
 //! Prices live in [`crate::prices`]; this module owns product records and product->price links.
 
 use crate::gas::callbacks;
+use crate::utils::block_timestamp;
 use crate::*;
 use near_sdk::ext_contract;
 use near_sdk::json_types::U64;
@@ -166,7 +167,7 @@ impl Contract {
             name,
             description,
             status: CatalogStatus::Active,
-            created_ns: U64(env::block_timestamp()),
+            created_ns: U64(block_timestamp()),
             price_ids: Vec::new(),
             default_price_id: None,
             usage_count: 0,

@@ -5,6 +5,7 @@
 //!
 //! **Non-WASM:** `testing_env!` skips promise chains; [`Contract::payout_user_withdraw`] runs directly from [`Contract::withdraw`].
 
+use crate::utils::epoch_height;
 use crate::*;
 use near_sdk::{AccountId, NearToken, Promise, assert_one_yocto, env, near, require};
 
@@ -140,7 +141,7 @@ impl Contract {
             pending_claim_bucket_yocto > 0,
             "No NEAR is claimable yet; wait until unstaked funds are withdrawn from the pool into this contract, then retry"
         );
-        let eh = env::epoch_height();
+        let eh = epoch_height();
         let (credit_yocto, user_done) = self.remove_claimable_tranches(&account_validator_key, eh);
         require!(
             credit_yocto > 0,

@@ -165,7 +165,7 @@ async fn staking_two_locks_aggregate_then_epoch_settle_next_epoch_clears_pending
         "second lock in the same NEAR epoch should leave stake pending until a later epoch can settle"
     );
 
-    fast_forward_until_epoch_delta(&worker, 1).await?;
+    fast_forward_until_epoch_delta(&worker, 1, None, None).await?;
 
     let settle = call_epoch_settle(&buyer_a, staking.id(), pool.id()).await?;
     settle.into_result()?;
@@ -374,7 +374,7 @@ async fn staking_withdraw_succeeds_after_unlock_and_epoch_gates()
         .await?
         .json()?;
     let end_ns = json_u64_field(&lock["end_ns"]).expect("lock.end_ns");
-    fast_forward_until_timestamp(&worker, end_ns.saturating_add(1)).await?;
+    fast_forward_until_timestamp(&worker, end_ns.saturating_add(1), None, None).await?;
 
     buyer
         .call(staking.id(), "unlock")
@@ -453,7 +453,7 @@ async fn staking_withdraw_fails_when_pool_withdraw_bucket_not_ready()
         .await?
         .json()?;
     let end_ns = json_u64_field(&lock["end_ns"]).expect("lock.end_ns");
-    fast_forward_until_timestamp(&worker, end_ns.saturating_add(1)).await?;
+    fast_forward_until_timestamp(&worker, end_ns.saturating_add(1), None, None).await?;
 
     buyer
         .call(staking.id(), "unlock")
