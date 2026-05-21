@@ -8,7 +8,7 @@ use mock_pool::{
     SETTLEMENT_PIPELINE_GAS_TGAS, add_validator_pair, call_epoch_settle,
     create_one_off_product_and_price, deploy_staking_and_mock_pool, fast_forward_until_epoch_delta,
     fast_forward_until_timestamp, json_near_token_yocto, json_u64_field, mock_pool_wasm_bytes,
-    near_token_yocto_from_view, staking_wasm_bytes,
+    near_token_yocto_from_view, staking_wasm_bytes_test,
 };
 use near_workspaces::types::{Gas as WsGas, NearToken};
 use serde_json::json;
@@ -16,7 +16,7 @@ use serde_json::json;
 #[tokio::test]
 async fn staking_get_validators_includes_allowlisted_pool() -> Result<(), Box<dyn std::error::Error>>
 {
-    let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
+    let staking_wasm = staking_wasm_bytes_test().map_err(|e| format!("staking wasm: {e}"))?;
     let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
 
     let worker = near_workspaces::sandbox().await?;
@@ -53,7 +53,7 @@ async fn staking_get_validators_includes_allowlisted_pool() -> Result<(), Box<dy
 #[tokio::test]
 async fn staking_epoch_settle_fast_path_succeeds_after_lock_consumed_slot()
 -> Result<(), Box<dyn std::error::Error>> {
-    let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
+    let staking_wasm = staking_wasm_bytes_test().map_err(|e| format!("staking wasm: {e}"))?;
     let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
 
     let worker = near_workspaces::sandbox().await?;
@@ -107,7 +107,7 @@ async fn staking_epoch_settle_fast_path_succeeds_after_lock_consumed_slot()
 #[tokio::test]
 async fn staking_two_locks_aggregate_then_epoch_settle_next_epoch_clears_pending()
 -> Result<(), Box<dyn std::error::Error>> {
-    let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
+    let staking_wasm = staking_wasm_bytes_test().map_err(|e| format!("staking wasm: {e}"))?;
     let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
 
     let worker = near_workspaces::sandbox().await?;
@@ -165,7 +165,7 @@ async fn staking_two_locks_aggregate_then_epoch_settle_next_epoch_clears_pending
         "second lock in the same NEAR epoch should leave stake pending until a later epoch can settle"
     );
 
-    fast_forward_until_epoch_delta(&worker, 1, None, None).await?;
+    fast_forward_until_epoch_delta(&worker, 1, Some(&buyer_a), Some(staking.id())).await?;
 
     let settle = call_epoch_settle(&buyer_a, staking.id(), pool.id()).await?;
     settle.into_result()?;
@@ -197,7 +197,7 @@ async fn staking_two_locks_aggregate_then_epoch_settle_next_epoch_clears_pending
 #[tokio::test]
 async fn staking_pause_validator_blocks_new_lock_for_product()
 -> Result<(), Box<dyn std::error::Error>> {
-    let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
+    let staking_wasm = staking_wasm_bytes_test().map_err(|e| format!("staking wasm: {e}"))?;
     let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
 
     let worker = near_workspaces::sandbox().await?;
@@ -258,7 +258,7 @@ async fn staking_pause_validator_blocks_new_lock_for_product()
 
 #[tokio::test]
 async fn staking_contract_pause_blocks_epoch_settle() -> Result<(), Box<dyn std::error::Error>> {
-    let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
+    let staking_wasm = staking_wasm_bytes_test().map_err(|e| format!("staking wasm: {e}"))?;
     let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
 
     let worker = near_workspaces::sandbox().await?;
@@ -322,7 +322,7 @@ async fn staking_contract_pause_blocks_epoch_settle() -> Result<(), Box<dyn std:
 #[tokio::test]
 async fn staking_withdraw_succeeds_after_unlock_and_epoch_gates()
 -> Result<(), Box<dyn std::error::Error>> {
-    let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
+    let staking_wasm = staking_wasm_bytes_test().map_err(|e| format!("staking wasm: {e}"))?;
     let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
 
     let worker = near_workspaces::sandbox().await?;
@@ -374,7 +374,13 @@ async fn staking_withdraw_succeeds_after_unlock_and_epoch_gates()
         .await?
         .json()?;
     let end_ns = json_u64_field(&lock["end_ns"]).expect("lock.end_ns");
-    fast_forward_until_timestamp(&worker, end_ns.saturating_add(1), None, None).await?;
+    fast_forward_until_timestamp(
+        &worker,
+        end_ns.saturating_add(1),
+        Some(&buyer),
+        Some(staking.id()),
+    )
+    .await?;
 
     buyer
         .call(staking.id(), "unlock")
@@ -385,7 +391,8 @@ async fn staking_withdraw_succeeds_after_unlock_and_epoch_gates()
         .await?
         .into_result()?;
 
-    worker.fast_forward(8000).await?;
+    // Advance epoch using mock
+    fast_forward_until_epoch_delta(&worker, 1, Some(&buyer), Some(staking.id())).await?;
 
     buyer
         .call(staking.id(), "withdraw")
@@ -402,7 +409,7 @@ async fn staking_withdraw_succeeds_after_unlock_and_epoch_gates()
 #[tokio::test]
 async fn staking_withdraw_fails_when_pool_withdraw_bucket_not_ready()
 -> Result<(), Box<dyn std::error::Error>> {
-    let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
+    let staking_wasm = staking_wasm_bytes_test().map_err(|e| format!("staking wasm: {e}"))?;
     let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
 
     let worker = near_workspaces::sandbox().await?;
@@ -453,7 +460,13 @@ async fn staking_withdraw_fails_when_pool_withdraw_bucket_not_ready()
         .await?
         .json()?;
     let end_ns = json_u64_field(&lock["end_ns"]).expect("lock.end_ns");
-    fast_forward_until_timestamp(&worker, end_ns.saturating_add(1), None, None).await?;
+    fast_forward_until_timestamp(
+        &worker,
+        end_ns.saturating_add(1),
+        Some(&buyer),
+        Some(staking.id()),
+    )
+    .await?;
 
     buyer
         .call(staking.id(), "unlock")
@@ -486,7 +499,7 @@ async fn staking_withdraw_fails_when_pool_withdraw_bucket_not_ready()
 #[tokio::test]
 async fn staking_create_product_fails_if_signer_is_not_pool_owner()
 -> Result<(), Box<dyn std::error::Error>> {
-    let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
+    let staking_wasm = staking_wasm_bytes_test().map_err(|e| format!("staking wasm: {e}"))?;
     let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
 
     let worker = near_workspaces::sandbox().await?;
@@ -528,7 +541,7 @@ async fn staking_create_product_fails_if_signer_is_not_pool_owner()
 #[tokio::test]
 async fn staking_validator_total_staked_balance_matches_pool_after_lock()
 -> Result<(), Box<dyn std::error::Error>> {
-    let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
+    let staking_wasm = staking_wasm_bytes_test().map_err(|e| format!("staking wasm: {e}"))?;
     let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
 
     let worker = near_workspaces::sandbox().await?;

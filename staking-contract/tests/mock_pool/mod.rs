@@ -462,6 +462,7 @@ pub async fn pool_total_balance_yocto(
 }
 
 /// Deploy staking + mock pool, allowlist pool, and create a one-off catalog price.
+/// Uses test-feature WASM with mock time/epoch controls for fast test advancement.
 pub async fn setup_staking_fixture(
     worker: &Worker<Sandbox>,
 ) -> Result<
@@ -474,7 +475,7 @@ pub async fn setup_staking_fixture(
     ),
     Box<dyn std::error::Error>,
 > {
-    let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
+    let staking_wasm = staking_wasm_bytes_test().map_err(|e| format!("staking test wasm: {e}"))?;
     let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
 
     let staking = worker.dev_create_account().await?;
@@ -510,7 +511,7 @@ pub async fn setup_staking_fixture_with_unstake_settle_epochs(
     ),
     Box<dyn std::error::Error>,
 > {
-    let staking_wasm = staking_wasm_bytes().map_err(|e| format!("staking wasm: {e}"))?;
+    let staking_wasm = staking_wasm_bytes_test().map_err(|e| format!("staking wasm: {e}"))?;
     let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
 
     let staking = worker.dev_create_account().await?;
@@ -552,42 +553,6 @@ pub async fn setup_staking_fixture_with_unstake_settle_epochs(
         .await?
         .into_result()?;
 
-    add_validator_pair(&staking, &pool).await?;
-    let (product_id, price_id) =
-        create_one_off_product_and_price(&staking, &pool, &validator_owner).await?;
-
-    Ok((staking, pool, validator_owner, product_id, price_id))
-}
-
-/// Same as [`setup_staking_fixture`] but uses test-feature WASM with mocked clock controls.
-/// This allows tests to use `set_mock_timestamp` and `set_mock_epoch` for instant time advancement.
-pub async fn setup_staking_fixture_with_mock(
-    worker: &Worker<Sandbox>,
-) -> Result<
-    (
-        near_workspaces::Account,
-        near_workspaces::Account,
-        near_workspaces::Account,
-        String,
-        String,
-    ),
-    Box<dyn std::error::Error>,
-> {
-    let staking_wasm = staking_wasm_bytes_test().map_err(|e| format!("staking test wasm: {e}"))?;
-    let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
-
-    let staking = worker.dev_create_account().await?;
-    let pool = worker.dev_create_account().await?;
-    let validator_owner = worker.dev_create_account().await?;
-
-    deploy_staking_and_mock_pool(
-        &staking,
-        &pool,
-        validator_owner.id(),
-        &staking_wasm,
-        &pool_wasm,
-    )
-    .await?;
     add_validator_pair(&staking, &pool).await?;
     let (product_id, price_id) =
         create_one_off_product_and_price(&staking, &pool, &validator_owner).await?;
