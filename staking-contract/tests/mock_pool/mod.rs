@@ -153,7 +153,7 @@ pub async fn set_mock_timestamp(
 ) -> Result<(), Box<dyn std::error::Error>> {
     caller
         .call(staking_id, "set_block_timestamp")
-        .args_json(json!({ "timestamp_ns": target_ns.to_string() }))
+        .args_json(json!({ "timestamp_ns": target_ns }))
         .gas(WsGas::from_tgas(50))
         .transact()
         .await?
@@ -171,7 +171,7 @@ pub async fn set_mock_epoch(
 ) -> Result<(), Box<dyn std::error::Error>> {
     caller
         .call(staking_id, "set_epoch_height")
-        .args_json(json!({ "epoch": target_epoch.to_string() }))
+        .args_json(json!({ "epoch": target_epoch }))
         .gas(WsGas::from_tgas(50))
         .transact()
         .await?
