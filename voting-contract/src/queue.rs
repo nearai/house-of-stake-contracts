@@ -141,9 +141,7 @@ impl Contract {
 
 #[cfg(test)]
 mod tests {
-    //! Contract-level checks for the queue surface. Every assertion that
-    //! checks active-set membership also checks the corresponding stored
-    //! status (via `assert_active_with_status` / `assert_queued_at`).
+    //! Active-set membership checks also assert stored status via `assert_active_with_status`.
     use super::*;
     use crate::metadata::ProposalMetadata;
     use crate::proposal::ProposalStatus::*;
@@ -152,9 +150,7 @@ mod tests {
     use common::voting::VoteOption;
     use near_sdk::json_types::U64;
 
-    // ---------------------------------------------------------------
     // Basics
-    // ---------------------------------------------------------------
 
     #[test]
     fn get_queue_state_on_empty_contract_returns_empty() {
@@ -225,10 +221,7 @@ mod tests {
 
     #[test]
     fn get_queue_state_promotes_queued_proposal_virtually_when_slot_frees() {
-        // Set max_active = 1, approve two proposals (second is Queued), then
-        // advance past the first proposal's voting_end. get_queue_state must
-        // virtually promote the second proposal even before advance_queue
-        // commits the change to storage.
+        // get_queue_state virtually promotes the queued proposal before advance_queue commits.
         let fixture = snapshot_with_voters(
             &[VoterSpec::new(for_voter(), NearToken::from_near(100))],
             NearToken::from_near(1_000),
@@ -247,8 +240,7 @@ mod tests {
         // Advance to first proposal's voting_end -> Defeated, slot freed.
         let voting_end = TEST_NOW_NS + default_config().classic_voting_duration_ns.0;
         set_ctx(voter(), 0, voting_end);
-        // get_proposal() runs the virtual update too — verify the promoted
-        // proposal's STATUS is Voting, not just its active-set membership.
+        // get_proposal() runs the virtual update too, so the promoted status is Voting.
         assert_eq!(
             contract.get_proposal(first).unwrap().proposal.status,
             ProposalStatus::Defeated
@@ -281,29 +273,22 @@ mod tests {
         set_ctx(proposer(), 0, voting_end);
         contract.advance_queue();
 
-        // After commit, read RAW stored state (bypassing the implicit update
-        // path) to verify the promotion landed in storage with the correct
-        // status, not just as a transient virtual override.
+        // Read RAW stored state to verify the promotion landed in storage, not just virtually.
         let raw_first: Proposal = contract.proposals.get(first).cloned().unwrap().into();
         let raw_second: Proposal = contract.proposals.get(second).cloned().unwrap().into();
         assert_eq!(raw_first.status, ProposalStatus::Defeated);
         assert_eq!(raw_second.status, ProposalStatus::Voting);
-        // Queue promotion must NOT auto-fetch a snapshot; the first voter
-        // through the door is responsible for calling take_snapshot_and_vote.
+        // Queue promotion must NOT auto-fetch a snapshot; the first voter takes it.
         assert!(raw_second.snapshot_and_state.is_none());
         assert!(!contract.active_proposals.contains(&first));
         assert!(contract.active_proposals.contains(&second));
         assert!(contract.pending_queue.is_empty());
     }
 
-    // ---------------------------------------------------------------
     // Default cap
-    // ---------------------------------------------------------------
 
     #[test]
     fn default_cap_allows_three_concurrent_active_proposals() {
-        // Default config sets max_active_proposals = 3, so three back-to-back
-        // approvals must all enter the active set with status Voting.
         let fixture = snapshot_with_voters(
             &[VoterSpec::new(for_voter(), NearToken::from_near(400))],
             NearToken::from_near(1_000),
@@ -324,14 +309,11 @@ mod tests {
         assert!(contract.get_queue_state().pending_queue.is_empty());
     }
 
-    // ---------------------------------------------------------------
     // Backdating
-    // ---------------------------------------------------------------
 
     #[test]
     fn promoted_proposal_backdates_voting_start_to_freed_slot_end_time() {
-        // max_active = 1 isolates the test from default-cap noise:
-        // exactly one slot frees, exactly one promotion happens.
+        // max_active = 1 isolates one slot freeing and one promotion.
         let fixture = snapshot_with_voters(
             &[VoterSpec::new(for_voter(), NearToken::from_near(400))],
             NearToken::from_near(1_000),
@@ -349,9 +331,7 @@ mod tests {
 
         let cfg = default_config();
         let a_voting_end = TEST_NOW_NS + cfg.classic_voting_duration_ns.0;
-        // Advance one minute past A's voting_end so the slot is unambiguously
-        // free, but B's hypothetical voting window (a_voting_end + duration)
-        // is still in the future.
+        // One minute past A's voting_end frees the slot while B's window stays future.
         let advance_to = a_voting_end + 60 * 1_000_000_000;
         set_ctx(proposer(), 0, advance_to);
         contract.advance_queue();
@@ -371,11 +351,7 @@ mod tests {
 
     #[test]
     fn backdating_cascade_through_already_stale_windows() {
-        // Setup: max_active = 1, queue B and C after A. Advance to 2.5 ×
-        // voting_duration past creation. A's window [0, dur] is past
-        // (Defeated). B inherits start = dur, B's window [dur, 2*dur] is
-        // also past (also Defeated). C inherits start = 2*dur, C's window
-        // [2*dur, 3*dur] straddles `now` -> Voting.
+        // At 2.5x duration, A and B windows are past (Defeated); C's straddles now -> Voting.
         let fixture = snapshot_with_voters(
             &[VoterSpec::new(for_voter(), NearToken::from_near(400))],
             NearToken::from_near(1_000),
@@ -424,15 +400,11 @@ mod tests {
         assert!(contract.active_proposals.contains(&c));
     }
 
-    // ---------------------------------------------------------------
     // FIFO and partial promotion
-    // ---------------------------------------------------------------
 
     #[test]
     fn slot_frees_one_at_a_time_promotes_head_only() {
-        // max_active = 2: A and B Voting. Stagger their creation so only one
-        // slot frees first. The pending queue head must promote, the tail
-        // stays queued.
+        // max_active = 2, staggered creation: one slot frees, head promotes, tail stays.
         let fixture = snapshot_with_voters(
             &[VoterSpec::new(for_voter(), NearToken::from_near(400))],
             NearToken::from_near(1_000),
@@ -446,8 +418,7 @@ mod tests {
         let a = create_proposal(&mut contract, ProposalFlow::Classic);
 
         approve_proposal(&mut contract, a, Some(&fixture));
-        // Stagger by 1 hour so B's voting_end is strictly later than A's, with
-        // enough margin to land `between` cleanly inside [a_end, b_end].
+        // Stagger by 1 hour so `between` lands cleanly inside [a_end, b_end].
         let stagger_ns: u64 = 3_600 * 1_000_000_000;
         let b_creation = TEST_NOW_NS + stagger_ns;
         set_ctx(
@@ -466,7 +437,14 @@ mod tests {
         );
         set_ctx(reviewer(), 1, b_creation);
         let _ = contract.approve_proposal(b, None);
-        set_ctx(current_account(), 0, b_creation);
+        near_sdk::testing_env!(
+            VMContextBuilder::new()
+                .current_account_id(current_account())
+                .predecessor_account_id(current_account())
+                .attached_deposit(NearToken::from_yoctonear(0))
+                .block_timestamp(b_creation)
+                .build()
+        );
         contract.on_get_snapshot((fixture.snapshot.clone(), fixture.vgs.clone()), b);
 
         let c = create_proposal(&mut contract, ProposalFlow::Classic);
@@ -480,8 +458,7 @@ mod tests {
         assert_queued_at(&contract, c, 0);
         assert_queued_at(&contract, d, 1);
 
-        // Advance to a point where ONLY A's voting_end has passed but B's
-        // hasn't. A is Defeated, slot frees, exactly one queued promotes.
+        // Only A's voting_end has passed: A Defeated, slot frees, one queued promotes.
         let a_voting_end = TEST_NOW_NS + cfg.classic_voting_duration_ns.0;
         let between = a_voting_end + 60 * 1_000_000_000;
         let b_voting_end = b_creation + cfg.classic_voting_duration_ns.0;
@@ -511,14 +488,11 @@ mod tests {
         assert_queued_at(&contract, d, 0);
     }
 
-    // ---------------------------------------------------------------
     // Mixed flow types
-    // ---------------------------------------------------------------
 
     #[test]
     fn mixed_classic_and_fasttrack_share_active_slots() {
-        // Default cap = 3, mixed flows: one Classic Voting, one FastTrack
-        // Sandbox, one FastTrack-with-threshold-met -> Scheduled.
+        // Cap 3: Classic Voting, FastTrack Sandbox, FastTrack-threshold-met -> Scheduled.
         let fixture = snapshot_with_voters(
             &[VoterSpec::new(for_voter(), NearToken::from_near(400))],
             NearToken::from_near(1_000),
@@ -531,8 +505,7 @@ mod tests {
         approve_proposal(&mut contract, classic, Some(&fixture));
         approve_proposal(&mut contract, sandbox_id, Some(&fixture));
         approve_proposal(&mut contract, scheduled_id, Some(&fixture));
-        // Cast a For vote on `scheduled_id` to clear the sandbox threshold
-        // and graduate it to Scheduled. The 400 NEAR weight clears 10%.
+        // A For vote (400 NEAR clears the 10% threshold) graduates it to Scheduled.
         let (proof, v_account) = fixture.proof_for(&for_voter());
         set_ctx(
             for_voter(),
@@ -547,9 +520,7 @@ mod tests {
         assert_eq!(contract.get_queue_state().active_proposals.len(), 3);
     }
 
-    // ---------------------------------------------------------------
     // max_active_proposals changes
-    // ---------------------------------------------------------------
 
     #[test]
     fn reducing_max_active_does_not_evict_existing_active_proposals() {
@@ -582,8 +553,7 @@ mod tests {
         assert_queued_at(&contract, d, 0);
         assert_queued_at(&contract, e, 1);
 
-        // All three actives time out as Defeated, freeing 3 slots; cap = 1
-        // means only one queued proposal promotes. The other stays at pos 0.
+        // 3 slots free but cap = 1, so only one queued promotes; the other stays at pos 0.
         let voting_end = TEST_NOW_NS + default_config().classic_voting_duration_ns.0;
         set_ctx(proposer(), 0, voting_end);
         contract.advance_queue();
@@ -595,8 +565,7 @@ mod tests {
 
     #[test]
     fn lifting_max_active_promotes_multiple_queued_at_once() {
-        // max_active = 1, A active, B/C/D queued. Lift cap to 3 -> B and C
-        // promote (filling the 2 newly-available slots), D stays queued.
+        // Lifting cap 1 -> 3 promotes B and C into the new slots; D stays queued.
         let fixture = snapshot_with_voters(
             &[VoterSpec::new(for_voter(), NearToken::from_near(400))],
             NearToken::from_near(1_000),
@@ -627,9 +596,7 @@ mod tests {
         assert_queued_at(&contract, d, 0);
     }
 
-    // ---------------------------------------------------------------
     // Slot-freeing exits: veto / noveto / sandbox-timeout
-    // ---------------------------------------------------------------
 
     #[test]
     fn fasttrack_sandbox_timeout_frees_slot_for_queued_promotion() {
@@ -637,8 +604,7 @@ mod tests {
         set_ctx(owner(), 1, TEST_NOW_NS);
         contract.set_max_active_proposals(1);
 
-        // 50 NEAR For-power is below the 10% sandbox threshold of a 1 000-NEAR
-        // supply, so A never graduates and times out as Defeated.
+        // 50 NEAR is below the 10% sandbox threshold, so A times out as Defeated.
         let a_fixture = snapshot_with_voters(
             &[VoterSpec::new(for_voter(), NearToken::from_near(50))],
             NearToken::from_near(1_000),
@@ -743,8 +709,7 @@ mod tests {
 
         let cfg = default_config();
         let voting_end = TEST_NOW_NS + cfg.classic_voting_duration_ns.0;
-        // Move A into Timelock then noveto it (slot would otherwise stay held
-        // until voting_end + timelock_duration).
+        // Move A into Timelock then noveto it (slot would otherwise hold until timelock end).
         assert_eq!(
             {
                 set_ctx(voter(), 0, voting_end);
@@ -756,8 +721,7 @@ mod tests {
         set_ctx(council(), 1, voting_end);
         contract.noveto_proposal(a);
 
-        // noveto_proposal triggers internal_advance_queue, so B promotes.
-        // A has no actions, so its terminal status is Succeeded.
+        // noveto_proposal triggers internal_advance_queue, so B promotes; A has no actions -> Succeeded.
         assert_eq!(
             contract.get_proposal(a).unwrap().proposal.status,
             ProposalStatus::Succeeded
@@ -766,14 +730,11 @@ mod tests {
         assert!(contract.pending_queue.is_empty());
     }
 
-    // ---------------------------------------------------------------
     // Lifecycle walkthrough
-    // ---------------------------------------------------------------
 
     #[test]
     fn virtual_queue_walkthrough_across_all_lifecycle_paths() {
-        // Single walkthrough of slot-freeing across THREE different active-proposal
-        // lifecycle paths, with seven queued proposals waiting to take freed slots.
+        // Slot-freeing across three active lifecycle paths with seven queued proposals.
         let fixture = snapshot_with_voters(
             &[VoterSpec::new(for_voter(), NearToken::from_near(400))],
             NearToken::from_near(1_000),
@@ -823,11 +784,7 @@ mod tests {
         let t_c_voting_end = t_c_voting_start + cfg.fast_track_voting_duration_ns.0;
         let t_a_voting_end = TEST_NOW_NS + cfg.classic_voting_duration_ns.0;
         let t_a_timelock_end = t_a_voting_end + cfg.timelock_duration_ns.0;
-        // Pin the only non-derived fact: TEST_NOW_NS = 2026-06-01 00:00 UTC
-        // = Monday 01:00 CET, so next_voting_start_ns rounds to the FOLLOWING
-        // Monday 00:00 CET = 2026-06-08. All other times above are pure
-        // arithmetic on `cfg.*_duration_ns` and TEST_NOW_NS, so re-asserting
-        // them in any other form would be tautological with their definition.
+        // Pin the only non-derived fact: next_voting_start_ns rounds to Monday 2026-06-08.
         assert_eq!(t_c_voting_start, date_ns(2026, 6, 8));
 
         // T0 — A Voting, B Sandbox, C Scheduled (vote pushed past threshold).
@@ -846,8 +803,7 @@ mod tests {
             ],
         );
 
-        // CHECKPOINT 1 — B Defeated, Q1 (Classic) promoted into B's slot,
-        // backdated to B's sandbox_end.
+        // CHECKPOINT 1 — B Defeated, Q1 (Classic) promoted backdated to B's sandbox_end.
         assert_eq!(
             all_statuses_at(&contract, t_b_sandbox_end),
             vec![
@@ -864,8 +820,7 @@ mod tests {
             "Q1 backdates voting_start to B's sandbox_end"
         );
 
-        // CHECKPOINT 2 — C Succeeded, Q2 (FastTrack) promoted into C's slot,
-        // backdated to C's voting_end.
+        // CHECKPOINT 2 — C Succeeded, Q2 (FastTrack) promoted backdated to C's voting_end.
         assert_eq!(
             all_statuses_at(&contract, t_c_voting_end),
             vec![
@@ -902,14 +857,11 @@ mod tests {
         );
     }
 
-    // ---------------------------------------------------------------
     // Ordering invariants
-    // ---------------------------------------------------------------
 
     #[test]
     fn active_proposals_iterate_in_approval_order() {
-        // Sequential approvals at default cap: get_queue_state must list
-        // active_proposals in the order they were approved.
+        // get_queue_state lists active_proposals in approval order.
         let fixture = snapshot_with_voters(
             &[
                 VoterSpec::new(for_voter(), NearToken::from_near(400)),
@@ -976,13 +928,9 @@ mod tests {
         let _ = b;
     }
 
-    // ---------------------------------------------------------------
     // Virtual-vs-committed equivalence
-    // ---------------------------------------------------------------
 
-    // Each test builds two contracts: a read-only one (virtual path) and
-    // one that commits via `advance_queue`. Both views are compared on
-    // active-set membership, pending-queue order, and per-proposal status.
+    // Compares a read-only (virtual) contract against one committed via advance_queue.
 
     #[test]
     fn virtual_matches_committed_in_backdating_cascade() {
@@ -1060,10 +1008,7 @@ mod tests {
 
     #[test]
     fn virtual_matches_committed_when_active_proposals_transition_without_queue_promotion() {
-        // Three active proposals at default cap; no queue. Advance past the
-        // voting_end so all three transition Voting -> Defeated via
-        // `active_updates` (not queue_promotions). The invariant must hold
-        // for the active_updates branch too.
+        // Three active, no queue: all transition Voting -> Defeated via active_updates, not promotions.
         let fixture = snapshot_with_voters(
             &[
                 VoterSpec::new(for_voter(), NearToken::from_near(400)),

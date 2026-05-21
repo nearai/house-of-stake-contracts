@@ -11,6 +11,9 @@ pub mod lockup_update;
 pub mod venear;
 pub mod voting;
 
+#[cfg(feature = "test-utils")]
+pub mod test_utils;
+
 pub use bps::Bps;
 pub use types::*;
 pub use utils::*;

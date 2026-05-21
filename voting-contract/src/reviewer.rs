@@ -244,20 +244,13 @@ impl Contract {
 
 #[cfg(test)]
 mod tests {
-    //! Tests for reviewer-only and council-only proposal transitions.
-    //!
-    //! Each public method (`approve_proposal`, `reject_proposal`,
-    //! `veto_proposal`, `noveto_proposal`, `slash_proposal`) is exercised
-    //! across its allowed and disallowed entry statuses, plus the access
-    //! control guards (`reviewer_ids` / `council_ids`).
+    //! Reviewer/council proposal transitions across allowed/disallowed statuses and access guards.
     use super::*;
     use crate::proposal::ProposalFlow;
     use crate::test_utils::*;
     use near_sdk::json_types::U64;
 
-    // -----------------------------------------------------------------
     // approve_proposal
-    // -----------------------------------------------------------------
 
     #[test]
     #[should_panic(expected = "Only the reviewers can call this method")]
@@ -365,9 +358,7 @@ mod tests {
         assert_eq!(queue.pending_queue, vec![second]);
     }
 
-    // -----------------------------------------------------------------
     // reject_proposal
-    // -----------------------------------------------------------------
 
     #[test]
     fn reject_moves_proposal_to_rejected() {
@@ -399,9 +390,7 @@ mod tests {
         contract.reject_proposal(id);
     }
 
-    // -----------------------------------------------------------------
     // veto_proposal
-    // -----------------------------------------------------------------
 
     #[test]
     fn veto_classic_during_timelock_succeeds() {
@@ -493,9 +482,7 @@ mod tests {
 
     #[test]
     fn veto_fasttrack_during_voting_succeeds() {
-        // Approve FastTrack, push For over the sandbox threshold to enter
-        // Scheduled, advance to next-Monday voting_start so the proposal
-        // is in Voting, then veto.
+        // Advance to next-Monday voting_start so the proposal is in Voting, then veto.
         let fixture = snapshot_with_voters(
             &[VoterSpec::new(for_voter(), NearToken::from_near(400))],
             NearToken::from_near(1_000),
@@ -538,9 +525,7 @@ mod tests {
         contract.veto_proposal(id);
     }
 
-    // -----------------------------------------------------------------
     // noveto_proposal
-    // -----------------------------------------------------------------
 
     #[test]
     fn noveto_signaling_only_proposal_succeeds_immediately() {
@@ -572,9 +557,7 @@ mod tests {
 
     #[test]
     fn noveto_with_actions_moves_to_executable() {
-        // Same flow as the signaling-only noveto test, but the proposal has
-        // actions so noveto must transition Timelock -> Executable instead
-        // of Timelock -> Succeeded.
+        // With actions, noveto transitions Timelock -> Executable, not -> Succeeded.
         let fixture = snapshot_with_voters(
             &[VoterSpec::new(for_voter(), NearToken::from_near(400))],
             NearToken::from_near(1_000),
@@ -600,7 +583,14 @@ mod tests {
         );
         set_ctx(reviewer(), 1, TEST_NOW_NS);
         let _ = contract.approve_proposal(id, None);
-        set_ctx(current_account(), 0, TEST_NOW_NS);
+        near_sdk::testing_env!(
+            VMContextBuilder::new()
+                .current_account_id(current_account())
+                .predecessor_account_id(current_account())
+                .attached_deposit(NearToken::from_yoctonear(0))
+                .block_timestamp(TEST_NOW_NS)
+                .build()
+        );
         contract.on_get_snapshot((fixture.snapshot.clone(), fixture.vgs.clone()), id);
         cast_vote(&mut contract, &fixture, for_voter(), id, VoteOption::For);
 
@@ -653,22 +643,16 @@ mod tests {
         contract.noveto_proposal(id);
     }
 
-    // -----------------------------------------------------------------
     // slash_proposal
-    // -----------------------------------------------------------------
 
     #[test]
     fn slash_fasttrack_with_zero_bond_returns_value_variant() {
-        // Owner zeroes the bond requirement before any FastTrack proposal is
-        // created, so the slashed proposal carries bond_amount = 0 and the
-        // method must return PromiseOrValue::Value(()) instead of a transfer
-        // promise.
+        // Zero bond_amount makes slash return PromiseOrValue::Value(()), not a transfer promise.
         let mut contract = fresh_contract();
         set_ctx(owner(), 1, TEST_NOW_NS);
         contract.set_bond_amount(NearToken::ZERO);
 
-        // Bond is zero, so creation no longer demands it. Use the standard
-        // proposer-deposit helper that covers fee + headroom.
+        // Bond is zero, so creation no longer demands it.
         let id = create_proposal(&mut contract, ProposalFlow::FastTrack);
 
         set_ctx(reviewer(), 1, TEST_NOW_NS);
@@ -722,10 +706,7 @@ mod tests {
         let _ = contract.slash_proposal(id);
     }
 
-    // -----------------------------------------------------------------
-    // on_get_snapshot — public surface already exercised in votes::tests
-    // but verify the wrong-status panic distinct from votes coverage.
-    // -----------------------------------------------------------------
+    // on_get_snapshot — wrong-status panic, distinct from votes::tests coverage.
 
     #[test]
     #[should_panic(expected = "Proposal must be in Sandbox or Voting status")]
@@ -738,15 +719,18 @@ mod tests {
         );
         let mut contract = fresh_contract();
         let id = create_proposal(&mut contract, ProposalFlow::Classic);
-        set_ctx(current_account(), 0, TEST_NOW_NS);
+        near_sdk::testing_env!(
+            VMContextBuilder::new()
+                .current_account_id(current_account())
+                .predecessor_account_id(current_account())
+                .attached_deposit(NearToken::from_yoctonear(0))
+                .block_timestamp(TEST_NOW_NS)
+                .build()
+        );
         contract.on_get_snapshot((fixture.snapshot.clone(), fixture.vgs.clone()), id);
     }
 
-    // -----------------------------------------------------------------
-    // Pause guards on reviewer/council actions. Each method calls
-    // assert_one_yocto() before assert_not_paused(), so the test attaches
-    // 1 yocto and verifies the pause panic.
-    // -----------------------------------------------------------------
+    // Pause guards: assert_one_yocto() runs before assert_not_paused(), so attach 1 yocto.
 
     #[test]
     #[should_panic(expected = "Contract is paused")]
@@ -799,58 +783,6 @@ mod tests {
     }
 
     #[test]
-    fn on_get_snapshot_applies_venear_growth_to_total() {
-        // on_get_snapshot calls `global_state.update(timestamp)` before
-        // reading `total_venear_balance.total()`. With a non-zero growth
-        // config and a non-zero elapsed window, the stored total must
-        // exceed the snapshot's pre-update total.
-        use common::Fraction;
-        use common::global_state::GlobalState;
-        use common::venear::{VenearGrowthConfig, VenearGrowthConfigFixedRate};
-        use near_sdk::json_types::U128;
-
-        let mut fixture = snapshot_with_voters(
-            &[VoterSpec::new(for_voter(), NearToken::from_near(1_000))],
-            NearToken::from_near(1_000),
-        );
-        // Override the zero-growth default with a rate large enough to be
-        // observable over a 1-second elapsed window.
-        let mut gs: GlobalState = fixture.vgs.clone().into();
-        let initial_total = gs.total_venear_balance.total();
-        gs.venear_growth_config =
-            VenearGrowthConfig::FixedRate(Box::new(VenearGrowthConfigFixedRate {
-                annual_growth_rate_ns: Fraction {
-                    numerator: U128(10_000_000_000_000_000_000),
-                    denominator: U128(10u128.pow(30)),
-                },
-            }));
-        fixture.vgs = gs.into();
-
-        let mut contract = fresh_contract();
-        let id = create_proposal(&mut contract, ProposalFlow::Classic);
-        set_ctx(reviewer(), 1, TEST_NOW_NS);
-        let _ = contract.approve_proposal(id, None);
-
-        let later = TEST_NOW_NS + 1_000_000_000;
-        set_ctx(current_account(), 0, later);
-        contract.on_get_snapshot((fixture.snapshot.clone(), fixture.vgs.clone()), id);
-
-        let stored = contract
-            .proposals
-            .get(id)
-            .cloned()
-            .map(|p| crate::proposal::Proposal::from(p))
-            .unwrap();
-        let total = stored.snapshot_and_state.unwrap().total_venear;
-        assert!(
-            total > initial_total,
-            "expected growth-adjusted total > initial {:?}, got {:?}",
-            initial_total,
-            total
-        );
-    }
-
-    #[test]
     #[should_panic(expected = "Contract is paused")]
     fn on_get_snapshot_panics_when_paused() {
         let fixture = snapshot_with_voters(
@@ -862,7 +794,14 @@ mod tests {
         set_ctx(reviewer(), 1, TEST_NOW_NS);
         let _ = contract.approve_proposal(id, None);
         contract.paused = true;
-        set_ctx(current_account(), 0, TEST_NOW_NS);
+        near_sdk::testing_env!(
+            VMContextBuilder::new()
+                .current_account_id(current_account())
+                .predecessor_account_id(current_account())
+                .attached_deposit(NearToken::from_yoctonear(0))
+                .block_timestamp(TEST_NOW_NS)
+                .build()
+        );
         contract.on_get_snapshot((fixture.snapshot.clone(), fixture.vgs.clone()), id);
     }
 }

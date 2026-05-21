@@ -561,16 +561,7 @@ mod tests {
 
 #[cfg(test)]
 mod lifecycle_tests {
-    //! Contract-level boundary tests for the proposal lifecycle.
-    //!
-    //! Every test here drives state through the public `Contract` API
-    //! (`create_proposal` / `approve_proposal` / `vote` / `get_proposal`),
-    //! then observes the resulting status via `contract.get_proposal()`.
-    //! Reading through `get_proposal` is what triggers the implicit
-    //! `update()` call, so the equivalence classes for time-driven status
-    //! transitions are exercised through the same code path users see.
-    //!
-    //! Boundary values are documented inline next to each test.
+    //! Lifecycle boundary tests driven through the public `Contract` API; reading via `get_proposal` triggers the implicit `update()`.
 
     use super::*;
     use crate::test_utils::*;
@@ -631,8 +622,7 @@ mod lifecycle_tests {
 
     #[test]
     fn classic_voting_at_end_with_actions_enters_timelock() {
-        // Pre-set a non-empty action list at creation time so the post-voting
-        // branch hits the Timelock arm.
+        // Non-empty action list at creation makes the post-voting branch hit the Timelock arm.
         let fixture = snapshot_with_voters(
             &[
                 VoterSpec::new(for_voter(), NearToken::from_near(400)),
@@ -659,7 +649,14 @@ mod lifecycle_tests {
         );
         set_ctx(reviewer(), 1, TEST_NOW_NS);
         let _ = contract.approve_proposal(id, None);
-        set_ctx(current_account(), 0, TEST_NOW_NS);
+        near_sdk::testing_env!(
+            VMContextBuilder::new()
+                .current_account_id(current_account())
+                .predecessor_account_id(current_account())
+                .attached_deposit(NearToken::from_yoctonear(0))
+                .block_timestamp(TEST_NOW_NS)
+                .build()
+        );
         contract.on_get_snapshot((fixture.snapshot.clone(), fixture.vgs.clone()), id);
         cast_vote(&mut contract, &fixture, for_voter(), id, VoteOption::For);
 
@@ -767,9 +764,7 @@ mod lifecycle_tests {
 
     #[test]
     fn sandbox_at_duration_end_becomes_defeated() {
-        // Reviewer approves a fast-track proposal but no voter ever clears
-        // the sandbox threshold; once the sandbox window elapses, the
-        // proposal is Defeated regardless of any partial For votes.
+        // Sandbox threshold never cleared, so the proposal is Defeated once the window elapses.
         let fixture = snapshot_with_voters(
             &[
                 VoterSpec::new(for_voter(), NearToken::from_near(50)),
@@ -791,8 +786,7 @@ mod lifecycle_tests {
 
     #[test]
     fn sandbox_threshold_met_promotes_to_scheduled() {
-        // For = 300 NEAR exactly hits the 30% sandbox bps threshold of the
-        // 1 000 NEAR supply.
+        // For = 300 NEAR exactly hits the 30% sandbox threshold of the 1 000 NEAR supply.
         let fixture = snapshot_with_voters(
             &[
                 VoterSpec::new(for_voter(), NearToken::from_near(300)),
@@ -832,9 +826,7 @@ mod lifecycle_tests {
 
     #[test]
     fn voting_outcome_quorum_exact_and_approval_exact_succeeds() {
-        // total = 1 000 NEAR, quorum 35% -> 350 NEAR.
-        // for-voter = 175, against-voter = 175 -> total = 350 (quorum exact),
-        // approval = 50% (exact, succeeds at >= 5000 bps).
+        // 175 For + 175 Against = 350 (quorum 35% exact), approval 50% exact -> Succeeded.
         let fixture = snapshot_with_voters(
             &[
                 VoterSpec::new(for_voter(), NearToken::from_near(175)),
@@ -866,8 +858,7 @@ mod lifecycle_tests {
 
     #[test]
     fn voting_outcome_approval_one_yocto_below_is_defeated() {
-        // For = 200 NEAR - 1 yocto, Against = 200 NEAR. Quorum (35%) trivially met,
-        // but approval is just below 50% so the proposal must lose.
+        // For = 200 NEAR - 1 yocto vs Against = 200: approval just below 50% -> lose.
         let for_v = NearToken::from_yoctonear(NearToken::from_near(200).as_yoctonear() - 1);
         let fixture = snapshot_with_voters(
             &[
@@ -897,8 +888,7 @@ mod lifecycle_tests {
 
     #[test]
     fn voting_outcome_pure_abstain_is_defeated_even_with_quorum() {
-        // 500 NEAR Abstain meets the 35% quorum (350 NEAR), but For+Against
-        // is empty so the approval denominator is zero — Defeated.
+        // 500 Abstain meets quorum but For+Against is empty (zero denominator) -> Defeated.
         let fixture = snapshot_with_voters(
             &[
                 VoterSpec::new(for_voter(), NearToken::from_near(0)),
@@ -926,8 +916,7 @@ mod lifecycle_tests {
 
     #[test]
     fn voting_outcome_quorum_floor_dominates_bps_when_higher() {
-        // bps quorum 35% of 1 000 = 350 NEAR. Floor = 400 NEAR overrides.
-        // For + Against = 350 NEAR -> below floor -> Defeated.
+        // Floor 400 overrides 35% quorum (350); For+Against = 350 < floor -> Defeated.
         let fixture = snapshot_with_voters(
             &[
                 VoterSpec::new(for_voter(), NearToken::from_near(175)),
@@ -958,8 +947,7 @@ mod lifecycle_tests {
 
     #[test]
     fn voting_outcome_for_only_succeeds() {
-        // For = 400, Against = 0. Quorum met (400 >= 350), denominator = 400,
-        // approval = 100% > 50%. Pure-For winning path.
+        // For = 400, Against = 0: quorum met, approval 100% -> pure-For winning path.
         let fixture = snapshot_with_voters(
             &[VoterSpec::new(for_voter(), NearToken::from_near(400))],
             NearToken::from_near(1_000),
@@ -980,8 +968,7 @@ mod lifecycle_tests {
 
     #[test]
     fn voting_outcome_against_only_is_defeated() {
-        // For = 0, Against = 400. Quorum met (400 >= 350) but denominator = 400,
-        // approval = 0% — distinct from abstain-only (where denominator = 0).
+        // For = 0, Against = 400: quorum met, approval 0% — distinct from abstain-only (denominator = 0).
         let fixture = snapshot_with_voters(
             &[VoterSpec::new(against_voter(), NearToken::from_near(400))],
             NearToken::from_near(1_000),
@@ -1028,8 +1015,7 @@ mod lifecycle_tests {
 
     #[test]
     fn fasttrack_voting_after_end_failing_quorum_is_defeated() {
-        // For = 300 (30% sandbox threshold met -> Scheduled). Quorum is 35% =
-        // 350, so 300 < quorum -> Defeated at FastTrack voting_end.
+        // For = 300 clears sandbox -> Scheduled, but 300 < 350 quorum -> Defeated at voting_end.
         let fixture = snapshot_with_voters(
             &[VoterSpec::new(for_voter(), NearToken::from_near(300))],
             NearToken::from_near(1_000),
@@ -1053,8 +1039,7 @@ mod lifecycle_tests {
 
     #[test]
     fn fasttrack_voting_with_actions_at_end_is_executable() {
-        // FastTrack with an action: For=400 passes both sandbox threshold and
-        // simple-majority quorum/approval, lands Executable at voting_end.
+        // FastTrack with an action: For=400 clears sandbox and majority -> Executable at voting_end.
         let fixture = snapshot_with_voters(
             &[VoterSpec::new(for_voter(), NearToken::from_near(400))],
             NearToken::from_near(1_000),
@@ -1079,7 +1064,14 @@ mod lifecycle_tests {
         );
         set_ctx(reviewer(), 1, TEST_NOW_NS);
         let _ = contract.approve_proposal(id, Some(MajorityType::Simple));
-        set_ctx(current_account(), 0, TEST_NOW_NS);
+        near_sdk::testing_env!(
+            VMContextBuilder::new()
+                .current_account_id(current_account())
+                .predecessor_account_id(current_account())
+                .attached_deposit(NearToken::from_yoctonear(0))
+                .block_timestamp(TEST_NOW_NS)
+                .build()
+        );
         contract.on_get_snapshot((fixture.snapshot.clone(), fixture.vgs.clone()), id);
         cast_vote(&mut contract, &fixture, for_voter(), id, VoteOption::For);
 
@@ -1142,10 +1134,7 @@ mod lifecycle_tests {
         );
     }
 
-    // ---------------------------------------------------------------
-    // active_end_time_ns — direct unit tests on the four flow/status
-    // branches that drive queue backdating.
-    // ---------------------------------------------------------------
+    // active_end_time_ns — direct unit tests on the four flow/status branches that drive queue backdating.
 
     fn read_raw(contract: &Contract, id: ProposalId) -> Proposal {
         contract.proposals.get(id).cloned().unwrap().into()
@@ -1172,8 +1161,7 @@ mod lifecycle_tests {
 
     #[test]
     fn active_end_time_classic_defeated_is_voting_end() {
-        // No votes cast -> compute_final_status returns Defeated -> active_end
-        // is just voting_end, not voting_end + timelock.
+        // No votes -> Defeated -> active_end is voting_end, not voting_end + timelock.
         let fixture = snapshot_with_voters(
             &[VoterSpec::new(for_voter(), NearToken::from_near(400))],
             NearToken::from_near(1_000),
@@ -1211,8 +1199,7 @@ mod lifecycle_tests {
 
     #[test]
     fn active_end_time_fasttrack_sandbox_only_is_sandbox_end() {
-        // No vote cast -> still in Sandbox -> voting_start_time_ns is None,
-        // active_end falls back to sandbox_start + sandbox_duration.
+        // No vote -> still Sandbox -> voting_start_time_ns None, active_end = sandbox_start + duration.
         let fixture = snapshot_with_voters(
             &[VoterSpec::new(for_voter(), NearToken::from_near(50))],
             NearToken::from_near(1_000),
@@ -1231,9 +1218,7 @@ mod lifecycle_tests {
 
     #[test]
     fn sandbox_threshold_met_returns_false_without_snapshot() {
-        // A FastTrack proposal sits in Created with no snapshot until approval.
-        // sandbox_threshold_met must short-circuit on the None branch instead
-        // of indexing into `votes`.
+        // No snapshot before approval: sandbox_threshold_met must short-circuit on the None branch.
         let mut contract = fresh_contract();
         let id = create_proposal(&mut contract, ProposalFlow::FastTrack);
         let raw = read_raw(&contract, id);
@@ -1244,9 +1229,7 @@ mod lifecycle_tests {
 
 #[cfg(test)]
 mod create_proposal_tests {
-    //! Boundary and validation tests for `Contract::create_proposal` reached
-    //! via the real public API. These exercise the deposit-required arithmetic
-    //! plus action-list validation.
+    //! Boundary/validation tests for `Contract::create_proposal`: deposit arithmetic and action-list validation.
 
     use super::*;
     use crate::test_utils::*;
@@ -1383,12 +1366,7 @@ mod create_proposal_tests {
 
 #[cfg(test)]
 mod long_flow_tests {
-    //! End-to-end-shaped tests that walk a proposal through every
-    //! lifecycle stage via the public `Contract` API.
-    //!
-    //! These complement the surgical boundary tests in `lifecycle_tests`
-    //! by checking that intermediate stages compose correctly when a
-    //! proposal traverses all of them in sequence.
+    //! End-to-end tests walking a proposal through every lifecycle stage in sequence via the public `Contract` API.
     use super::*;
     use crate::test_utils::*;
 
@@ -1412,7 +1390,14 @@ mod long_flow_tests {
         // 2. Reviewer approves -> Voting (with snapshot wired by helper)
         set_ctx(reviewer(), 1, TEST_NOW_NS);
         let _ = contract.approve_proposal(id, None);
-        set_ctx(current_account(), 0, TEST_NOW_NS);
+        near_sdk::testing_env!(
+            VMContextBuilder::new()
+                .current_account_id(current_account())
+                .predecessor_account_id(current_account())
+                .attached_deposit(NearToken::from_yoctonear(0))
+                .block_timestamp(TEST_NOW_NS)
+                .build()
+        );
         contract.on_get_snapshot((fixture.snapshot.clone(), fixture.vgs.clone()), id);
         assert_eq!(
             status_at(&contract, id, TEST_NOW_NS),
@@ -1467,7 +1452,14 @@ mod long_flow_tests {
         );
         set_ctx(reviewer(), 1, TEST_NOW_NS);
         let _ = contract.approve_proposal(id, None);
-        set_ctx(current_account(), 0, TEST_NOW_NS);
+        near_sdk::testing_env!(
+            VMContextBuilder::new()
+                .current_account_id(current_account())
+                .predecessor_account_id(current_account())
+                .attached_deposit(NearToken::from_yoctonear(0))
+                .block_timestamp(TEST_NOW_NS)
+                .build()
+        );
         contract.on_get_snapshot((fixture.snapshot.clone(), fixture.vgs.clone()), id);
         cast_vote(&mut contract, &fixture, for_voter(), id, VoteOption::For);
 
@@ -1482,8 +1474,7 @@ mod long_flow_tests {
 
     #[test]
     fn fasttrack_signaling_full_flow_created_to_succeeded() {
-        // Voter holds 400 NEAR (40%) — clears both the 10% sandbox threshold
-        // and the 50% approval threshold on its own.
+        // Voter holds 400 NEAR (40%) — clears both the sandbox and 50% approval thresholds alone.
         let fixture = snapshot_with_voters(
             &[
                 VoterSpec::new(for_voter(), NearToken::from_near(400)),
@@ -1500,7 +1491,14 @@ mod long_flow_tests {
 
         set_ctx(reviewer(), 1, TEST_NOW_NS);
         let _ = contract.approve_proposal(id, Some(MajorityType::Simple));
-        set_ctx(current_account(), 0, TEST_NOW_NS);
+        near_sdk::testing_env!(
+            VMContextBuilder::new()
+                .current_account_id(current_account())
+                .predecessor_account_id(current_account())
+                .attached_deposit(NearToken::from_yoctonear(0))
+                .block_timestamp(TEST_NOW_NS)
+                .build()
+        );
         contract.on_get_snapshot((fixture.snapshot.clone(), fixture.vgs.clone()), id);
         assert_eq!(
             status_at(&contract, id, TEST_NOW_NS),
@@ -1514,16 +1512,14 @@ mod long_flow_tests {
             ProposalStatus::Scheduled
         );
 
-        // The scheduled start is on the next Monday CET. Read at exactly that
-        // boundary -> Voting.
+        // Scheduled start is the next Monday CET; reading at that boundary -> Voting.
         let voting_start = next_voting_start_ns(TEST_NOW_NS);
         assert_eq!(
             status_at(&contract, id, voting_start),
             ProposalStatus::Voting
         );
 
-        // Past voting_end without further votes against -> Succeeded
-        // (the for vote is preserved through the Sandbox -> Voting transition).
+        // Past voting_end -> Succeeded; the For vote is preserved through Sandbox -> Voting.
         let voting_end = voting_start + default_config().fast_track_voting_duration_ns.0;
         assert_eq!(
             status_at(&contract, id, voting_end),
@@ -1533,10 +1529,7 @@ mod long_flow_tests {
 
     #[test]
     fn concurrent_three_classic_proposals_at_default_cap_lifecycle() {
-        // Default cap = 3. Approve three independent classic proposals,
-        // give each a different vote outcome, advance through voting +
-        // timelock, and verify each lands in its expected terminal status
-        // without interference.
+        // Default cap = 3: three independent proposals with different outcomes land in their terminal status without interference.
         let fixture = snapshot_with_voters(
             &[
                 VoterSpec::new(for_voter(), NearToken::from_near(400)),
@@ -1585,8 +1578,7 @@ mod long_flow_tests {
 
         // C: no votes -> below quorum -> Defeated.
 
-        // Advance to voting_end: A enters Timelock (signaling-only stays
-        // there for the timelock window), B and C immediately Defeated.
+        // At voting_end: A enters Timelock (signaling-only), B and C immediately Defeated.
         let cfg = default_config();
         let voting_end = TEST_NOW_NS + cfg.classic_voting_duration_ns.0;
         assert_eq!(

@@ -264,12 +264,6 @@ impl Contract {
 #[cfg(test)]
 mod tests {
     //! Tests for the governance setters and the two-step ownership transfer.
-    //!
-    //! The setters share the same shape (assert_one_yocto + assert_owner +
-    //! mutate one config field), so this suite tests one representative of
-    //! each shape exhaustively, plus the few setters with custom logic:
-    //! `accept_ownership` (two-step), `set_max_active_proposals` (>0 guard
-    //! and queue advance side-effect).
     use super::*;
     use crate::proposal::{ProposalFlow, ProposalStatus};
     use crate::test_utils::*;
@@ -456,9 +450,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Only the owner can call this method")]
     fn non_owner_cannot_propose_new_owner() {
-        // propose_new_owner_account_id has its own custom logic (the two-step
-        // flow) and warrants a distinct role-rejection test, unlike the
-        // plain-shape setters covered by `non_owner_cannot_set_venear_account_id`.
+        // The two-step flow's custom logic warrants its own role-rejection test.
         let mut contract = fresh_contract();
         set_ctx(guardian(), 1, TEST_NOW_NS);
         contract.propose_new_owner_account_id(Some(acc("next-owner.test.near")));
@@ -601,8 +593,7 @@ mod tests {
             ProposalStatus::Queued
         );
 
-        // Lifting the cap to 2 must promote the queued proposal during the
-        // setter's `internal_advance_queue` tail call.
+        // Lifting the cap promotes the queued proposal via internal_advance_queue.
         set_ctx(owner(), 1, TEST_NOW_NS);
         contract.set_max_active_proposals(2);
 

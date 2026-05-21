@@ -39,3 +39,7 @@ common = { path = "../common" }
 near-sdk.workspace = true
 serde_json.workspace = true
 hex.workspace = true
+
+[dev-dependencies]
+near-sdk = { workspace = true, features = ["unit-testing"] }
+common = { path = "../common", features = ["test-utils"] }

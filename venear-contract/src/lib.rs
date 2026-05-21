@@ -7,6 +7,8 @@ mod lockup;
 mod pause;
 mod snapshot;
 mod storage;
+#[cfg(test)]
+mod test_utils;
 mod token;
 mod upgrade;
 

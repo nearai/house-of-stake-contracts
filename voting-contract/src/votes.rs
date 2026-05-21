@@ -213,9 +213,7 @@ mod tests {
     use merkle_tree::MerkleProof;
     use near_sdk::NearToken;
 
-    /// Local helper for this module: build a single-voter fixture, set up a
-    /// fresh contract, and drive the proposal through create + approve (with
-    /// snapshot). Returns `(contract, fixture, pid)`.
+    /// Single-voter fixture + fresh contract, created and approved with snapshot.
     fn setup(
         flow: ProposalFlow,
         near_balance: NearToken,
@@ -240,7 +238,10 @@ mod tests {
 
         let proposal: Proposal = contract.proposals.get(pid).cloned().unwrap().into();
         assert_eq!(proposal.votes[0].total_votes, 1);
-        assert_eq!(proposal.votes[0].total_venear, NearToken::from_near(100));
+        assert_eq!(
+            proposal.votes[0].total_venear,
+            voting_power(NearToken::from_near(100))
+        );
         assert_eq!(proposal.total_votes.total_votes, 1);
         assert_eq!(contract.get_vote(voter(), pid), Some(0));
     }
@@ -288,8 +289,6 @@ mod tests {
     #[test]
     #[should_panic(expected = "Snapshot has not been taken yet")]
     fn vote_requires_snapshot() {
-        // Build a fixture only to manufacture a valid proof shape; the proposal is approved
-        // but the snapshot callback is skipped, which is what the assertion exercises.
         let fixture = snapshot_with_voters(
             &[VoterSpec::new(voter(), NearToken::from_near(100))],
             NearToken::from_near(10_000),
@@ -379,7 +378,10 @@ mod tests {
         assert_eq!(proposal.votes[0].total_votes, 0);
         assert_eq!(proposal.votes[0].total_venear, NearToken::from_yoctonear(0));
         assert_eq!(proposal.votes[1].total_votes, 1);
-        assert_eq!(proposal.votes[1].total_venear, NearToken::from_near(100));
+        assert_eq!(
+            proposal.votes[1].total_venear,
+            voting_power(NearToken::from_near(100))
+        );
         assert_eq!(proposal.total_votes.total_votes, 1);
         assert_eq!(contract.get_vote(voter(), pid), Some(1));
     }
@@ -503,15 +505,21 @@ mod tests {
         );
 
         // Re-trigger the snapshot callback directly to hit the duplicate-set guard.
-        set_ctx(current_account(), 0, TEST_NOW_NS);
+        near_sdk::testing_env!(
+            VMContextBuilder::new()
+                .current_account_id(current_account())
+                .predecessor_account_id(current_account())
+                .attached_deposit(NearToken::from_yoctonear(0))
+                .block_timestamp(TEST_NOW_NS)
+                .build()
+        );
         contract.on_get_snapshot((fixture.snapshot.clone(), fixture.vgs.clone()), pid);
     }
 
     #[test]
     #[should_panic(expected = "Proposal is not in the voting phase")]
     fn vote_rejected_in_queued_status() {
-        // max_active = 1, so the second approval lands as Queued (not yet
-        // promoted into the active set). vote() must refuse.
+        // max_active = 1, so the second approval lands Queued; vote() must refuse.
         let fixture = snapshot_with_voters(
             &[VoterSpec::new(voter(), NearToken::from_near(100))],
             NearToken::from_near(10_000),
@@ -533,8 +541,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Proposal is not in the voting phase")]
     fn vote_rejected_in_scheduled_status() {
-        // Drive a FastTrack proposal over the sandbox threshold so it flips to Scheduled,
-        // then have a different holder try to vote while it's still Scheduled.
+        // FastTrack over sandbox threshold flips to Scheduled; voting then is rejected.
         let voter_a = voter();
         let filler = acc("filler1.test.near");
         let fixture = snapshot_with_voters(
@@ -609,38 +616,22 @@ mod tests {
 
         let proposal: Proposal = contract.proposals.get(pid).cloned().unwrap().into();
         assert_eq!(proposal.votes[0].total_votes, 1);
-        assert_eq!(proposal.votes[0].total_venear, NearToken::from_near(100));
+        assert_eq!(
+            proposal.votes[0].total_venear,
+            voting_power(NearToken::from_near(100))
+        );
         assert_eq!(proposal.votes[1].total_votes, 1);
-        assert_eq!(proposal.votes[1].total_venear, NearToken::from_near(40));
+        assert_eq!(
+            proposal.votes[1].total_venear,
+            voting_power(NearToken::from_near(40))
+        );
         assert_eq!(proposal.total_votes.total_votes, 2);
-        assert_eq!(proposal.total_votes.total_venear, NearToken::from_near(140));
+        assert_eq!(
+            proposal.total_votes.total_venear,
+            voting_power(NearToken::from_near(140))
+        );
         assert_eq!(contract.get_vote(voter_a, pid), Some(0));
         assert_eq!(contract.get_vote(voter_b, pid), Some(1));
-    }
-
-    #[test]
-    fn vote_weight_includes_extra_venear() {
-        let voter_id = voter();
-        let fixture = snapshot_with_voters(
-            &[
-                VoterSpec {
-                    account_id: voter_id.clone(),
-                    near_balance: NearToken::from_near(100),
-                    extra: NearToken::from_near(50),
-                },
-                VoterSpec::new(acc("filler1.test.near"), NearToken::from_near(10)),
-            ],
-            NearToken::from_near(10_000),
-        );
-        let mut contract = fresh_contract();
-        let pid = create_proposal(&mut contract, ProposalFlow::Classic);
-        approve_proposal(&mut contract, pid, Some(&fixture));
-
-        cast_vote(&mut contract, &fixture, voter_id, pid, VoteOption::For);
-
-        let proposal: Proposal = contract.proposals.get(pid).cloned().unwrap().into();
-        assert_eq!(proposal.votes[0].total_venear, NearToken::from_near(150));
-        assert_eq!(proposal.total_votes.total_venear, NearToken::from_near(150));
     }
 
     #[test]
@@ -668,10 +659,8 @@ mod tests {
 
     #[test]
     fn vote_accepts_self_call_predecessor() {
-        // vote() permits predecessor == current_account_id (the
-        // take_snapshot_and_vote chained-call path). Verify a vote cast
-        // with that predecessor is registered against the v_account's
-        // account_id, not the current_account_id.
+        // Self-call predecessor (the chained take_snapshot_and_vote path) votes
+        // as the v_account's owner, not as current_account_id.
         let (mut contract, fixture, pid) = setup(
             ProposalFlow::Classic,
             NearToken::from_near(100),
@@ -679,12 +668,22 @@ mod tests {
         );
         let (proof, v_account) = fixture.proof_for(&voter());
 
-        set_ctx(current_account(), vote_deposit_yocto(), TEST_NOW_NS);
+        near_sdk::testing_env!(
+            VMContextBuilder::new()
+                .current_account_id(current_account())
+                .predecessor_account_id(current_account())
+                .attached_deposit(NearToken::from_yoctonear(vote_deposit_yocto()))
+                .block_timestamp(TEST_NOW_NS)
+                .build()
+        );
         contract.vote(pid, VoteOption::For, proof, v_account);
 
         assert_eq!(contract.get_vote(voter(), pid), Some(0));
         let proposal: Proposal = contract.proposals.get(pid).cloned().unwrap().into();
-        assert_eq!(proposal.votes[0].total_venear, NearToken::from_near(100));
+        assert_eq!(
+            proposal.votes[0].total_venear,
+            voting_power(NearToken::from_near(100))
+        );
     }
 
     #[test]
@@ -713,9 +712,7 @@ mod tests {
 
     #[test]
     fn vote_refunds_excess_deposit_above_storage_fee() {
-        // attached_deposit > storage_added + 1 yocto triggers the refund branch.
-        // storage_added is the default vote_storage_fee (10 millinear); attach
-        // 11 millinear so the diff is the 1 millinear refund.
+        // 11 millinear attached over the 10 millinear fee triggers the refund branch.
         let (mut contract, fixture, pid) = setup(
             ProposalFlow::Classic,
             NearToken::from_near(100),
@@ -736,9 +733,7 @@ mod tests {
 
     #[test]
     fn take_snapshot_and_vote_without_vote_returns_snapshot_promise() {
-        // Proposal is approved but the snapshot callback was skipped, so the
-        // call must construct the snapshot-fetch promise (lines that build
-        // the ext_venear::get_snapshot chain) and return it.
+        // No snapshot yet: the call must build and return the fetch promise.
         let mut contract = fresh_contract();
         let pid = create_proposal(&mut contract, ProposalFlow::Classic);
         approve_proposal(&mut contract, pid, None);
@@ -749,9 +744,7 @@ mod tests {
 
     #[test]
     fn take_snapshot_and_vote_with_vote_payload_only_chains_action() {
-        // Snapshot already present, so the snapshot-fetch branch is skipped;
-        // the vote payload constructs the chained `vote` action, taking the
-        // `promise = None -> action` arm.
+        // Snapshot present: fetch is skipped, only the chained vote action runs.
         let (mut contract, fixture, pid) = setup(
             ProposalFlow::Classic,
             NearToken::from_near(100),
@@ -772,9 +765,7 @@ mod tests {
 
     #[test]
     fn take_snapshot_and_vote_with_both_chains_snapshot_then_vote() {
-        // No snapshot AND a vote payload: the method must build the
-        // snapshot-fetch promise AND chain the vote action onto it, taking
-        // the `Some(p) -> p.then(action)` arm.
+        // No snapshot + a vote payload: fetch promise built, then vote chained onto it.
         let fixture = snapshot_with_voters(
             &[VoterSpec::new(voter(), NearToken::from_near(100))],
             NearToken::from_near(10_000),

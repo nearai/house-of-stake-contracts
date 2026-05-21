@@ -96,3 +96,94 @@ impl Contract {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::{entry, fresh_contract, set_ctx};
+
+    /// Register `caller` with 1 NEAR and each delegate with zero, so set_delegations can scale onto them.
+    fn registered_contract(caller: &AccountId, delegates: &[&str]) -> Contract {
+        let mut contract = fresh_contract(caller.clone());
+        contract.internal_register_account(caller, NearToken::from_near(1));
+        for delegate in delegates {
+            let id: AccountId = delegate.parse().unwrap();
+            contract.internal_register_account(&id, NearToken::from_yoctonear(0));
+        }
+        contract
+    }
+
+    fn delegated_total(contract: &Contract, account_id: &str) -> NearToken {
+        contract
+            .get_account_info(account_id.parse().unwrap())
+            .unwrap()
+            .account
+            .delegated_balance
+            .total()
+    }
+
+    #[test]
+    fn accepts_partial_sum_under_full() {
+        let caller: AccountId = "caller.near".parse().unwrap();
+        let mut contract = registered_contract(&caller, &["a.near", "b.near"]);
+        let entries = vec![entry("a.near", 2_500), entry("b.near", 1_500)];
+        set_ctx(caller.clone(), NearToken::from_near(1).as_yoctonear(), 0);
+        contract.set_delegations(entries.clone());
+
+        assert_eq!(
+            contract.get_account_info(caller).unwrap().account.delegations,
+            entries
+        );
+        assert_eq!(delegated_total(&contract, "a.near"), NearToken::from_millinear(250));
+        assert_eq!(delegated_total(&contract, "b.near"), NearToken::from_millinear(150));
+    }
+
+    #[test]
+    fn accepts_sum_exactly_full() {
+        let caller: AccountId = "caller.near".parse().unwrap();
+        let mut contract = registered_contract(&caller, &["a.near", "b.near"]);
+        let entries = vec![entry("a.near", 4_000), entry("b.near", 6_000)];
+        set_ctx(caller.clone(), NearToken::from_near(1).as_yoctonear(), 0);
+        contract.set_delegations(entries.clone());
+
+        assert_eq!(
+            contract.get_account_info(caller).unwrap().account.delegations,
+            entries
+        );
+        assert_eq!(delegated_total(&contract, "a.near"), NearToken::from_millinear(400));
+        assert_eq!(delegated_total(&contract, "b.near"), NearToken::from_millinear(600));
+    }
+
+    #[test]
+    fn accepts_single_full_entry() {
+        let caller: AccountId = "caller.near".parse().unwrap();
+        let mut contract = registered_contract(&caller, &["a.near"]);
+        let entries = vec![entry("a.near", 10_000)];
+        set_ctx(caller.clone(), NearToken::from_near(1).as_yoctonear(), 0);
+        contract.set_delegations(entries.clone());
+
+        assert_eq!(
+            contract.get_account_info(caller).unwrap().account.delegations,
+            entries
+        );
+        assert_eq!(delegated_total(&contract, "a.near"), NearToken::from_near(1));
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid bps (cannot be 0)")]
+    fn set_delegations_rejects_zero_bps() {
+        let caller: AccountId = "caller.near".parse().unwrap();
+        let mut contract = fresh_contract(caller.clone());
+        set_ctx(caller, 1, 0);
+        contract.set_delegations(vec![entry("a.near", 2_500), entry("b.near", 0)]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Total bps exceeds 10000")]
+    fn set_delegations_rejects_sum_over_full() {
+        let caller: AccountId = "caller.near".parse().unwrap();
+        let mut contract = fresh_contract(caller.clone());
+        set_ctx(caller, 1, 0);
+        contract.set_delegations(vec![entry("a.near", 6_000), entry("b.near", 4_001)]);
+    }
+}

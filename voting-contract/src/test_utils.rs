@@ -23,98 +23,19 @@ use crate::proposal::{
     MajorityType, ProposalFlow, ProposalId, ProposalStatus, is_active_status,
 };
 use chrono::{FixedOffset, NaiveDate};
-use common::Fraction;
-use common::account::{AccountV1, VAccount};
-use common::global_state::{GlobalState, VGlobalState};
-use common::venear::{VenearGrowthConfig, VenearGrowthConfigFixedRate};
 use common::voting::VoteOption;
-use common::{Bps, PooledVenearBalance, TimestampNs, VenearBalance};
-use merkle_tree::{MerkleProof, MerkleTree, MerkleTreeSnapshot};
-use near_sdk::json_types::{U64, U128};
-use near_sdk::test_utils::VMContextBuilder;
-use near_sdk::{AccountId, BorshStorageKey, NearToken, near, testing_env};
-use std::collections::HashMap;
+use common::Bps;
+pub use common::test_utils::{
+    abstain_voter, acc, against_voter, council, current_account, for_voter, guardian, owner,
+    proposer, reviewer, set_ctx, voter, SnapshotFixture, VMContextBuilder, VoterSpec,
+};
+use near_sdk::json_types::U64;
+use near_sdk::{AccountId, NearToken};
 
-// ---------------------------------------------------------------------------
-// Constants and named-account helpers
-// ---------------------------------------------------------------------------
+// Named-account fixtures are re-exported above from `common::test_utils`.
 
 /// Test default: 2026-06-01 00:00:00 UTC in nanoseconds, truncated to seconds.
 pub const TEST_NOW_NS: u64 = 1_780_272_000_000_000_000;
-
-pub fn acc(id: &str) -> AccountId {
-    id.parse().unwrap()
-}
-
-pub fn current_account() -> AccountId {
-    acc("vote.test.near")
-}
-
-pub fn voter() -> AccountId {
-    acc("voter.test.near")
-}
-
-pub fn reviewer() -> AccountId {
-    acc("reviewer.test.near")
-}
-
-pub fn proposer() -> AccountId {
-    acc("proposer.test.near")
-}
-
-pub fn owner() -> AccountId {
-    acc("owner.test.near")
-}
-
-pub fn council() -> AccountId {
-    acc("council.test.near")
-}
-
-pub fn guardian() -> AccountId {
-    acc("guardian.test.near")
-}
-
-pub fn for_voter() -> AccountId {
-    acc("for-voter.test.near")
-}
-
-pub fn against_voter() -> AccountId {
-    acc("against-voter.test.near")
-}
-
-pub fn abstain_voter() -> AccountId {
-    acc("abstain-voter.test.near")
-}
-
-// ---------------------------------------------------------------------------
-// Context
-// ---------------------------------------------------------------------------
-
-/// Install a unit-test `VMContext` (predecessor, attached deposit, block timestamp).
-///
-/// `#[callback]`-decorated parameters only matter at the WASM entry point. When the callback
-/// is invoked directly from Rust (as in unit tests), the tuple is passed as a regular argument
-/// — no `PromiseResult` mocking is required.
-pub fn set_ctx(predecessor: AccountId, attached_deposit_yocto: u128, block_ts_ns: u64) {
-    set_ctx_at_block(predecessor, attached_deposit_yocto, block_ts_ns, 1);
-}
-
-fn set_ctx_at_block(
-    predecessor: AccountId,
-    attached_deposit_yocto: u128,
-    block_ts_ns: u64,
-    block_height: u64,
-) {
-    let ctx = VMContextBuilder::new()
-        .current_account_id(current_account())
-        .predecessor_account_id(predecessor.clone())
-        .signer_account_id(predecessor)
-        .attached_deposit(NearToken::from_yoctonear(attached_deposit_yocto))
-        .block_timestamp(block_ts_ns)
-        .block_height(block_height)
-        .build();
-    testing_env!(ctx);
-}
 
 // ---------------------------------------------------------------------------
 // Config and contract construction
@@ -151,17 +72,6 @@ pub fn default_config() -> Config {
     }
 }
 
-/// Zero growth-rate keeps `Account::total_balance` simple in unit tests: it
-/// returns `near_balance + extra_venear_balance` regardless of timestamp delta.
-pub fn zero_growth_config() -> VenearGrowthConfig {
-    VenearGrowthConfig::FixedRate(Box::new(VenearGrowthConfigFixedRate {
-        annual_growth_rate_ns: Fraction {
-            numerator: U128(0),
-            denominator: U128(1_000_000_000_000_000_000_000_000_000_000),
-        },
-    }))
-}
-
 /// The single contract constructor: installs a proposer context at `TEST_NOW_NS`
 /// and builds a `Contract` from `default_config()`. Callers override the context
 /// afterwards (e.g. `set_ctx(owner(), 1, TEST_NOW_NS)` before owner-only setters).
@@ -171,121 +81,30 @@ pub fn fresh_contract() -> Contract {
 }
 
 // ---------------------------------------------------------------------------
-// Snapshot fixture (single builder)
+// Snapshot fixture
 // ---------------------------------------------------------------------------
 
-#[derive(BorshStorageKey)]
-#[near(serializers=[borsh])]
-enum FixtureStorageKeys {
-    Tree,
-}
-
-/// One voter's input to `snapshot_with_voters`.
-#[derive(Clone)]
-pub struct VoterSpec {
-    pub account_id: AccountId,
-    pub near_balance: NearToken,
-    pub extra: NearToken,
-}
-
-impl VoterSpec {
-    pub fn new(account_id: AccountId, near_balance: NearToken) -> Self {
-        Self {
-            account_id,
-            near_balance,
-            extra: NearToken::from_yoctonear(0),
-        }
-    }
-}
-
-/// Snapshot + per-voter proofs, threaded into `vote()` after `deliver_snapshot`.
-pub struct SnapshotFixture {
-    pub snapshot: MerkleTreeSnapshot,
-    pub vgs: VGlobalState,
-    pub proofs: HashMap<AccountId, (MerkleProof, VAccount)>,
-}
-
-impl SnapshotFixture {
-    pub fn proof_for(&self, account_id: &AccountId) -> (MerkleProof, VAccount) {
-        self.proofs
-            .get(account_id)
-            .cloned()
-            .expect("voter missing from fixture")
-    }
-}
-
-/// Build a `VAccount::V1` whose merkle leaf has the given balance, with
-/// `update_timestamp` truncated to whole seconds so `total_balance` succeeds.
-pub fn make_v_account(
-    account_id: AccountId,
-    near_balance: NearToken,
-    extra: NearToken,
-    at_timestamp_ns: TimestampNs,
-) -> VAccount {
-    VAccount::V1(AccountV1 {
-        account_id,
-        update_timestamp: at_timestamp_ns,
-        balance: VenearBalance {
-            near_balance,
-            extra_venear_balance: extra,
-        },
-        delegated_balance: Default::default(),
-        delegations: vec![],
-    })
-}
-
-/// The single fixture builder. Materialises a merkle tree with the given voters
-/// and emits a fixture that includes a `MerkleProof` per voter.
-///
-/// `total_venear` is baked into the `VGlobalState` so that `on_get_snapshot`,
-/// which reads `total_venear_balance.total()`, reproduces it when this fixture
-/// is later fed through the real `create → approve → on_get_snapshot` path.
+/// Builds a snapshot fixture at `TEST_NOW_NS` with `reviewer()` as the building
+/// context. The reusable builder lives in `common::test_utils`; this wrapper
+/// pins the voting-test conventions so call sites stay unchanged.
 pub fn snapshot_with_voters(voters: &[VoterSpec], total_venear: NearToken) -> SnapshotFixture {
-    let block_ts_ns = TEST_NOW_NS;
-    let timestamp_ns = TimestampNs::from(block_ts_ns / 1_000_000_000 * 1_000_000_000);
-    let total_balance =
-        PooledVenearBalance::default().pooled_add(&VenearBalance::from_near(total_venear));
-    let global_state = GlobalState {
-        update_timestamp: timestamp_ns,
-        total_venear_balance: total_balance,
-        venear_growth_config: zero_growth_config(),
-    };
-    let vgs: VGlobalState = global_state.into();
+    common::test_utils::snapshot_with_voters(voters, total_venear, TEST_NOW_NS, reviewer())
+}
 
-    set_ctx_at_block(reviewer(), 0, block_ts_ns, 1);
-    let mut tree: MerkleTree<VAccount, VGlobalState> =
-        MerkleTree::new(FixtureStorageKeys::Tree, vgs.clone());
-
-    let mut v_accounts: HashMap<AccountId, VAccount> = HashMap::new();
-    for spec in voters {
-        let v = make_v_account(
-            spec.account_id.clone(),
-            spec.near_balance,
-            spec.extra,
-            timestamp_ns,
-        );
-        tree.set(spec.account_id.clone(), v.clone());
-        v_accounts.insert(spec.account_id.clone(), v);
-    }
-
-    let mut proofs = HashMap::new();
-    for spec in voters {
-        let (proof, _) = tree.get_proof(&spec.account_id).expect("proof");
-        proofs.insert(
-            spec.account_id.clone(),
-            (proof, v_accounts.remove(&spec.account_id).unwrap()),
-        );
-    }
-
-    // Advance the block so `get_snapshot()` exposes the just-built state.
-    set_ctx_at_block(reviewer(), 0, block_ts_ns, 2);
-    let (snapshot, _vgs_again) = tree.get_snapshot().expect("snapshot");
-
-    SnapshotFixture {
-        snapshot,
-        vgs,
-        proofs,
-    }
+/// Expected voting power of a `near_balance` cast against a `snapshot_with_voters`
+/// fixture: the snapshot evaluates balances at `TEST_NOW_NS`, one `LOCK_AGE_NS`
+/// after the accounts were written, so growth applies. Computed via the
+/// contract's own `total_balance` math to keep assertions exact. Growth accrues
+/// only on `near_balance`, so a voter's extra veNEAR adds on top flatly.
+pub fn voting_power(near_balance: NearToken) -> NearToken {
+    let account: common::account::Account = common::test_utils::make_v_account(
+        voter(),
+        near_balance,
+        NearToken::from_yoctonear(0),
+        U64(TEST_NOW_NS - common::test_utils::LOCK_AGE_NS),
+    )
+    .into();
+    account.total_balance(U64(TEST_NOW_NS), &common::test_utils::growth_config())
 }
 
 // ---------------------------------------------------------------------------
@@ -331,7 +150,14 @@ pub fn approve_proposal(
     set_ctx(reviewer(), 1, TEST_NOW_NS);
     let _ = contract.approve_proposal(id, majority);
     if let Some(fixture) = snapshot {
-        set_ctx(current_account(), 0, TEST_NOW_NS);
+        near_sdk::testing_env!(
+            VMContextBuilder::new()
+                .current_account_id(current_account())
+                .predecessor_account_id(current_account())
+                .attached_deposit(NearToken::from_yoctonear(0))
+                .block_timestamp(TEST_NOW_NS)
+                .build()
+        );
         contract.on_get_snapshot((fixture.snapshot.clone(), fixture.vgs.clone()), id);
     }
 }

@@ -115,6 +115,7 @@ impl From<Bps> for u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use near_sdk::borsh;
 
     #[test]
     fn try_new_accepts_in_range() {
@@ -161,7 +162,6 @@ mod tests {
 
     #[test]
     fn borsh_roundtrip_matches_u16_layout() {
-        use near_sdk::borsh;
         let bps = Bps::new(1_234);
         let bytes = borsh::to_vec(&bps).unwrap();
         // Same wire format as u16: 2 bytes, little-endian.

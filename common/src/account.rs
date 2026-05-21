@@ -19,10 +19,10 @@ pub struct AccountV0 {
     pub delegation: Option<AccountDelegation>,
 }
 
-/// The runtime account shape and the V1 on-tree format.
+/// The account details that are stored in the Merkle Tree.
 #[derive(Clone)]
 #[near(serializers=[borsh, json])]
-pub struct AccountV1 {
+pub struct Account {
     /// The account ID of the account. Required for the security of the Merkle Tree proofs.
     pub account_id: AccountId,
     /// The timestamp in nanoseconds when the account was last updated.
@@ -35,8 +35,6 @@ pub struct AccountV1 {
     /// The partial delegation entries. The undelegated remainder implicitly stays with self.
     pub delegations: Vec<DelegationEntry>,
 }
-
-pub type Account = AccountV1;
 
 /// The details of the delegation of veNEAR from one account to another.
 /// In the first version we assume that the whole balance was delegated.
@@ -59,7 +57,7 @@ pub struct DelegationEntry {
 #[near(serializers=[borsh, json])]
 pub enum VAccount {
     V0(AccountV0),
-    V1(AccountV1),
+    V1(Account),
 }
 
 impl From<Account> for VAccount {
