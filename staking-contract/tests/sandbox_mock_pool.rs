@@ -7,8 +7,8 @@ mod mock_pool;
 use mock_pool::{
     SETTLEMENT_PIPELINE_GAS_TGAS, add_validator_pair, call_epoch_settle,
     create_one_off_product_and_price, deploy_staking_and_mock_pool, fast_forward_until_epoch_delta,
-    fast_forward_until_timestamp, json_near_token_yocto, json_u64_field, mock_pool_wasm_bytes,
-    near_token_yocto_from_view, staking_wasm_bytes_test,
+    fast_forward_until_timestamp, fetch_validator, json_near_token_yocto, json_u64_field,
+    mock_pool_wasm_bytes, near_token_yocto_from_view, set_mock_epoch, staking_wasm_bytes_test,
 };
 use near_workspaces::types::{Gas as WsGas, NearToken};
 use serde_json::json;
@@ -454,6 +454,12 @@ async fn staking_withdraw_fails_when_pool_withdraw_bucket_not_ready()
         .into_result()?
         .json()?;
 
+    // Pin mocked epoch after lock settlement so later unlock/withdraw stay in the same NEAR epoch
+    // (fast settlement path). Advancing chain epoch via `fast_forward` would let `withdraw`'s
+    // built-in settlement complete pool unstake → `pending_to_claim`, making this claim succeed.
+    let epoch_after_lock: u64 = buyer.view(staking.id(), "get_epoch_height").await?.json()?;
+    set_mock_epoch(&buyer, staking.id(), epoch_after_lock).await?;
+
     let lock: serde_json::Value = worker
         .view(staking.id(), "get_lock")
         .args_json(json!({ "lock_id": lock_id }))
@@ -477,8 +483,12 @@ async fn staking_withdraw_fails_when_pool_withdraw_bucket_not_ready()
         .await?
         .into_result()?;
 
-    // Not enough NEAR epochs for `epoch_unstake_settle_epochs` / pool withdraw-from-pool prefetch gates.
-    worker.fast_forward(50).await?;
+    let v_before_withdraw = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    assert_eq!(
+        json_near_token_yocto(&v_before_withdraw["pending_to_claim"]).unwrap_or(0),
+        0,
+        "claim bucket must be empty before pool withdraw prefetches NEAR into the contract"
+    );
 
     let early_claim = buyer
         .call(staking.id(), "withdraw")

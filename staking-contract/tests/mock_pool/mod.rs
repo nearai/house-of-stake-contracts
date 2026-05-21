@@ -290,6 +290,30 @@ pub async fn fetch_validator(
         .json()?)
 }
 
+/// Debug log for wait-window sandbox tests: staking contract NEAR balance + validator pending buckets.
+pub async fn eprintln_wait_window_stage(
+    worker: &Worker<Sandbox>,
+    staking_id: &near_workspaces::AccountId,
+    stage: &str,
+    v: &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let staking_balance_yocto = worker
+        .view_account(staking_id)
+        .await?
+        .balance
+        .as_yoctonear();
+    eprintln!(
+        "[timing][wait-window] {stage} staking_contract_balance_yocto={staking_balance_yocto} \
+         last_unstake_epoch={} pending_to_stake={} pending_to_unstake={} pending_to_withdraw={} pending_to_claim={}",
+        json_u64_field_any(&v["last_unstake_epoch"]).unwrap_or(0),
+        json_near_token_yocto(&v["pending_to_stake"]).unwrap_or(0),
+        json_near_token_yocto(&v["pending_to_unstake"]).unwrap_or(0),
+        json_near_token_yocto(&v["pending_to_withdraw"]).unwrap_or(0),
+        json_near_token_yocto(&v["pending_to_claim"]).unwrap_or(0),
+    );
+    Ok(())
+}
+
 pub async fn buyer_storage_deposit(
     buyer: &near_workspaces::Account,
     staking_id: &near_workspaces::AccountId,
