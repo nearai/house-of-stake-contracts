@@ -51,7 +51,7 @@ impl Contract {
                 .accounts_with_pending_unstake
                 .push(account_id.clone());
         }
-        self.validators.insert(validator_id.clone(), validator);
+        self.internal_set_validator(validator_id.clone(), validator);
 
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -61,7 +61,7 @@ impl Contract {
         {
             self.promise_validator_per_epoch_settlement_then(
                 validator_id.clone(),
-                PerEpochContinue::WithdrawUserTransfer {
+                UserAction::WithdrawUserTransfer {
                     validator_id,
                     account_id,
                 },
@@ -164,7 +164,7 @@ impl Contract {
 
         let credit = NearToken::from_yoctonear(credit_yocto);
 
-        self.validators.insert(validator_id.clone(), validator);
+        self.internal_set_validator(validator_id.clone(), validator);
 
         crate::events::log_withdraw(&account_id, &validator_id, credit.as_yoctonear());
         credit
@@ -180,6 +180,10 @@ impl Contract {
         validator_id: ValidatorId,
     ) -> Promise {
         let credit = self.claim_from_withdraw_bucket(account_id.clone(), validator_id);
+        require!(
+            env::account_balance().as_yoctonear() >= credit.as_yoctonear(),
+            "Contract does not hold enough NEAR to complete this withdraw transfer yet; retry after pool funds arrive"
+        );
         Promise::new(account_id).transfer(credit)
     }
 }

@@ -1,20 +1,6 @@
 use crate::*;
 use near_sdk::{NearToken, Promise, assert_one_yocto, env, near, require};
 
-#[derive(Clone)]
-#[near(serializers = [borsh, json])]
-pub struct Account {
-    pub storage_deposit: NearToken,
-}
-
-impl Default for Account {
-    fn default() -> Self {
-        Self {
-            storage_deposit: NearToken::from_near(0),
-        }
-    }
-}
-
 #[near]
 impl Contract {
     /// NEP-145-style: attach NEAR to register an account for locks and withdrawals.
@@ -27,12 +13,12 @@ impl Contract {
         let attached = env::attached_deposit();
         require!(attached.as_yoctonear() > 0, "Attach NEAR for storage");
         let depositor = env::predecessor_account_id();
-        let mut account = self.accounts.get(&depositor).cloned().unwrap_or_default();
+        let mut account = self.internal_get_account(&depositor).unwrap_or_default();
         account.storage_deposit = account
             .storage_deposit
             .checked_add(attached)
             .expect("Storage deposit overflow; reduce the attached amount");
-        self.accounts.insert(depositor, account);
+        self.internal_set_account(depositor, account);
     }
 
     /// Withdraw prepaid storage above [`crate::config::Config::min_storage_deposit`].
@@ -47,9 +33,7 @@ impl Contract {
 
         let account_id = env::predecessor_account_id();
         let mut account = self
-            .accounts
-            .get(&account_id)
-            .cloned()
+            .internal_get_account(&account_id)
             .expect("Account not registered; call storage_deposit first");
 
         let storage_yocto = account.storage_deposit.as_yoctonear();
@@ -70,21 +54,27 @@ impl Contract {
         );
 
         account.storage_deposit = NearToken::from_yoctonear(after);
-        self.accounts.insert(account_id.clone(), account);
+        self.internal_set_account(account_id.clone(), account);
 
         Promise::new(account_id).transfer(amount)
     }
 
     pub fn get_account(&self, account_id: AccountId) -> Option<Account> {
-        self.accounts.get(&account_id).cloned()
+        self.internal_get_account(&account_id)
     }
 }
 
 impl Contract {
+    pub(crate) fn internal_get_account(&self, id: &AccountId) -> Option<Account> {
+        self.accounts.get(id).cloned().map(Into::into)
+    }
+
+    pub(crate) fn internal_set_account(&mut self, id: AccountId, account: Account) {
+        self.accounts.insert(id, account.into());
+    }
+
     fn require_registered_account(&self, account_id: &AccountId) -> Account {
-        self.accounts
-            .get(account_id)
-            .cloned()
+        self.internal_get_account(account_id)
             .expect("Account not registered; call storage_deposit")
     }
 
@@ -106,8 +96,14 @@ impl Contract {
         account_id: &AccountId,
         extra_locks: u32,
     ) -> u128 {
-        let base = self.config.min_storage_deposit.as_yoctonear();
-        let per = self.config.per_lock_storage_stake.as_yoctonear();
+        let base = self
+            .internal_get_config()
+            .min_storage_deposit
+            .as_yoctonear();
+        let per = self
+            .internal_get_config()
+            .per_lock_storage_stake
+            .as_yoctonear();
         let recorded_lock_count =
             self.user_lock_count.get(account_id).copied().unwrap_or(0) as u128;
         let total_locks = recorded_lock_count.saturating_add(u128::from(extra_locks));
@@ -118,19 +114,11 @@ impl Contract {
     /// Use for claim / withdraw paths so older locks do not force endless storage top-ups.
     pub(crate) fn ensure_min_base_storage(&self, account_id: &AccountId) {
         let account = self.require_registered_account(account_id);
-        let min = self.config.min_storage_deposit.as_yoctonear();
+        let min = self
+            .internal_get_config()
+            .min_storage_deposit
+            .as_yoctonear();
         self.assert_storage_deposit_at_least(&account, min, "Top up storage (minimum prepaid)");
-    }
-
-    /// Full prepaid requirement including `per_lock_storage_stake` × locks recorded in [`crate::Contract::user_lock_count`].
-    pub(crate) fn ensure_min_storage(&self, account_id: &AccountId) {
-        let account = self.require_registered_account(account_id);
-        let need = self.required_storage_deposit_yocto(account_id, 0);
-        self.assert_storage_deposit_at_least(
-            &account,
-            need,
-            "Prepaid storage is too low; call storage_deposit to top up (minimum plus per-lock stake)",
-        );
     }
 
     /// Before creating a lock: require prepaid storage for one more lock entry.

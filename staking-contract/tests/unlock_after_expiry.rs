@@ -18,7 +18,7 @@ fn unlock_after_end_ns_requests_unlock() {
     register_buyer(&mut c);
 
     let start_ts = 1_800_000_000_000_000_000_u64;
-    let dur = c.config.min_lock_duration_ns.0.saturating_add(50_000);
+    let dur = c.get_config().min_lock_duration_ns.0.saturating_add(50_000);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), start_ts));
     let lock_id = unwrap_sync_lock_id(c.lock_for_product(Some(price_id), U64(dur), None));

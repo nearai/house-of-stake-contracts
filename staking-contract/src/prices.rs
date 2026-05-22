@@ -170,9 +170,9 @@ impl Contract {
             status: CatalogStatus::Active,
             usage_count: 0,
         };
-        self.prices.insert(price_id.clone(), price);
+        self.internal_set_price(price_id.clone(), price);
         product.price_ids.push(price_id.clone());
-        self.products.insert(product_id, product);
+        self.internal_set_product(product_id, product);
         price_id
     }
 
@@ -189,7 +189,7 @@ impl Contract {
         let mut price = self.require_price(&price_id);
         price.name = name;
         price.description = description;
-        self.prices.insert(price_id, price);
+        self.internal_set_price(price_id, price);
     }
 
     #[private]
@@ -203,7 +203,7 @@ impl Contract {
         let mut price = self.require_price(&price_id);
         let product_id = price.product_id.clone();
         price.status = CatalogStatus::Archived;
-        self.prices.insert(price_id.clone(), price);
+        self.internal_set_price(price_id.clone(), price);
         // Default must reference an active tier; see `set_product_default_price`.
         self.clear_product_default_price_field_if_matches(&product_id, &price_id);
     }
@@ -224,7 +224,7 @@ impl Contract {
         let product_id = price.product_id.clone();
         let mut product = self.require_product(&price.product_id);
         product.price_ids.retain(|x| x != &price_id);
-        self.products.insert(price.product_id.clone(), product);
+        self.internal_set_product(price.product_id.clone(), product);
         self.prices.remove(&price_id);
         self.clear_product_default_price_field_if_matches(&product_id, &price_id);
     }
@@ -243,21 +243,27 @@ impl Contract {
             "Price is not archived"
         );
         price.status = CatalogStatus::Active;
-        self.prices.insert(price_id, price);
+        self.internal_set_price(price_id, price);
     }
 
     // Public price view functions.
 
     pub fn get_price(&self, price_id: PriceId) -> Option<Price> {
-        self.prices.get(&price_id).cloned()
+        self.internal_get_price(&price_id)
     }
 }
 
 impl Contract {
+    pub(crate) fn internal_get_price(&self, id: &PriceId) -> Option<Price> {
+        self.prices.get(id).cloned().map(Into::into)
+    }
+
+    pub(crate) fn internal_set_price(&mut self, id: PriceId, price: Price) {
+        self.prices.insert(id, price.into());
+    }
+
     pub(crate) fn require_price(&self, price_id: &PriceId) -> Price {
-        self.prices
-            .get(price_id)
-            .cloned()
+        self.internal_get_price(price_id)
             .unwrap_or_else(|| env::panic_str("Price not found in the catalog"))
     }
 

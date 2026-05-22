@@ -1,5 +1,5 @@
 //! Validator pool pipeline: balance refresh, withdraw-if-ready, net stake/unstake (one mutating pool op per NEAR epoch per pool).
-//! Step-by-step promise chain: [`docs/EPOCH_SETTLEMENT_CHAIN.md`](../docs/EPOCH_SETTLEMENT_CHAIN.md). Product goals: `docs/LAZY_EPOCH_PIPELINE.md`.
+//! Pool pipeline design: [`docs/LAZY_EPOCH_PIPELINE.md`](../docs/LAZY_EPOCH_PIPELINE.md).
 //!
 //! **Entry:** [`Contract::promise_validator_per_epoch_settlement_then`] (**0**, sets **`Busy`**) — shared by `lock`, `unlock`, `withdraw`, `epoch_settle`.
 //! Fast path when [`Validator::last_settlement_epoch`] ≥ current epoch: **0** → **4** only.
@@ -27,7 +27,7 @@ pub trait ExtSelfEpoch {
         &mut self,
         #[callback_result] pool_account_result: Result<PoolAccountView, PromiseError>,
         validator_id: ValidatorId,
-        cont: PerEpochContinue,
+        cont: UserAction,
     ) -> Promise;
     /// **[Pipeline 2b]** Moves `pending_to_withdraw` -> `pending_to_claim` after pool `withdraw` (stays **`Busy`**).
     fn on_epoch_withdraw_transfer_done(
@@ -39,14 +39,14 @@ pub trait ExtSelfEpoch {
     fn on_after_pool_withdraw_maybe_settle(
         &mut self,
         validator_id: ValidatorId,
-        cont: PerEpochContinue,
+        cont: UserAction,
     ) -> PromiseOrValue<bool>;
     /// **[Pipeline 3b]** Pool `deposit_and_stake` result: updates pending queues, bumps `last_settlement_epoch`.
     fn on_deposit_and_stake(&mut self, validator_id: ValidatorId) -> bool;
     /// **[Pipeline 3c]** Pool `unstake` result: records `last_unstake_epoch`, adjusts pending queues.
     fn on_unstake(&mut self, validator_id: ValidatorId) -> bool;
     /// **[Pipeline 4]** Fan-out to user tail (**5a** / **5b** / **5c**), then **6**.
-    fn on_epoch_settlement_dispatch_continue(&mut self, cont: PerEpochContinue) -> Promise;
+    fn on_epoch_settlement_dispatch_continue(&mut self, cont: UserAction) -> Promise;
     /// **[Pipeline 5a]** Catalog mint; may re-enter **3** (`lock.rs`).
     fn resolve_lock(
         &mut self,
@@ -87,7 +87,7 @@ pub trait ExtSelfEpoch {
         &mut self,
         #[callback_result] lock_id_result: Result<LockId, PromiseError>,
         validator_id: ValidatorId,
-        cont: PerEpochContinue,
+        cont: UserAction,
     ) -> PromiseOrValue<LockId>;
 }
 
@@ -107,13 +107,13 @@ pub trait ExtStakingPool {
 
 #[near]
 impl Contract {
-    /// Public entry → **[Pipeline 0]** with [`PerEpochContinue::SettleOnly`] (tail **5** = no-op, then **6**).
+    /// Public entry → **[Pipeline 0]** with [`UserAction::SettleOnly`] (tail **5** = no-op, then **6**).
     pub fn epoch_settle(&mut self, validator_id: ValidatorId) -> Promise {
         self.assert_not_paused();
         self.require_enough_gas_for_epoch_settlement();
         self.promise_validator_per_epoch_settlement_then(
             validator_id.clone(),
-            PerEpochContinue::SettleOnly { validator_id },
+            UserAction::SettleOnly { validator_id },
         )
     }
 }
@@ -128,13 +128,13 @@ impl Contract {
     pub(crate) fn promise_validator_per_epoch_settlement_then(
         &mut self,
         validator_id: ValidatorId,
-        cont: PerEpochContinue,
+        cont: UserAction,
     ) -> Promise {
         let mut validator = self.require_validator_idle(&validator_id);
         // Fast path when this pool already consumed its one settle slot for the current NEAR epoch.
         let needs_pre_user_settlement_pipeline = validator.last_settlement_epoch < epoch_height();
         validator.tx_status = TransactionStatus::Busy;
-        self.validators.insert(validator_id.clone(), validator);
+        self.internal_set_validator(validator_id.clone(), validator);
 
         if !needs_pre_user_settlement_pipeline {
             // Same-contract fast-path dispatch: no cross-contract boundary is needed here.
@@ -163,7 +163,7 @@ impl Contract {
         &mut self,
         #[callback_result] pool_account_result: Result<PoolAccountView, PromiseError>,
         validator_id: ValidatorId,
-        cont: PerEpochContinue,
+        cont: UserAction,
     ) -> Promise {
         let pool_account = match pool_account_result {
             Ok(pool_account) => pool_account,
@@ -184,7 +184,7 @@ impl Contract {
         );
         validator.total_staked_balance = pool_account.total_balance();
         validator.last_balance_refresh_ns = U64(block_timestamp());
-        self.validators.insert(validator_id.clone(), validator);
+        self.internal_set_validator(validator_id.clone(), validator);
 
         let unstaked = pool_account.unstaked();
 
@@ -284,7 +284,7 @@ impl Contract {
                 .expect("pending_to_claim overflow after pool transfer");
             events::log_validator_withdraw_in(credited_yocto, &validator_id);
         }
-        self.validators.insert(validator_id, validator);
+        self.internal_set_validator(validator_id, validator);
         PromiseOrValue::Value(ok)
     }
 
@@ -295,7 +295,7 @@ impl Contract {
     pub fn on_after_pool_withdraw_maybe_settle(
         &mut self,
         validator_id: ValidatorId,
-        cont: PerEpochContinue,
+        cont: UserAction,
     ) -> PromiseOrValue<bool> {
         let validator = self.require_validator(&validator_id);
         self.assert_validator_busy(
@@ -307,7 +307,7 @@ impl Contract {
 
     // --- [Pipeline 3 / 3a] ---
 
-    fn promise_epoch_settlement_dispatch(&mut self, cont: PerEpochContinue) -> Promise {
+    fn promise_epoch_settlement_dispatch(&mut self, cont: UserAction) -> Promise {
         // Same-contract dispatch continuation does not need an extra self-promise hop.
         self.on_epoch_settlement_dispatch_continue(cont)
     }
@@ -317,7 +317,7 @@ impl Contract {
     pub(crate) fn try_epoch_stake_or_unstake(
         &mut self,
         validator_id: ValidatorId,
-        dispatch_after: PerEpochContinue,
+        dispatch_after: UserAction,
     ) -> Promise {
         let validator = self.require_validator(&validator_id);
         self.assert_validator_busy(
@@ -410,7 +410,7 @@ impl Contract {
             );
         }
         validator.last_settlement_epoch = epoch_height();
-        self.validators.insert(validator_id.clone(), validator);
+        self.internal_set_validator(validator_id.clone(), validator);
         true
     }
 
@@ -447,7 +447,7 @@ impl Contract {
             .checked_add(NearToken::from_yoctonear(net_stake_yocto))
             .expect("total_staked_balance overflow after stake");
         validator.last_settlement_epoch = epoch_height();
-        self.validators.insert(validator_id, validator);
+        self.internal_set_validator(validator_id, validator);
         true
     }
 
@@ -488,7 +488,7 @@ impl Contract {
         );
         validator.last_unstake_epoch = current_epoch;
         validator.last_settlement_epoch = current_epoch;
-        self.validators.insert(validator_id, validator);
+        self.internal_set_validator(validator_id, validator);
         true
     }
 
@@ -496,7 +496,7 @@ impl Contract {
 
     /// **[Pipeline 4]** Fan-out to **5a** / **5b** / **5c**, then chain **6**.
     #[private]
-    pub fn on_epoch_settlement_dispatch_continue(&mut self, cont: PerEpochContinue) -> Promise {
+    pub fn on_epoch_settlement_dispatch_continue(&mut self, cont: UserAction) -> Promise {
         enum ReleaseKind {
             Terminal,
             WithLockId,
@@ -506,7 +506,7 @@ impl Contract {
         let cont_for_release = cont.clone();
         let (tail, release_kind) = match cont {
             // Catalog purchase: mint shares / usage after validator state is fresh for this epoch.
-            PerEpochContinue::CatalogLockMint {
+            UserAction::CommitLock {
                 validator_id,
                 buyer,
                 locked,
@@ -526,7 +526,7 @@ impl Contract {
                     ),
                 ReleaseKind::WithLockId,
             ),
-            PerEpochContinue::SubscriptionUpgrade {
+            UserAction::SubscriptionUpgrade {
                 validator_id,
                 buyer,
                 deposit,
@@ -545,7 +545,7 @@ impl Contract {
                 ReleaseKind::WithLockId,
             ),
             // Share exit: burn shares and queue `pending_to_unstake` (pool `unstake` on a later settlement).
-            PerEpochContinue::UnlockQueueUnstake {
+            UserAction::UnlockQueueUnstake {
                 lock_id,
                 account_id,
                 validator_id,
@@ -557,7 +557,7 @@ impl Contract {
                 ReleaseKind::Terminal,
             ),
             // User claim: move unlocked NEAR from `pending_to_claim` (see `withdraw.rs`).
-            PerEpochContinue::WithdrawUserTransfer {
+            UserAction::WithdrawUserTransfer {
                 account_id,
                 validator_id,
             } => (
@@ -566,7 +566,7 @@ impl Contract {
                     .on_withdraw_user_transfer_after_settle(account_id, validator_id),
                 ReleaseKind::Terminal,
             ),
-            PerEpochContinue::SettleOnly { .. } => {
+            UserAction::SettleOnly { .. } => {
                 return ext_self_epoch::ext(env::current_account_id())
                     .with_static_gas(callbacks::ON_EPOCH_PIPELINE_TERMINAL_RELEASE)
                     .on_epoch_pipeline_terminal_release(pipeline_validator_id);
@@ -612,7 +612,7 @@ impl Contract {
     pub(crate) fn release_validator_pool_pipeline(&mut self, validator_id: &ValidatorId) {
         let mut validator = self.require_validator(validator_id);
         validator.tx_status = TransactionStatus::Idle;
-        self.validators.insert(validator_id.clone(), validator);
+        self.internal_set_validator(validator_id.clone(), validator);
     }
 
     /// **[Pipeline 6]** After **4** tail completes: clear pipeline **`Busy`**.
@@ -627,7 +627,7 @@ impl Contract {
         &mut self,
         #[callback_result] lock_id_result: Result<LockId, PromiseError>,
         validator_id: ValidatorId,
-        cont: PerEpochContinue,
+        cont: UserAction,
     ) -> PromiseOrValue<LockId> {
         match lock_id_result {
             Ok(lock_id) => {

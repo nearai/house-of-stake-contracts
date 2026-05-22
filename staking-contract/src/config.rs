@@ -35,6 +35,16 @@ pub struct Config {
 #[near]
 impl Contract {
     pub fn get_config(&self) -> &Config {
-        &self.config
+        self.internal_get_config()
+    }
+}
+
+impl Contract {
+    pub(crate) fn internal_get_config(&self) -> &Config {
+        self.config.as_ref()
+    }
+
+    pub(crate) fn internal_get_config_mut(&mut self) -> &mut Config {
+        self.config.as_mut()
     }
 }

@@ -18,7 +18,7 @@ todos:
     content: "Implement products.rs + prices.rs: validator-owner-only create/edit/archive/delete with usage_count guards and CatalogStatus"
     status: pending
   - id: oracle_module
-    content: "Superseded — NEAR-only catalog; pricing in internal.rs (no oracle crate)"
+    content: "Superseded — NEAR-only catalog; pricing in utils.rs (no oracle crate)"
     status: cancelled
   - id: accounts_storage
     content: "Implement accounts.rs: Account struct, NEP-145 storage_deposit/withdraw, per-validator share holdings"
@@ -114,7 +114,7 @@ Add a new crate inside the workspace mirroring sibling crates. Suggested files (
 - `validators.rs` — `Validator` model and the on-contract validator allowlist (the `validators` map itself); `add_validator`/`pause_validator`/`remove_validator`/`get_validators`; share-pool math per validator. Validator **ownership for catalog operations** is always the staking pool’s `get_owner_id()` (see `products.rs`), not a field on `Validator`.
 - `products.rs` — `Product`, `Price`, lifecycle (`create_product`, `edit_product`, `archive_product`, `delete_product`, plus parallel `*_price` methods). All gated by `assert_validator_owner` for the product's validator.
 - `subscriptions.rs` — `Subscription` lifecycle RPCs, Phase B prorate at renewal, calendar-month extension helper (`add_months_stripe_style`).
-- `internal.rs` — share pool math, `check_near_price_lock` (NEAR-only duration-weighted sufficiency vs catalog line item).
+- `utils.rs` — share pool math, `check_near_price_lock` (NEAR-only duration-weighted sufficiency vs catalog line item).
 - `accounts.rs` — `Account` (prepaid storage only), NEP-145-style `storage_deposit` / `storage_withdraw`.
 - `ids.rs` — Stripe-style identifier wrappers (`ProductId`, `PriceId`, `SubscriptionId`, `LockId`) plus deterministic on-chain ID generator.
 - `lock.rs` — `lock_for_product`, `lock_for_subscription`, `check_near_price_lock`, finalize lock and `pending_to_stake` accounting.
@@ -228,7 +228,7 @@ pub struct Price {
     pub amount: U128,                        // yoctoNEAR
     pub price_type: PriceType,
     pub billing_period: Option<BillingPeriod>,
-    pub lock_factor_near_months: U128,       // see internal::LOCK_FACTOR_DENOM
+    pub lock_factor_near_months: U128,       // see utils::LOCK_FACTOR_DENOM
     pub status: CatalogStatus,
     pub usage_count: u64,
 }
@@ -246,7 +246,7 @@ pub struct Subscription {
 }
 ```
 
-NEAR pricing rule (implemented in [`internal::check_near_price_lock`](../src/internal.rs)):
+NEAR pricing rule (implemented in [`utils::check_near_price_lock`](../src/utils.rs)):
 - Compute required NEAR-months from the catalog line: `required_nm = amount * lock_factor_near_months / LOCK_FACTOR_DENOM` (yocto-scale integers).
 - Require `locked_yocto * duration_ns >= required_nm * AVG_MONTH_NS` so the user’s attached lock and chosen duration jointly satisfy the price.
 - Product locks pass explicit `lock_duration_ns`; subscription locks derive duration from the active billing window (`end_ns - now`).
@@ -437,7 +437,7 @@ Extend [common/src/events.rs](house-of-stake-contracts/common/src/events.rs) (ne
 - Validator status transitions guarded so a `Removed` validator can never serve new locks but existing locks can still be unlocked/withdrawn through it.
 - Slashing is tolerated: `total_staked_balance` updates when balance views run in the lazy pipeline callbacks; share holders share the loss proportionally (standard staking pool semantics). Locks remain valid by share count, but `near_for(shares)` decreases — explicit risk disclosure in README.
 - Reentrancy avoided via the `Idle/Busy` per-validator status flag.
-- Integer-overflow safety: share–NEAR products use `U256` where needed (see [internal.rs](../src/internal.rs)); lock pricing uses `U256` for the NEAR-months inequality.
+- Integer-overflow safety: share–NEAR products use `U256` where needed (see [utils.rs](../src/utils.rs)); lock pricing uses `U256` for the NEAR-months inequality.
 
 ## 11. Open items to confirm during implementation
 

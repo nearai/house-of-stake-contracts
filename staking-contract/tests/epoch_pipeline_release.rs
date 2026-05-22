@@ -4,7 +4,7 @@ mod common;
 
 use common::{BUYER, POOL, STAKING, acct, ctx, deploy, setup_catalog_near_oneoff};
 use near_sdk::{NearToken, PromiseError, PromiseOrValue, testing_env};
-use staking_contract::types::{OrderRef, PerEpochContinue, TransactionStatus};
+use staking_contract::types::{OrderRef, TransactionStatus, UserAction};
 
 #[test]
 fn lock_pipeline_tail_failure_releases_busy_and_schedules_refund() {
@@ -14,10 +14,10 @@ fn lock_pipeline_tail_failure_releases_busy_and_schedules_refund() {
 
     let mut validator = c.get_validator(pool.clone()).expect("validator").clone();
     validator.tx_status = TransactionStatus::Busy;
-    c.validators.insert(pool.clone(), validator);
+    c.validators.insert(pool.clone(), validator.into());
 
     let locked = NearToken::from_near(50);
-    let cont = PerEpochContinue::CatalogLockMint {
+    let cont = UserAction::CommitLock {
         validator_id: pool.clone(),
         buyer: acct(BUYER),
         locked,
@@ -54,10 +54,10 @@ fn lock_pipeline_tail_success_releases_busy_and_returns_lock_id() {
 
     let mut validator = c.get_validator(pool.clone()).expect("validator").clone();
     validator.tx_status = TransactionStatus::Busy;
-    c.validators.insert(pool.clone(), validator);
+    c.validators.insert(pool.clone(), validator.into());
 
     let lock_id = "lock-test-1".to_string();
-    let cont = PerEpochContinue::CatalogLockMint {
+    let cont = UserAction::CommitLock {
         validator_id: pool.clone(),
         buyer: acct(BUYER),
         locked: NearToken::from_near(50),

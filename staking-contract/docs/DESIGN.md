@@ -11,7 +11,7 @@ The following sections specify the on-chain design of the contract in the [staki
 Goals:
 - Allow a NEAR account (the "staker") to purchase a service provider's product or subscribe to a plan by **locking** NEAR for a chosen duration. Service providers are examples such as NEAR AI or near.com—any offering that runs its **own** validator pool for this purpose. The locked NEAR is staked into that product's validator pool; the validator's commission funds the provider (e.g. 100% commission on a pool such as `nearai.poolv1.near`).
 - Be the single on-chain entrypoint for that billing model: products, prices, subscriptions, locks.
-- Price catalog amounts are **NEAR (yocto) only**; lock sufficiency is enforced on-chain via [`check_near_price_lock`](../src/internal.rs) (locked NEAR × duration vs catalog line item). There is **no** oracle and **no** USD conversion path.
+- Price catalog amounts are **NEAR (yocto) only**; lock sufficiency is enforced on-chain via [`check_near_price_lock`](../src/utils.rs) (locked NEAR × duration vs catalog line item). There is **no** oracle and **no** USD conversion path.
 - Use a pooled meta-validator model: `stake.dao` is the only delegator on each whitelisted validator pool; per-user accounting is internal via shares.
 - **User-driven pool work:** there is no separate operator role and no public `epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator_balance` ABI. Pool calls (`deposit_and_stake`, `unstake`, withdraw-from-pool, balance refresh) are chained from **`lock`**, **`unlock`**, **`withdraw`**, and optional manual **`epoch_settle(validator_id)`** for retry. See [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md).
 - Be governed by HoS DAO (initially a security multisig), upgradable in the same pattern as the sibling contracts.
@@ -49,7 +49,7 @@ Key roles:
 
 ## 3. Crate layout
 
-See source files under [src/](../src/). Key modules: `config`, `types`, `ids`, `validators`, `products`, `accounts`, `governance`, `pause`, `upgrade`, `lock`, `unlock`, `withdraw`, **`epoch`** (pool cross-contract calls and self-callbacks; `try_epoch_stake_or_unstake` / `try_epoch_withdraw`, `epoch_settle`), `prices`, `subscriptions`, `events`, `gas`, `internal` (share math and NEAR price lock check).
+See source files under [src/](../src/). Key modules: `config`, `types`, `ids`, `validators`, `products`, `accounts`, `governance`, `pause`, `upgrade`, `lock`, `unlock`, `withdraw`, **`epoch`** (pool cross-contract calls and self-callbacks; `try_epoch_stake_or_unstake` / `try_epoch_withdraw`, `epoch_settle`), `prices`, `subscriptions`, `events`, `gas`, `utils` (share math and NEAR price lock check).
 
 ## 4. Data model (summary)
 

@@ -18,7 +18,7 @@ fn lock_for_product_rejects_both_price_id_and_product_id() {
     set_default_price_for_product(&mut c, product_id.clone(), price_id.clone());
     register_buyer(&mut c);
 
-    let dur = c.config.min_lock_duration_ns.0.saturating_add(10_000);
+    let dur = c.get_config().min_lock_duration_ns.0.saturating_add(10_000);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
     c.lock_for_product(Some(price_id), U64(dur), Some(product_id));
 }
@@ -30,7 +30,7 @@ fn lock_for_product_rejects_missing_price_and_product() {
     let (_product_id, _price_id) = setup_catalog_near_oneoff(&mut c);
     register_buyer(&mut c);
 
-    let dur = c.config.min_lock_duration_ns.0.saturating_add(10_000);
+    let dur = c.get_config().min_lock_duration_ns.0.saturating_add(10_000);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
     c.lock_for_product(None, U64(dur), None);
 }
@@ -42,7 +42,7 @@ fn lock_for_product_resolves_product_id_via_default_price() {
     set_default_price_for_product(&mut c, product_id.clone(), price_id.clone());
     register_buyer(&mut c);
 
-    let dur = c.config.min_lock_duration_ns.0.saturating_add(10_000);
+    let dur = c.get_config().min_lock_duration_ns.0.saturating_add(10_000);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
     let lock_id = unwrap_sync_lock_id(c.lock_for_product(None, U64(dur), Some(product_id.clone())));
 
