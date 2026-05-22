@@ -325,7 +325,10 @@ impl Contract {
         subscription_id: &SubscriptionId,
         subscription: &mut Subscription,
     ) {
-        let stored = self.require_subscription_by_id(subscription_id);
+        // First subscribe persists the subscription only at the end of `commit_catalog_lock`.
+        let Some(stored) = self.subscriptions.get(subscription_id.as_str()).cloned() else {
+            return;
+        };
         let Some(low_id) = stored.pending_downgrade_price_id.clone() else {
             return;
         };

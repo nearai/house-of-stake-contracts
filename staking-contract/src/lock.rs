@@ -224,18 +224,14 @@ impl Contract {
         // Same host synchronous path as `lock_for_product_with_price_id` (see comment there).
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let lock_id = self.commit_catalog_lock(
+            return PromiseOrValue::Value(self.commit_catalog_lock(
                 buyer.clone(),
                 locked,
                 duration_ns,
                 order,
                 validator_id,
                 Some((subscription, sub_id.clone(), is_new_index)),
-            );
-            if is_new_index {
-                self.subscription_by_account_product.insert(sub_key, sub_id);
-            }
-            return PromiseOrValue::Value(lock_id);
+            ));
         }
         #[cfg(target_arch = "wasm32")]
         {

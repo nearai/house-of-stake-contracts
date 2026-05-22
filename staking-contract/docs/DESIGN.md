@@ -18,7 +18,7 @@ Goals:
 - Share patterns/types with the existing workspace ([common/](../../common/), [lockup-contract/](../../lockup-contract/), [venear-contract/](../../venear-contract/)).
 
 Non-goals (for v1):
-- Granting veNEAR voting power for `stake.dao` locks (kept independent of `venear-contract`; can be added later via a "register lock with veNEAR" hook).
+- Granting veNEAR voting power for `stake.dao` locks (kept independent of `venear-contract` in the shipped v1 contract). See [VENEAR_INTEGRATION.md](VENEAR_INTEGRATION.md) for the v2 design (opt-in per lock, `on_stake_dao_update` to veNEAR).
 - Liquid staking tokens (no fungible share token issued; shares are internal).
 - Cross-validator rebalancing / autocompounding (stake stays where the user purchased).
 - On-chain credit redemption — "credits" are an off-chain billing concept driven by `lock` events.
