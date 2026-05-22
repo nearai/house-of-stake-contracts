@@ -45,7 +45,7 @@ Review energy should go to **new staking code and tests**, not re-litigating vot
 
 ## Suggested follow-ups (non-blocking)
 
-- Longer sandbox E2E: unlock → `epoch_unstake_settle_epochs` → `withdraw(validator_id)` (see `README.md` / `ACTION_ITEMS.md`).
+- Sandbox golden path: [`tests/sandbox_golden_path.rs`](../tests/sandbox_golden_path.rs); subscription sandbox: [`tests/sandbox_subscription_e2e.rs`](../tests/sandbox_subscription_e2e.rs).
 - Calendar-accurate subscription billing vs linear-month helper.
 - Stronger invariant tests (shares vs `total_staked_balance` vs user positions).
 

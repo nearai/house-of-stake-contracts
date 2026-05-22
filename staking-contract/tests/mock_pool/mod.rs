@@ -754,3 +754,104 @@ pub async fn create_subscription_product_and_price(
     let price_id: String = cpr.into_result()?.json()?;
     Ok((product_id, price_id))
 }
+
+/// Validator owner: add another active recurring-monthly price on an existing product.
+pub async fn create_recurring_price_on_product(
+    staking: &near_workspaces::Account,
+    validator_owner: &near_workspaces::Account,
+    product_id: &str,
+    name: &str,
+    amount_yocto: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let cpr = validator_owner
+        .call(staking.id(), "create_price")
+        .args_json(json!({
+            "product_id": product_id,
+            "name": name,
+            "description": "",
+            "amount": amount_yocto,
+            "price_type": "Recurring",
+            "billing_period": "Monthly",
+            "lock_factor_near_months": LOCK_FACTOR_DENOM,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(WsGas::from_tgas(200))
+        .transact()
+        .await?;
+    assert!(cpr.is_success(), "create_price: {:#?}", cpr.outcomes());
+    Ok(cpr.into_result()?.json()?)
+}
+
+pub async fn buyer_upgrade_subscription(
+    buyer: &near_workspaces::Account,
+    staking_id: &near_workspaces::AccountId,
+    new_price_id: &str,
+    deposit_near: u128,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let lock_id: String = buyer
+        .call(staking_id, "upgrade_subscription")
+        .args_json(json!({ "new_price_id": new_price_id }))
+        .deposit(NearToken::from_near(deposit_near))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
+        .transact()
+        .await?
+        .into_result()?
+        .json()?;
+    Ok(lock_id)
+}
+
+pub async fn buyer_schedule_downgrade_subscription(
+    buyer: &near_workspaces::Account,
+    staking_id: &near_workspaces::AccountId,
+    target_price_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    buyer
+        .call(staking_id, "schedule_downgrade_subscription")
+        .args_json(json!({ "target_price_id": target_price_id }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(WsGas::from_tgas(50))
+        .transact()
+        .await?
+        .into_result()?;
+    Ok(())
+}
+
+/// Advance `epoch_count` NEAR epochs and run `epoch_settle` each time (pool stake / unstake / withdraw steps).
+pub async fn drive_validator_settlement_epochs(
+    worker: &Worker<Sandbox>,
+    caller: &near_workspaces::Account,
+    staking_id: &near_workspaces::AccountId,
+    pool_id: &near_workspaces::AccountId,
+    epoch_count: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for _ in 0..epoch_count {
+        fast_forward_until_epoch_delta(worker, 1, Some(caller), Some(staking_id)).await?;
+        call_epoch_settle(caller, staking_id, pool_id)
+            .await?
+            .into_result()?;
+    }
+    Ok(())
+}
+
+/// Wait until `lock.end_ns`, then call `unlock`.
+pub async fn unlock_lock_after_expiry(
+    worker: &Worker<Sandbox>,
+    buyer: &near_workspaces::Account,
+    staking_id: &near_workspaces::AccountId,
+    lock_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let lock: serde_json::Value = worker
+        .view(staking_id, "get_lock")
+        .args_json(json!({ "lock_id": lock_id }))
+        .await?
+        .json()?;
+    let end_ns = json_u64_field(&lock["end_ns"]).expect("lock.end_ns");
+    fast_forward_until_timestamp(
+        worker,
+        end_ns.saturating_add(1),
+        Some(buyer),
+        Some(staking_id),
+    )
+    .await?;
+    buyer_unlock(buyer, staking_id, lock_id).await
+}

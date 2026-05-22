@@ -8,13 +8,12 @@ On the **host** triple, `lock_for_*` uses a synchronous mint path (`not(target_a
 
 ## Sandbox (`near-workspaces`) + mock pool
 
-[`sandbox_mock_pool.rs`](sandbox_mock_pool.rs) and [`sandbox_epoch_settlement.rs`](sandbox_epoch_settlement.rs) deploy built **`staking_contract.wasm`** and **`mock_staking_pool_contract.wasm`** and exercise real cross-contract calls (catalog, `lock_for_product`, pool views, `epoch_settle`, unlock → unstake, net-zero settle, `withdraw(validator_id)`, etc.). Shared helpers live in [`mock_pool/mod.rs`](mock_pool/mod.rs). Requires a **near-workspaces**–supported host (linux-x86 or darwin-arm) to run.
+[`sandbox_mock_pool.rs`](sandbox_mock_pool.rs), [`sandbox_epoch_settlement.rs`](sandbox_epoch_settlement.rs), [`sandbox_golden_path.rs`](sandbox_golden_path.rs), and [`sandbox_subscription_e2e.rs`](sandbox_subscription_e2e.rs) deploy **`staking_contract_test.wasm`** (test feature: mock clock) and **`mock_staking_pool_contract.wasm`**, then exercise real cross-contract calls. Shared helpers live in [`mock_pool/mod.rs`](mock_pool/mod.rs). Requires a **near-workspaces**–supported host (linux-x86 or darwin-arm) to run.
 
 Build WASMs from repo root (`house-of-stake-contracts/`):
 
 ```bash
-make staking-contract
-make mock-staking-pool-contract
+make staking-contract-test mock-staking-pool-contract
 ```
 
 Run sandbox integration tests:
@@ -22,6 +21,12 @@ Run sandbox integration tests:
 ```bash
 cargo test -p staking-contract --test sandbox_mock_pool
 cargo test -p staking-contract --test sandbox_epoch_settlement
+cargo test -p staking-contract --test sandbox_golden_path
+cargo test -p staking-contract --test sandbox_subscription_e2e
 ```
+
+**Golden path** (`sandbox_golden_path`): one documented flow — `lock_for_product` → `epoch_settle` → `unlock` → two settlement epochs → `withdraw(validator_id)` with NEAR received by the buyer.
+
+**Subscriptions** (`sandbox_subscription_e2e`): `upgrade_subscription` and `schedule_downgrade_subscription` + renewal under sandbox (complements host [`subscription_lifecycle.rs`](subscription_lifecycle.rs)).
 
 (`near-workspaces` installs a local NEAR sandbox binary; supported hosts are **linux-x86** and **darwin-arm**.)

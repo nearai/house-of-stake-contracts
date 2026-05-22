@@ -30,7 +30,7 @@ Backlog for taking **`stake.dao`** (`staking-contract`) from **implemented v1** 
 
 ### End-to-end funds path
 
-- [ ] **Sandbox E2E (mock pool)** — Add or extend tests: **`lock_for_product`** → **`epoch_settle`** (if needed) → **`unlock`** → advance epochs (`epoch_unstake_settle_epochs`) → **`withdraw(validator_id)`** with NEAR received by user. Today covered in parts across [`sandbox_mock_pool.rs`](../tests/sandbox_mock_pool.rs) and [`sandbox_epoch_settlement.rs`](../tests/sandbox_epoch_settlement.rs); tie into one documented golden path.
+- [x] **Sandbox E2E (mock pool)** — Golden path in [`sandbox_golden_path.rs`](../tests/sandbox_golden_path.rs): **`lock_for_product`** → **`epoch_settle`** → **`unlock`** → settlement epochs → **`withdraw(validator_id)`** with NEAR received by buyer. Deeper pipeline cases remain in [`sandbox_mock_pool.rs`](../tests/sandbox_mock_pool.rs) and [`sandbox_epoch_settlement.rs`](../tests/sandbox_epoch_settlement.rs).
 - [ ] **Testnet validation on a real pool** — Deploy via [`scripts/deploy_testnet_staking_stack.sh`](../../scripts/deploy_testnet_staking_stack.sh) (mock pool) **and** exercise at least one **production-shaped** staking pool account on testnet (allowlist, catalog, lock, unlock, withdraw). Mock pool behavior must not be the only pre-mainnet evidence.
 - [ ] **Concurrent / retry behavior** — QA `tx_status == Busy` (overlapping lock/unlock/withdraw), failed pool callbacks, and **`epoch_settle`** recovery; ensure users are never permanently stuck.
 
@@ -59,7 +59,7 @@ Backlog for taking **`stake.dao`** (`staking-contract`) from **implemented v1** 
 ### Testing
 
 - [ ] **Accounting invariants** — Property or scripted tests: Σ user shares vs `Validator.total_shares`; `pending_user_unstake_total` vs tranches; after net-zero, `pending_to_unstake` re-rooted correctly.
-- [ ] **Subscription lifecycle** — Extend [`subscription_lifecycle.rs`](../tests/subscription_lifecycle.rs) for upgrade + scheduled downgrade + renewal prorate (Phase B) under sandbox if not already end-to-end.
+- [x] **Subscription lifecycle (sandbox)** — [`sandbox_subscription_e2e.rs`](../tests/sandbox_subscription_e2e.rs): `upgrade_subscription` and `schedule_downgrade_subscription` + renewal. Host coverage: [`subscription_lifecycle.rs`](../tests/subscription_lifecycle.rs) (incl. Phase B prorate on `user_pending_unstake`).
 
 ### Product / economics
 
