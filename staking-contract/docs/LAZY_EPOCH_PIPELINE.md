@@ -19,7 +19,7 @@ Implementation: [`src/epoch.rs`](../src/epoch.rs). Entrypoints: [`lock.rs`](../s
 | `withdraw` | May chain pool withdraw when the on-contract bucket is empty but settlement allows. |
 | Pool mutating actions per NEAR epoch | Per allowlisted pool (`validator_id` = pool account), at most **one** successful **`deposit_and_stake`** **or** **`unstake`** per `epoch_height` (**`Validator.last_settlement_epoch`**). **`try_epoch_stake_or_unstake`** nets **`pending_to_stake`** vs **`pending_to_unstake`**: stake excess, unstake excess, or clear both without a pool call when equal (still bumps **`last_settlement_epoch`**). Withdraw-from-pool does **not** consume that slot. |
 
-**Pre-ship concerns:** prepaid gas on long promise chains (see [`API.md`](API.md) and [`gas.rs`](../src/gas.rs)); small `PerEpochContinue` callback payloads; **`tx_status == Busy`** retries; sandbox/deploy scripts must use user flows, not removed `epoch_*` batch methods.
+**Pre-ship concerns:** prepaid gas on long promise chains (see [`API.md`](API.md) and [`gas.rs`](../src/gas.rs)); small `UserAction` callback payloads; **`tx_status == Busy`** retries; sandbox/deploy scripts must use user flows, not removed `epoch_*` batch methods.
 
 ---
 
@@ -30,7 +30,7 @@ Before a user-visible action (mint shares, queue unlock unstake, or pay out a cl
 1. **Refresh** cached pool balance for this contract’s pool account.
 2. **Pull** spendable unstaked NEAR into **`pending_to_withdraw`** when allowed.
 3. **Net-settle** queued stake vs unstake (at most one pool `deposit_and_stake` or `unstake` per NEAR epoch).
-4. **Dispatch** the caller’s continuation (`PerEpochContinue`).
+4. **Dispatch** the caller’s continuation (`UserAction`).
 
 Withdraw-from-pool does **not** consume the stake/unstake epoch slot; only successful net stake, net unstake, or net-zero clearance bumps **`last_settlement_epoch`**.
 
@@ -72,9 +72,9 @@ One cross-contract view replaces separate total/unstaked queries.
 
 ## Entry points
 
-| Entry | When | `PerEpochContinue` tail |
+| Entry | When | `UserAction` tail |
 |--------|------|-------------------------|
-| `lock_for_product` / `lock_for_subscription` | User attaches NEAR | `CatalogLockMint` |
+| `lock_for_product` / `lock_for_subscription` | User attaches NEAR | `CommitLock` |
 | `unlock` | Lock owner, after `end_ns` | `UnlockQueueUnstake` |
 | `withdraw` | User claims tranches (WASM) | `WithdrawUserTransfer` |
 | `epoch_settle(validator_id)` | Anyone; manual retry | `SettleOnly` |
@@ -133,7 +133,7 @@ Numbered steps match `/** [Pipeline N] */` in [`epoch.rs`](../src/epoch.rs).
 ### **[Pipeline 0]** — `promise_validator_per_epoch_settlement_then`
 
 - **Called from:** `lock.rs`, `unlock.rs`, `withdraw.rs`, `epoch_settle`
-- **Args:** `validator_id`, `cont: PerEpochContinue`
+- **Args:** `validator_id`, `cont: UserAction`
 - `require!(tx_status == Idle)` → set **`Busy`**
 - **Fast path:** if `last_settlement_epoch >= epoch_height()` → `on_epoch_settlement_dispatch_continue(cont)` only
 
@@ -173,9 +173,9 @@ try_epoch_withdraw_known_unstaked  [2a]
 
 ### **[Pipeline 4–6]** — dispatch and release
 
-| `PerEpochContinue` | Handler | Module |
+| `UserAction` | Handler | Module |
 |--------------------|---------|--------|
-| `CatalogLockMint` | `on_lock_finally_mint_and_maybe_post_settle` | `lock.rs` |
+| `CommitLock` | `on_lock_finally_mint_and_maybe_post_settle` | `lock.rs` |
 | `UnlockQueueUnstake` | `on_unlock_tail_after_pre_user_settle` | `unlock.rs` |
 | `WithdrawUserTransfer` | `payout_user_withdraw` | `withdraw.rs` |
 | `SettleOnly` | No-op → `on_epoch_pipeline_terminal_release` | `epoch.rs` |
@@ -202,13 +202,13 @@ If the pool **already** settled this epoch in the preamble, the unlock tail may 
 
 ---
 
-## `PerEpochContinue`
+## `UserAction`
 
 Defined in [`types.rs`](../src/types.rs). Keep fields small; reload catalog rows by id in callbacks.
 
 ```rust
-pub enum PerEpochContinue {
-    CatalogLockMint { validator_id, buyer, locked, duration_ns, order, subscription_followup },
+pub enum UserAction {
+    CommitLock { validator_id, buyer, locked, duration_ns, order, subscription_followup },
     UnlockQueueUnstake { validator_id, lock_id, account_id, shares_remove },
     WithdrawUserTransfer { validator_id, account_id },
     SettleOnly { validator_id },
@@ -293,4 +293,4 @@ Host `tests/*.rs` use synchronous lock mint (`not(target_arch = "wasm32")`) beca
 - [ ] `pending_to_unstake` / `pending_user_unstake_total` aligned after net-zero and unlock.
 - [ ] **`Busy`** cleared on all success and failure paths.
 - [ ] At most one successful stake/unstake per pool per NEAR epoch.
-- [ ] `PerEpochContinue` args bounded for callback gas.
+- [ ] `UserAction` args bounded for callback gas.

@@ -126,9 +126,9 @@ Public **`epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator
 - **Unstake spacing**: another pool **`unstake`** requires **`validator_unstake_waiting_finished`** (`last_unstake_epoch` + **`epoch_unstake_settle_epochs`**).
 - **Withdraw from pool** does **not** consume the stake/unstake epoch slot.
 
-| Entry | `PerEpochContinue` tail | User tail |
-|--------|-------------------------|-----------|
-| `lock_for_product` / `lock_for_subscription` | `CatalogLockMint` | Mint lock (**5a**); optional post-settle |
+| Entry | `UserAction` tail | User tail |
+|--------|-------------------|-----------|
+| `lock_for_product` / `lock_for_subscription` | `CommitLock` | Mint lock (**5a**); optional post-settle |
 | `upgrade_subscription` | `SubscriptionUpgrade` | Upgrade lock (**5d**); optional post-settle |
 | `unlock` | `UnlockQueueUnstake` | Share exit only (**5b**) |
 | `withdraw` (WASM) | `WithdrawUserTransfer` | Payout (**5c**) |

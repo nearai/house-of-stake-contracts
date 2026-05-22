@@ -5,84 +5,6 @@ use near_sdk::{
     AccountId, NearToken, Promise, assert_one_yocto, env, is_promise_success, near, require,
 };
 
-#[derive(Clone)]
-#[near(serializers = [borsh, json])]
-pub struct Validator {
-    /// Staking pool contract account (= catalog `validator_id` / lock `validator_id`).
-    pub validator_id: ValidatorId,
-    /// Whether new locks are allowed (**`Active`**) or blocked (**`Paused`**), or this pool is **`Removed`**.
-    pub status: ValidatorStatus,
-
-    /// Total issued stake.dao **share units** for this pool (integer; same scale as per-user shares).
-    pub total_shares: U128,
-    /// Cached **staked NEAR** for this contract’s account on the pool, from the last successful
-    /// pool `get_account` total balance (plus bookkeeping updates on stake/unstake/withdraw paths). Used with
-    /// `pending_*` for share mint/burn pricing—not updated until the next pool read or accounting step.
-    pub total_staked_balance: NearToken,
-    /// `block_timestamp` (nanoseconds) when `total_staked_balance` was last synced from the pool (or validator was added).
-    pub last_balance_refresh_ns: U64,
-
-    /// NEAR waiting to be sent to the pool via **`deposit_and_stake`** (aggregated locks; net-settled vs
-    /// `pending_to_unstake` in `Contract::try_epoch_stake_or_unstake` in `epoch.rs`).
-    pub pending_to_stake: NearToken,
-    /// NEAR queued to leave the pool via **`unstake`** (user unlocks etc.; net-settled vs `pending_to_stake`).
-    pub pending_to_unstake: NearToken,
-    /// Epoch height recorded after the last successful pool `unstake` callback; gates further unstakes
-    /// (with [`crate::config::Config::epoch_unstake_settle_epochs`]).
-    pub last_unstake_epoch: u64,
-    /// Last NEAR `epoch_height` for which this validator completed the **pre–user-action** pipeline for a request:
-    /// **sync** `total_staked_balance` from the pool (at most once per epoch for catalog flows), **withdraw**
-    /// from the pool when eligible, then at most one **net** pool `deposit_and_stake` / `unstake` / net-zero
-    /// clearance for that epoch (same mutex the staking pool enforces per account). Successful callbacks
-    /// on stake, unstake, and net-zero settlement set this to `env::epoch_height()`. When this equals the
-    /// current epoch, user flows **skip** another pool `get_account` refresh for this validator until the
-    /// next NEAR epoch.
-    pub last_settlement_epoch: u64,
-    /// NEAR that has been unstaked on the pool side and is expected to be moved by pool `withdraw`
-    /// into this contract.
-    pub pending_to_withdraw: NearToken,
-    /// NEAR already moved from pool into this contract and now claimable by users.
-    pub pending_to_claim: NearToken,
-    /// Accounts that currently have at least one non-empty tranche in **`user_pending_unstake`** for this pool.
-    pub accounts_with_pending_unstake: Vec<AccountId>,
-
-    /// At most one in-flight cross-contract **mutating** pool pipeline for this validator (`Idle` vs `Busy`).
-    pub tx_status: TransactionStatus,
-}
-
-impl Validator {
-    /// Total user-exit liability across all buckets.
-    pub fn pending_user_liability_yocto(&self) -> u128 {
-        self.pending_to_unstake
-            .as_yoctonear()
-            .saturating_add(self.pending_to_withdraw.as_yoctonear())
-            .saturating_add(self.pending_to_claim.as_yoctonear())
-    }
-
-    /// Liability still outside this contract (pool stake + pool unstaked).
-    pub fn pending_not_in_contract_yocto(&self) -> u128 {
-        self.pending_to_unstake
-            .as_yoctonear()
-            .saturating_add(self.pending_to_withdraw.as_yoctonear())
-    }
-
-    pub fn gross_stake_yocto(&self) -> u128 {
-        self.total_staked_balance
-            .as_yoctonear()
-            .saturating_add(self.pending_to_stake.as_yoctonear())
-    }
-
-    /// NEAR backing **remaining** circulating shares: gross effective stake minus user liability that
-    /// is still outside this contract (`pending_to_unstake + pending_to_withdraw`).
-    ///
-    /// **Solvency:** share pricing must not use gross backing alone after shares burn down.
-    /// `pending_to_claim` is already in-contract cash and should not reduce pool-side backing again.
-    pub fn net_stake_yocto(&self) -> u128 {
-        self.gross_stake_yocto()
-            .saturating_sub(self.pending_not_in_contract_yocto())
-    }
-}
-
 #[near]
 impl Contract {
     /// Contract owner: add a validator pool to the allowlist. Pool ownership for catalog operations is
@@ -92,7 +14,7 @@ impl Contract {
         assert_one_yocto();
         self.assert_owner();
         require!(
-            self.validators.get(&validator_id).is_none(),
+            self.internal_get_validator(&validator_id).is_none(),
             "Validator already exists"
         );
 
@@ -111,7 +33,7 @@ impl Contract {
             accounts_with_pending_unstake: Vec::new(),
             tx_status: TransactionStatus::Idle,
         };
-        self.validators.insert(validator_id.clone(), new_validator);
+        self.internal_set_validator(validator_id.clone(), new_validator);
         self.validator_ids.push(validator_id.clone());
         crate::events::log_validator_added(&validator_id);
     }
@@ -122,7 +44,7 @@ impl Contract {
         self.assert_owner();
         let mut validator = self.require_validator(&validator_id);
         validator.status = ValidatorStatus::Paused;
-        self.validators.insert(validator_id, validator);
+        self.internal_set_validator(validator_id, validator);
     }
 
     #[payable]
@@ -139,7 +61,7 @@ impl Contract {
             "Cannot remove this validator: all stake, pending stake/unstake, and withdraw bucket must be cleared first"
         );
         validator.status = ValidatorStatus::Removed;
-        self.validators.insert(validator_id, validator);
+        self.internal_set_validator(validator_id, validator);
     }
 
     // -------------------------------------------------------------------------
@@ -147,7 +69,7 @@ impl Contract {
     // -------------------------------------------------------------------------
 
     pub fn get_validator(&self, validator_id: ValidatorId) -> Option<Validator> {
-        self.validators.get(&validator_id).cloned()
+        self.internal_get_validator(&validator_id)
     }
 
     /// Paginated validator records (stable allowlist order in [`Contract::validator_ids`]).
@@ -156,12 +78,20 @@ impl Contract {
         self.collect_paginated(from_index, limit, total_len, |index| {
             self.validator_ids
                 .get(index)
-                .and_then(|id| self.validators.get(id).cloned())
+                .and_then(|id| self.internal_get_validator(id))
         })
     }
 }
 
 impl Contract {
+    pub(crate) fn internal_get_validator(&self, id: &ValidatorId) -> Option<Validator> {
+        self.validators.get(id).cloned().map(Into::into)
+    }
+
+    pub(crate) fn internal_set_validator(&mut self, id: ValidatorId, validator: Validator) {
+        self.validators.insert(id, validator.into());
+    }
+
     /// Preamble for pool-owner catalog RPCs: 1 yocto, not paused, validator allowlisted.
     pub(crate) fn catalog_admin_entry_for_pool(
         &self,
@@ -188,7 +118,7 @@ impl Contract {
     /// `get_owner_id()` via a cross-contract call (see `products.rs` and `prices.rs`).
     pub(crate) fn assert_validator_allowlisted(&self, validator_id: &ValidatorId) {
         require!(
-            self.validators.get(validator_id).is_some(),
+            self.internal_get_validator(validator_id).is_some(),
             "Validator not found on the allowlist"
         );
     }
@@ -202,9 +132,7 @@ impl Contract {
     }
 
     pub(crate) fn require_validator(&self, validator_id: &ValidatorId) -> Validator {
-        self.validators
-            .get(validator_id)
-            .cloned()
+        self.internal_get_validator(validator_id)
             .expect("Validator not found on the allowlist")
     }
 
@@ -243,7 +171,7 @@ impl Contract {
             && epoch_height()
                 >= validator
                     .last_unstake_epoch
-                    .saturating_add(self.config.epoch_unstake_settle_epochs)
+                    .saturating_add(self.internal_get_config().epoch_unstake_settle_epochs)
     }
 
     /// NEAR `epoch_height` from which a new [`PendingUnstakeTranche`] may participate in
@@ -258,7 +186,7 @@ impl Contract {
         validator: &Validator,
     ) -> u64 {
         let current_epoch_height = epoch_height();
-        let settle = self.config.epoch_unstake_settle_epochs;
+        let settle = self.internal_get_config().epoch_unstake_settle_epochs;
         let unstake_start_epoch =
             current_epoch_height.max(validator.last_unstake_epoch.saturating_add(settle));
         unstake_start_epoch.saturating_add(settle)
@@ -297,7 +225,7 @@ impl Contract {
             user_validator_shares_key,
             user_shares_before.saturating_add(new_shares),
         );
-        self.validators.insert(validator_id.clone(), validator);
+        self.internal_set_validator(validator_id.clone(), validator);
         new_shares
     }
 
@@ -399,7 +327,7 @@ impl Contract {
                 .push(account_id.clone());
         }
 
-        self.validators.insert(validator_id, validator);
+        self.internal_set_validator(validator_id, validator);
         near_amt
     }
 

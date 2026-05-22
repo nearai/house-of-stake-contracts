@@ -56,7 +56,7 @@ pub mod callbacks {
     pub const ON_LOCK_REFRESH_THEN_FINALIZE: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// After `get_owner_id`: callback does a few storage writes (catalog or owner cache refresh).
     pub const ON_VALIDATOR_OWNER_CHECK: Gas = Gas::from_gas(BASE_GAS.as_gas() * 2);
-    /// Tail dispatch after shared per-epoch settlement (`PerEpochContinue`).
+    /// Tail dispatch after shared per-epoch settlement (`UserAction`).
     ///
     /// This callback fans out into Pipeline 5 tails (currently `8 * BASE_GAS`) and then chains
     /// Pipeline 6 release (`1 * BASE_GAS`), plus its own execution overhead.

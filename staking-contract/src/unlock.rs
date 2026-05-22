@@ -32,7 +32,7 @@ impl Contract {
 
         self.promise_validator_per_epoch_settlement_then(
             validator_id.clone(),
-            PerEpochContinue::UnlockQueueUnstake {
+            UserAction::UnlockQueueUnstake {
                 validator_id,
                 lock_id,
                 account_id: lock.account_id.clone(),
@@ -79,15 +79,13 @@ impl Contract {
             &lock.account_id.clone(),
             &lock.validator_id.clone(),
         );
-        self.locks.insert(lock_id.clone(), lock);
+        self.internal_set_lock(lock_id.clone(), lock);
     }
 }
 
 impl Contract {
     pub(crate) fn require_lock(&self, lock_id: &LockId, not_found_msg: &str) -> Lock {
-        self.locks
-            .get(lock_id)
-            .cloned()
+        self.internal_get_lock(lock_id)
             .unwrap_or_else(|| env::panic_str(not_found_msg))
     }
 
@@ -109,9 +107,7 @@ impl Contract {
         buyer: &AccountId,
     ) -> Lock {
         let lock = self
-            .locks
-            .get(&sub.last_lock_id)
-            .cloned()
+            .internal_get_lock(&sub.last_lock_id)
             .unwrap_or_else(|| env::panic_str("No lock is linked to this subscription"));
         require!(
             lock.account_id == *buyer,

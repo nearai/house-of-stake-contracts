@@ -172,7 +172,7 @@ impl Contract {
             default_price_id: None,
             usage_count: 0,
         };
-        self.products.insert(id.clone(), product);
+        self.internal_set_product(id.clone(), product);
         self.product_ids.push(id.clone());
         crate::events::log_product_created(id.as_str(), &validator_id);
         id
@@ -191,7 +191,7 @@ impl Contract {
         let mut product = self.require_product(&product_id);
         product.name = name;
         product.description = description;
-        self.products.insert(product_id, product);
+        self.internal_set_product(product_id, product);
     }
 
     #[private]
@@ -206,7 +206,7 @@ impl Contract {
         // Archived products cannot serve as default; clear so lock-by-product fails fast.
         product.default_price_id = None;
         product.status = CatalogStatus::Archived;
-        self.products.insert(product_id, product);
+        self.internal_set_product(product_id, product);
     }
 
     #[private]
@@ -244,7 +244,7 @@ impl Contract {
             "Product is not archived"
         );
         product.status = CatalogStatus::Active;
-        self.products.insert(product_id, product);
+        self.internal_set_product(product_id, product);
     }
 
     #[private]
@@ -282,7 +282,7 @@ impl Contract {
                 product.default_price_id = Some(pid);
             }
         }
-        self.products.insert(product_id, product);
+        self.internal_set_product(product_id, product);
     }
 
     // -------------------------------------------------------------------------
@@ -290,12 +290,11 @@ impl Contract {
     // -------------------------------------------------------------------------
 
     pub fn get_product(&self, product_id: ProductId) -> Option<Product> {
-        self.products.get(&product_id).cloned()
+        self.internal_get_product(&product_id)
     }
 
     pub fn get_product_default_price(&self, product_id: ProductId) -> Option<PriceId> {
-        self.products
-            .get(&product_id)
+        self.internal_get_product(&product_id)
             .and_then(|product| product.default_price_id.clone())
     }
 
@@ -305,7 +304,7 @@ impl Contract {
         self.collect_paginated(from_index, limit, total_len, |index| {
             self.product_ids
                 .get(index)
-                .and_then(|id| self.products.get(id).cloned())
+                .and_then(|id| self.internal_get_product(id))
         })
     }
 }
@@ -313,10 +312,16 @@ impl Contract {
 // Internal helpers (also used from [`crate::prices`]).
 
 impl Contract {
+    pub(crate) fn internal_get_product(&self, id: &ProductId) -> Option<Product> {
+        self.products.get(id).cloned().map(Into::into)
+    }
+
+    pub(crate) fn internal_set_product(&mut self, id: ProductId, product: Product) {
+        self.products.insert(id, product.into());
+    }
+
     pub(crate) fn require_product(&self, product_id: &ProductId) -> Product {
-        self.products
-            .get(product_id)
-            .cloned()
+        self.internal_get_product(product_id)
             .unwrap_or_else(|| env::panic_str("Product not found in the catalog"))
     }
 
@@ -326,13 +331,13 @@ impl Contract {
         product_id: &ProductId,
         price_id: &PriceId,
     ) {
-        let mut product = match self.products.get(product_id).cloned() {
+        let mut product = match self.internal_get_product(product_id) {
             Some(existing) => existing,
             None => return,
         };
         if product.default_price_id.as_ref() == Some(price_id) {
             product.default_price_id = None;
-            self.products.insert(product_id.clone(), product);
+            self.internal_set_product(product_id.clone(), product);
         }
     }
 

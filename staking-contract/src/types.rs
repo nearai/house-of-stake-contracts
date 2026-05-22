@@ -1,5 +1,6 @@
-//! Catalog and lifecycle enums.
+//! Catalog, lifecycle, and versioned on-chain storage types.
 
+use crate::config::Config;
 use near_sdk::json_types::{U64, U128};
 use near_sdk::{AccountId, NearToken, near};
 
@@ -78,6 +79,100 @@ pub enum ValidatorStatus {
 pub enum TransactionStatus {
     Idle,
     Busy,
+}
+
+/// NEP-145-style prepaid storage for a registered user.
+#[derive(Clone)]
+#[near(serializers = [borsh, json])]
+pub struct Account {
+    pub storage_deposit: NearToken,
+}
+
+impl Default for Account {
+    fn default() -> Self {
+        Self {
+            storage_deposit: NearToken::from_near(0),
+        }
+    }
+}
+
+/// Allowlisted staking pool row (pool contract account id + share-pool accounting).
+#[derive(Clone)]
+#[near(serializers = [borsh, json])]
+pub struct Validator {
+    /// Staking pool contract account (= catalog `validator_id` / lock `validator_id`).
+    pub validator_id: ValidatorId,
+    /// Whether new locks are allowed (**`Active`**) or blocked (**`Paused`**), or this pool is **`Removed`**.
+    pub status: ValidatorStatus,
+
+    /// Total issued stake.dao **share units** for this pool (integer; same scale as per-user shares).
+    pub total_shares: U128,
+    /// Cached **staked NEAR** for this contract’s account on the pool, from the last successful
+    /// pool `get_account` total balance (plus bookkeeping updates on stake/unstake/withdraw paths). Used with
+    /// `pending_*` for share mint/burn pricing—not updated until the next pool read or accounting step.
+    pub total_staked_balance: NearToken,
+    /// `block_timestamp` (nanoseconds) when `total_staked_balance` was last synced from the pool (or validator was added).
+    pub last_balance_refresh_ns: U64,
+
+    /// NEAR waiting to be sent to the pool via **`deposit_and_stake`** (aggregated locks; net-settled vs
+    /// `pending_to_unstake` in `Contract::try_epoch_stake_or_unstake` in `epoch.rs`).
+    pub pending_to_stake: NearToken,
+    /// NEAR queued to leave the pool via **`unstake`** (user unlocks etc.; net-settled vs `pending_to_stake`).
+    pub pending_to_unstake: NearToken,
+    /// Epoch height recorded after the last successful pool `unstake` callback; gates further unstakes
+    /// (with [`Config::epoch_unstake_settle_epochs`]).
+    pub last_unstake_epoch: u64,
+    /// Last NEAR `epoch_height` for which this validator completed the **pre–user-action** pipeline for a request:
+    /// **sync** `total_staked_balance` from the pool (at most once per epoch for catalog flows), **withdraw**
+    /// from the pool when eligible, then at most one **net** pool `deposit_and_stake` / `unstake` / net-zero
+    /// clearance for that epoch (same mutex the staking pool enforces per account). Successful callbacks
+    /// on stake, unstake, and net-zero settlement set this to `env::epoch_height()`. When this equals the
+    /// current epoch, user flows **skip** another pool `get_account` refresh for this validator until the
+    /// next NEAR epoch.
+    pub last_settlement_epoch: u64,
+    /// NEAR that has been unstaked on the pool side and is expected to be moved by pool `withdraw`
+    /// into this contract.
+    pub pending_to_withdraw: NearToken,
+    /// NEAR already moved from pool into this contract and now claimable by users.
+    pub pending_to_claim: NearToken,
+    /// Accounts that currently have at least one non-empty tranche in **`user_pending_unstake`** for this pool.
+    pub accounts_with_pending_unstake: Vec<AccountId>,
+
+    /// At most one in-flight cross-contract **mutating** pool pipeline for this validator (`Idle` vs `Busy`).
+    pub tx_status: TransactionStatus,
+}
+
+impl Validator {
+    /// Total user-exit liability across all buckets.
+    pub fn pending_user_liability_yocto(&self) -> u128 {
+        self.pending_to_unstake
+            .as_yoctonear()
+            .saturating_add(self.pending_to_withdraw.as_yoctonear())
+            .saturating_add(self.pending_to_claim.as_yoctonear())
+    }
+
+    /// Liability still outside this contract (pool stake + pool unstaked).
+    pub fn pending_not_in_contract_yocto(&self) -> u128 {
+        self.pending_to_unstake
+            .as_yoctonear()
+            .saturating_add(self.pending_to_withdraw.as_yoctonear())
+    }
+
+    pub fn gross_stake_yocto(&self) -> u128 {
+        self.total_staked_balance
+            .as_yoctonear()
+            .saturating_add(self.pending_to_stake.as_yoctonear())
+    }
+
+    /// NEAR backing **remaining** circulating shares: gross effective stake minus user liability that
+    /// is still outside this contract (`pending_to_unstake + pending_to_withdraw`).
+    ///
+    /// **Solvency:** share pricing must not use gross backing alone after shares burn down.
+    /// `pending_to_claim` is already in-contract cash and should not reduce pool-side backing again.
+    pub fn net_stake_yocto(&self) -> u128 {
+        self.gross_stake_yocto()
+            .saturating_sub(self.pending_not_in_contract_yocto())
+    }
 }
 
 /// One slice of a user's post-unlock NEAR liability; claims from `pending_to_claim` are allowed
@@ -179,14 +274,15 @@ pub struct Lock {
     pub status: LockStatus,
 }
 
-/// Payload chained after [`Contract::promise_validator_per_epoch_settlement_then`] for catalog lock,
-/// unlock, or **user withdraw**: either the full pre-user pipeline ran (balance sync → withdraw-if-ready →
+/// User-facing tail chained after [`Contract::promise_validator_per_epoch_settlement_then`]:
+/// either the full pre-user pipeline ran (balance sync → withdraw-if-ready →
 /// [`crate::epoch::Contract::try_epoch_stake_or_unstake`]), or the pool had **already** settled this NEAR epoch and
 /// the contract skipped that pipeline and jumped straight here (cached **`total_staked_balance`**).
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
-pub enum PerEpochContinue {
-    CatalogLockMint {
+pub enum UserAction {
+    /// Mint a catalog lock after settlement (`lock_for_product` / `lock_for_subscription`).
+    CommitLock {
         validator_id: ValidatorId,
         buyer: AccountId,
         locked: NearToken,
@@ -217,10 +313,10 @@ pub enum PerEpochContinue {
     },
 }
 
-impl PerEpochContinue {
+impl UserAction {
     pub fn validator_id(&self) -> &ValidatorId {
         match self {
-            Self::CatalogLockMint { validator_id, .. }
+            Self::CommitLock { validator_id, .. }
             | Self::UnlockQueueUnstake { validator_id, .. }
             | Self::WithdrawUserTransfer { validator_id, .. }
             | Self::SettleOnly { validator_id }
@@ -232,9 +328,200 @@ impl PerEpochContinue {
     /// Used to refund when the async pre-user pipeline aborts before mint / upgrade commits.
     pub fn payable_refund(&self) -> Option<(AccountId, NearToken)> {
         match self {
-            Self::CatalogLockMint { buyer, locked, .. } => Some((buyer.clone(), *locked)),
+            Self::CommitLock { buyer, locked, .. } => Some((buyer.clone(), *locked)),
             Self::SubscriptionUpgrade { buyer, deposit, .. } => Some((buyer.clone(), *deposit)),
             _ => None,
         }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Versioned borsh wrappers (`LookupMap` values and `Contract.config`)
+//
+// Append new variants at the end when layouts change (do not reorder). See [`upgrade.rs`](upgrade.rs)
+// for migration patterns (compare [`voting-contract`](../voting-contract/src/proposal.rs) `VProposal`).
+//
+// [`VConfig`]: [`AsRef`] / [`AsMut`] for in-place `Contract.config` access. Map values: [`From`] / `into()` only.
+// Do not match `V*::V0` outside this module.
+// -----------------------------------------------------------------------------
+
+#[derive(Clone)]
+#[near(serializers = [borsh])]
+pub enum VConfig {
+    V0(Config),
+}
+
+impl From<Config> for VConfig {
+    fn from(value: Config) -> Self {
+        Self::V0(value)
+    }
+}
+
+impl From<VConfig> for Config {
+    fn from(value: VConfig) -> Self {
+        match value {
+            VConfig::V0(inner) => inner,
+        }
+    }
+}
+
+impl AsRef<Config> for VConfig {
+    fn as_ref(&self) -> &Config {
+        match self {
+            VConfig::V0(c) => c,
+        }
+    }
+}
+
+impl AsMut<Config> for VConfig {
+    fn as_mut(&mut self) -> &mut Config {
+        match self {
+            VConfig::V0(c) => c,
+        }
+    }
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh])]
+pub enum VValidator {
+    V0(Validator),
+}
+
+impl From<Validator> for VValidator {
+    fn from(value: Validator) -> Self {
+        Self::V0(value)
+    }
+}
+
+impl From<VValidator> for Validator {
+    fn from(value: VValidator) -> Self {
+        match value {
+            VValidator::V0(inner) => inner,
+        }
+    }
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh])]
+pub enum VProduct {
+    V0(Product),
+}
+
+impl From<Product> for VProduct {
+    fn from(value: Product) -> Self {
+        Self::V0(value)
+    }
+}
+
+impl From<VProduct> for Product {
+    fn from(value: VProduct) -> Self {
+        match value {
+            VProduct::V0(inner) => inner,
+        }
+    }
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh])]
+pub enum VPrice {
+    V0(Price),
+}
+
+impl From<Price> for VPrice {
+    fn from(value: Price) -> Self {
+        Self::V0(value)
+    }
+}
+
+impl From<VPrice> for Price {
+    fn from(value: VPrice) -> Self {
+        match value {
+            VPrice::V0(inner) => inner,
+        }
+    }
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh])]
+pub enum VAccount {
+    V0(Account),
+}
+
+impl From<Account> for VAccount {
+    fn from(value: Account) -> Self {
+        Self::V0(value)
+    }
+}
+
+impl From<VAccount> for Account {
+    fn from(value: VAccount) -> Self {
+        match value {
+            VAccount::V0(inner) => inner,
+        }
+    }
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh])]
+pub enum VSubscription {
+    V0(Subscription),
+}
+
+impl From<Subscription> for VSubscription {
+    fn from(value: Subscription) -> Self {
+        Self::V0(value)
+    }
+}
+
+impl From<VSubscription> for Subscription {
+    fn from(value: VSubscription) -> Self {
+        match value {
+            VSubscription::V0(inner) => inner,
+        }
+    }
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh])]
+pub enum VLock {
+    V0(Lock),
+}
+
+impl From<Lock> for VLock {
+    fn from(value: Lock) -> Self {
+        Self::V0(value)
+    }
+}
+
+impl From<VLock> for Lock {
+    fn from(value: VLock) -> Self {
+        match value {
+            VLock::V0(inner) => inner,
+        }
+    }
+}
+
+#[cfg(test)]
+mod versioned_tests {
+    use super::*;
+    use near_sdk::json_types::U64;
+
+    #[test]
+    fn vconfig_v0_roundtrip() {
+        let owner: AccountId = "owner.near".parse().unwrap();
+        let cfg = Config {
+            owner_account_id: owner.clone(),
+            proposed_new_owner_account_id: None,
+            guardians: vec![],
+            min_lock_duration_ns: U64(1),
+            max_lock_duration_ns: U64(2),
+            epoch_unstake_settle_epochs: 4,
+            min_storage_deposit: NearToken::from_near(1),
+            per_lock_storage_stake: NearToken::from_near(0),
+            min_lock_amount: NearToken::from_near(1),
+        };
+        let v: VConfig = cfg.clone().into();
+        let back: Config = v.into();
+        assert_eq!(back.owner_account_id, owner);
     }
 }

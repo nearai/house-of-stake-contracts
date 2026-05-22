@@ -38,7 +38,8 @@ impl Contract {
 
         let dur = lock_duration_ns.0;
         require!(
-            dur >= self.config.min_lock_duration_ns.0 && dur <= self.config.max_lock_duration_ns.0,
+            dur >= self.internal_get_config().min_lock_duration_ns.0
+                && dur <= self.internal_get_config().max_lock_duration_ns.0,
             "Lock duration is outside the allowed range for this contract"
         );
 
@@ -80,7 +81,7 @@ impl Contract {
             return self
                 .promise_validator_per_epoch_settlement_then(
                     validator_id.clone(),
-                    PerEpochContinue::CatalogLockMint {
+                    UserAction::CommitLock {
                         validator_id,
                         buyer,
                         locked,
@@ -131,7 +132,7 @@ impl Contract {
                 "Only the subscription owner can perform this action"
             );
             if now < sub.end_ns.0 {
-                if let Some(prev) = self.locks.get(&sub.last_lock_id) {
+                if let Some(prev) = self.internal_get_lock(&sub.last_lock_id) {
                     require!(
                         prev.status != LockStatus::Active,
                         "This subscription period already has an active lock"
@@ -238,7 +239,7 @@ impl Contract {
             return self
                 .promise_validator_per_epoch_settlement_then(
                     validator_id.clone(),
-                    PerEpochContinue::CatalogLockMint {
+                    UserAction::CommitLock {
                         validator_id,
                         buyer,
                         locked,
@@ -252,11 +253,19 @@ impl Contract {
     }
 
     pub fn get_lock(&self, lock_id: LockId) -> Option<Lock> {
-        self.locks.get(&lock_id).cloned()
+        self.internal_get_lock(&lock_id)
     }
 }
 
 impl Contract {
+    pub(crate) fn internal_get_lock(&self, id: &LockId) -> Option<Lock> {
+        self.locks.get(id).cloned().map(Into::into)
+    }
+
+    pub(crate) fn internal_set_lock(&mut self, id: LockId, lock: Lock) {
+        self.locks.insert(id, lock.into());
+    }
+
     pub(crate) fn lock_entry_preamble(&self) -> (AccountId, NearToken) {
         self.assert_not_paused();
         let buyer = env::predecessor_account_id();
@@ -264,7 +273,7 @@ impl Contract {
 
         let locked = env::attached_deposit();
         require!(
-            locked.as_yoctonear() >= self.config.min_lock_amount.as_yoctonear(),
+            locked.as_yoctonear() >= self.internal_get_config().min_lock_amount.as_yoctonear(),
             "Attached NEAR is below the contract minimum lock amount (min_lock_amount)"
         );
         (buyer, locked)
@@ -285,8 +294,7 @@ impl Contract {
             (None, Some(prod_id)) => {
                 // Resolve via the product's default_price_id, then sanity-check the price.
                 let pr_id = self
-                    .products
-                    .get(&prod_id)
+                    .internal_get_product(&prod_id)
                     .and_then(|p| p.default_price_id.clone())
                     .unwrap_or_else(|| env::panic_str("No default price for this product"));
                 let pr = self.require_price(&pr_id);
@@ -354,14 +362,14 @@ impl Contract {
             order: order.clone(),
             status: LockStatus::Active,
         };
-        self.locks.insert(lock_id.clone(), lock);
+        self.internal_set_lock(lock_id.clone(), lock);
 
         // Catalog usage counters + persist updated price, product, and validator state.
         price.usage_count = price.usage_count.saturating_add(1);
         product.usage_count = product.usage_count.saturating_add(1);
 
-        self.prices.insert(price.price_id.clone(), price);
-        self.products.insert(product.product_id.clone(), product);
+        self.internal_set_price(price.price_id.clone(), price);
+        self.internal_set_product(product.product_id.clone(), product);
 
         // Drives prepaid lock storage (`per_lock_storage_stake` × count) for this account.
         let user_lock_count_before = self.user_lock_count.get(&buyer).copied().unwrap_or(0);
@@ -375,7 +383,7 @@ impl Contract {
                 subscription.account_id.clone(),
                 subscription.product_id.clone(),
             );
-            self.subscriptions.insert(sub_id.clone(), subscription);
+            self.internal_set_subscription(sub_id.clone(), subscription);
             if is_new_index {
                 self.subscription_by_account_product.insert(sub_key, sub_id);
             }

@@ -35,7 +35,7 @@ impl Contract {
         let mut sub = self.project_subscription_view_now(sub);
         Self::assert_subscription_active(&sub);
         sub.cancel_at_period_end = true;
-        self.subscriptions.insert(sid.clone(), sub.clone());
+        self.internal_set_subscription(sid.clone(), sub.clone());
         crate::events::log_subscription_cancel(&buyer, &product_id);
     }
 
@@ -53,7 +53,7 @@ impl Contract {
             "Subscription is not scheduled to cancel at period end"
         );
         sub.cancel_at_period_end = false;
-        self.subscriptions.insert(sid.clone(), sub.clone());
+        self.internal_set_subscription(sid.clone(), sub.clone());
         crate::events::log_subscription_resume(&buyer, &product_id);
     }
 
@@ -69,7 +69,7 @@ impl Contract {
 
         let deposit = env::attached_deposit();
         require!(
-            deposit.as_yoctonear() >= self.config.min_lock_amount.as_yoctonear(),
+            deposit.as_yoctonear() >= self.internal_get_config().min_lock_amount.as_yoctonear(),
             "Attached NEAR is below the contract minimum lock amount (min_lock_amount)"
         );
 
@@ -123,7 +123,7 @@ impl Contract {
             return self
                 .promise_validator_per_epoch_settlement_then(
                     validator_id.clone(),
-                    PerEpochContinue::SubscriptionUpgrade {
+                    UserAction::SubscriptionUpgrade {
                         validator_id,
                         buyer,
                         deposit,
@@ -157,7 +157,7 @@ impl Contract {
         );
 
         sub.pending_downgrade_price_id = Some(target_price_id.clone());
-        self.subscriptions.insert(sid, sub.clone());
+        self.internal_set_subscription(sid, sub.clone());
 
         crate::events::log_subscription_downgrade_scheduled(&buyer, &target_price_id);
     }
@@ -167,9 +167,7 @@ impl Contract {
     // -------------------------------------------------------------------------
 
     pub fn get_subscription(&self, subscription_id: SubscriptionId) -> Option<Subscription> {
-        self.subscriptions
-            .get(subscription_id.as_str())
-            .cloned()
+        self.internal_get_subscription(&subscription_id)
             .map(|sub| self.project_subscription_view_now(sub))
     }
 
@@ -183,9 +181,7 @@ impl Contract {
             .subscription_by_account_product
             .get(&(account_id, product_id.clone()))?
             .clone();
-        self.subscriptions
-            .get(sid.as_str())
-            .cloned()
+        self.internal_get_subscription(&sid)
             .map(|sub| self.project_subscription_view_now(sub))
     }
 
@@ -194,7 +190,7 @@ impl Contract {
         account_id: AccountId,
         price_id: PriceId,
     ) -> Option<Subscription> {
-        let price = self.prices.get(&price_id)?;
+        let price = self.internal_get_price(&price_id)?;
         self.get_subscription_for_product(account_id, price.product_id.clone())
     }
 }
@@ -226,6 +222,18 @@ impl Contract {
 }
 
 impl Contract {
+    pub(crate) fn internal_get_subscription(&self, id: &SubscriptionId) -> Option<Subscription> {
+        self.subscriptions.get(id).cloned().map(Into::into)
+    }
+
+    pub(crate) fn internal_set_subscription(
+        &mut self,
+        id: SubscriptionId,
+        subscription: Subscription,
+    ) {
+        self.subscriptions.insert(id, subscription.into());
+    }
+
     /// Resolve `(account, product)` index, load subscription, verify caller ownership. Panics with stable user-facing messages.
     pub(crate) fn require_subscription_owned_by(
         &self,
@@ -249,9 +257,7 @@ impl Contract {
         &self,
         subscription_id: &SubscriptionId,
     ) -> Subscription {
-        self.subscriptions
-            .get(subscription_id.as_str())
-            .cloned()
+        self.internal_get_subscription(subscription_id)
             .unwrap_or_else(|| env::panic_str("Subscription not found"))
     }
 
@@ -306,8 +312,8 @@ impl Contract {
         sub.price_id = new_price_id.clone();
 
         let lock_id_out = lock.lock_id.clone();
-        self.locks.insert(lock_id_out.clone(), lock);
-        self.subscriptions.insert(subscription_id, sub);
+        self.internal_set_lock(lock_id_out.clone(), lock);
+        self.internal_set_subscription(subscription_id, sub);
 
         crate::events::log_subscription_upgrade(&buyer, &new_price_id);
         crate::events::log_lock(lock_id_out.as_str(), &buyer);
@@ -326,7 +332,7 @@ impl Contract {
         subscription: &mut Subscription,
     ) {
         // First subscribe persists the subscription only at the end of `commit_catalog_lock`.
-        let Some(stored) = self.subscriptions.get(subscription_id.as_str()).cloned() else {
+        let Some(stored) = self.internal_get_subscription(subscription_id) else {
             return;
         };
         let Some(low_id) = stored.pending_downgrade_price_id.clone() else {
@@ -354,8 +360,7 @@ impl Contract {
         let mut stored_update = stored;
         stored_update.price_id = low_id;
         stored_update.pending_downgrade_price_id = None;
-        self.subscriptions
-            .insert(subscription_id.clone(), stored_update);
+        self.internal_set_subscription(subscription_id.clone(), stored_update);
     }
 
     /// Phase B: at scheduled downgrade renewal, release catalog **tier-gap** stake (min high − min low for
@@ -378,7 +383,7 @@ impl Contract {
             return;
         }
 
-        let mut lock = match self.locks.get(&sub.last_lock_id).cloned() {
+        let mut lock = match self.internal_get_lock(&sub.last_lock_id) {
             Some(l) => l,
             None => return,
         };
@@ -411,7 +416,7 @@ impl Contract {
         if lock.shares.0 == 0 {
             lock.status = LockStatus::UnlockRequested;
         }
-        self.locks.insert(lock.lock_id.clone(), lock);
+        self.internal_set_lock(lock.lock_id.clone(), lock);
 
         crate::events::log_subscription_downgrade_prorate(buyer, &sub.product_id, near_amt);
     }
