@@ -57,10 +57,7 @@ Implemented in code:
 - **EVENT_JSON** for lock/unlock, catalog, validators, epoch ops, claim/withdraw, pool withdraw-in ([`events.rs`](src/events.rs)) — `standard: "stake.dao"`, `version: "1.0.0"`, nested `data`
 - **`get_products`**, **`get_product_default_price`**, catalog **`unarchive_*`**, **`set_product_default_price`**; **`lock_for_product`** / **`lock_for_subscription`** accept explicit **`price_id`** or **`product_id`** (uses **`Product.default_price_id`**) ([`products.rs`](src/products.rs), [`lock.rs`](src/lock.rs))
 
-Still to refine per [docs/PLAN.md](docs/PLAN.md) / [docs/ACTION_ITEMS.md](docs/ACTION_ITEMS.md):
-
-- **Calendar-accurate** subscription billing (average-month linear helper only in [`subscriptions.rs`](src/subscriptions.rs); **`lock_for_subscription`** exists but uses linear months)
-- Longer **sandbox E2E** (unlock → wait `epoch_unstake_settle_epochs` → optional `epoch_settle` → `withdraw(validator_id)`) — see [`tests/sandbox_mock_pool.rs`](tests/sandbox_mock_pool.rs); extend as needed
+**Before mainnet:** see [docs/ACTION_ITEMS.md](docs/ACTION_ITEMS.md) for the production readiness checklist (audit, real-pool testnet validation, deploy runbook, E2E tests, and launch follow-ups).
 
 ## Workspace
 
