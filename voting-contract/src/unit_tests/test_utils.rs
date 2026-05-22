@@ -1,34 +1,15 @@
 #![cfg(test)]
-//! Fixtures for fast unit tests against `Contract` without a sandbox.
-//!
-//! The cross-contract surface is small: `ext_venear::get_snapshot()` returns
-//! `(MerkleTreeSnapshot, VGlobalState)`, and `on_get_snapshot` writes that into
-//! `proposal.snapshot_and_state`. Once that field is set, the rest of the
-//! voting logic is purely local — so most tests can seed a `Proposal` with a
-//! ready-made `SnapshotAndState` and invoke `vote()` / siblings directly.
-//!
-//! Public surface kept intentionally small:
-//! - `fresh_contract()` — the single contract constructor.
-//! - `snapshot_with_voters()` — the single fixture builder.
-//! - `create_proposal()` / `approve_proposal()` — composable proposal-lifecycle
-//!   steps. `approve_proposal` takes an optional fixture: pass `Some(&f)` to
-//!   also deliver the venear snapshot callback, or `None` to stop after
-//!   approval (e.g. for queueing or pre-snapshot tests).
-//! - `cast_vote()` / `cast_vote_at()` — vote with the standard deposit/context.
-
 use crate::Contract;
 use crate::config::Config;
 use crate::metadata::ProposalMetadata;
-use crate::proposal::{
-    MajorityType, ProposalFlow, ProposalId, ProposalStatus, is_active_status,
-};
+use crate::proposal::{MajorityType, ProposalFlow, ProposalId, ProposalStatus, is_active_status};
 use chrono::{FixedOffset, NaiveDate};
-use common::voting::VoteOption;
 use common::Bps;
 pub use common::test_utils::{
-    abstain_voter, acc, against_voter, council, current_account, for_voter, guardian, owner,
-    proposer, reviewer, set_ctx, voter, SnapshotFixture, VMContextBuilder, VoterSpec,
+    SnapshotFixture, VMContextBuilder, VoterSpec, abstain_voter, acc, against_voter, council,
+    current_account, for_voter, guardian, owner, proposer, reviewer, set_ctx, voter,
 };
+use common::voting::VoteOption;
 use near_sdk::json_types::U64;
 use near_sdk::{AccountId, NearToken};
 

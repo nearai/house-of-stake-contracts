@@ -9,7 +9,7 @@ pub mod proposal;
 pub mod queue;
 mod reviewer;
 #[cfg(test)]
-mod test_utils;
+mod unit_tests;
 mod upgrade;
 mod votes;
 
