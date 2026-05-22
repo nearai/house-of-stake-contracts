@@ -79,8 +79,8 @@ pub mod callbacks {
     pub const ON_SUBSCRIPTION_UPGRADE_AFTER_SETTLE: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// After user-flow tail promise completes: release pipeline `Busy`.
     pub const ON_EPOCH_PIPELINE_TERMINAL_RELEASE: Gas = BASE_GAS;
-    /// Release pipeline `Busy` and pass lock id through to caller.
-    pub const ON_EPOCH_PIPELINE_RELEASE_WITH_LOCK_ID: Gas = BASE_GAS;
+    /// Release pipeline `Busy`, return lock id, or refund payable entry on tail failure (transfer).
+    pub const ON_EPOCH_PIPELINE_RELEASE_WITH_LOCK_ID: Gas = Gas::from_gas(BASE_GAS.as_gas() * 2);
 }
 
 impl Contract {

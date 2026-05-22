@@ -92,12 +92,13 @@ pub trait ExtSelfEpoch {
     ) -> Promise;
     /// **[Pipeline 6]** After **4** tail promise completes: sets pipeline **`Idle`**.
     fn on_epoch_pipeline_terminal_release(&mut self, validator_id: ValidatorId);
-    /// **[Pipeline 6]** Same as `on_epoch_pipeline_terminal_release`, but preserves lock id return.
+    /// **[Pipeline 6]** Release **`Busy`** and return lock id from mint/upgrade tail; refund on tail failure.
     fn on_epoch_pipeline_release_with_lock_id(
         &mut self,
         #[callback_result] lock_id_result: Result<LockId, PromiseError>,
         validator_id: ValidatorId,
-    ) -> LockId;
+        cont: PerEpochContinue,
+    ) -> PromiseOrValue<LockId>;
 }
 
 #[ext_contract(ext_staking_pool)]
@@ -529,6 +530,7 @@ impl Contract {
         }
 
         let pipeline_validator_id = cont.validator_id().clone();
+        let cont_for_release = cont.clone();
         let (tail, release_kind) = match cont {
             // Catalog purchase: mint shares / usage after validator state is fresh for this epoch.
             PerEpochContinue::CatalogLockMint {
@@ -607,7 +609,10 @@ impl Contract {
             ReleaseKind::WithLockId => tail.then(
                 ext_self_epoch::ext(env::current_account_id())
                     .with_static_gas(callbacks::ON_EPOCH_PIPELINE_RELEASE_WITH_LOCK_ID)
-                    .on_epoch_pipeline_release_with_lock_id(pipeline_validator_id),
+                    .on_epoch_pipeline_release_with_lock_id(
+                        pipeline_validator_id,
+                        cont_for_release,
+                    ),
             ),
         }
     }
@@ -643,17 +648,27 @@ impl Contract {
         self.release_validator_pool_pipeline(&validator_id);
     }
 
-    /// **[Pipeline 6]** Release pipeline and preserve lock id from mint/upgrade tails.
+    /// **[Pipeline 6]** Release pipeline and return lock id from mint/upgrade tails; refund payable entry on tail failure.
     #[private]
     pub fn on_epoch_pipeline_release_with_lock_id(
         &mut self,
         #[callback_result] lock_id_result: Result<LockId, PromiseError>,
         validator_id: ValidatorId,
-    ) -> LockId {
-        self.release_validator_pool_pipeline(&validator_id);
+        cont: PerEpochContinue,
+    ) -> PromiseOrValue<LockId> {
         match lock_id_result {
-            Ok(lock_id) => lock_id,
-            Err(_) => env::panic_str("Lock pipeline callback failed"),
+            Ok(lock_id) => {
+                self.release_validator_pool_pipeline(&validator_id);
+                PromiseOrValue::Value(lock_id)
+            }
+            Err(_) => {
+                events::log_epoch_operation("epoch_lock_pipeline_tail_failed", &validator_id);
+                let (buyer, amount) = cont
+                    .payable_refund()
+                    .expect("WithLockId continuation must be payable");
+                self.refund_payable_pipeline(&validator_id, buyer, amount)
+                    .into()
+            }
         }
     }
 }
