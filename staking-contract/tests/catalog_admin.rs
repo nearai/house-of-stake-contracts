@@ -51,7 +51,7 @@ fn delete_price_fails_when_in_use() {
     let (_product_id, price_id) = setup_catalog_near_oneoff(&mut c);
     common::register_buyer(&mut c);
 
-    let dur = c.config.min_lock_duration_ns.0.saturating_add(1);
+    let dur = c.get_config().min_lock_duration_ns.0.saturating_add(1);
     testing_env!(ctx(common::acct(common::BUYER), NearToken::from_near(50)));
     let _ = c.lock_for_product(Some(price_id.clone()), near_sdk::json_types::U64(dur), None);
 

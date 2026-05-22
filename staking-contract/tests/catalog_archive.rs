@@ -23,7 +23,7 @@ fn lock_for_product_rejects_archived_price() {
         acct(VALIDATOR_OWNER_ACCOUNT),
     );
 
-    let dur = c.config.min_lock_duration_ns.0.saturating_add(10_000);
+    let dur = c.get_config().min_lock_duration_ns.0.saturating_add(10_000);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
     c.lock_for_product(Some(price_id), U64(dur), None);
 }
@@ -42,7 +42,7 @@ fn lock_for_product_rejects_archived_product() {
         acct(VALIDATOR_OWNER_ACCOUNT),
     );
 
-    let dur = c.config.min_lock_duration_ns.0.saturating_add(10_000);
+    let dur = c.get_config().min_lock_duration_ns.0.saturating_add(10_000);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
     c.lock_for_product(Some(price_id), U64(dur), None);
 }

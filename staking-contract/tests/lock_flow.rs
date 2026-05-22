@@ -16,7 +16,7 @@ fn lock_for_product_happy_path_records_lock_and_usage() {
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
     register_buyer(&mut c);
 
-    let dur = c.config.min_lock_duration_ns.0.saturating_add(10_000);
+    let dur = c.get_config().min_lock_duration_ns.0.saturating_add(10_000);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
     let lock_id = unwrap_sync_lock_id(c.lock_for_product(Some(price_id.clone()), U64(dur), None));
 
@@ -39,7 +39,7 @@ fn lock_for_product_fails_without_storage_deposit() {
     let mut c = deploy();
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
 
-    let dur = c.config.min_lock_duration_ns.0.saturating_add(1);
+    let dur = c.get_config().min_lock_duration_ns.0.saturating_add(1);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
     c.lock_for_product(Some(price_id), U64(dur), None);
 }
@@ -54,7 +54,7 @@ fn lock_for_product_fails_when_paused() {
     testing_env!(ctx(acct(OWNER), NearToken::from_yoctonear(1)));
     c.pause();
 
-    let dur = c.config.min_lock_duration_ns.0.saturating_add(1);
+    let dur = c.get_config().min_lock_duration_ns.0.saturating_add(1);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
     c.lock_for_product(Some(price_id), U64(dur), None);
 }
@@ -111,7 +111,7 @@ fn unpause_allows_lock_again() {
     c.unpause();
     assert!(!c.is_paused());
 
-    let dur = c.config.min_lock_duration_ns.0.saturating_add(1);
+    let dur = c.get_config().min_lock_duration_ns.0.saturating_add(1);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
     let _ = unwrap_sync_lock_id(c.lock_for_product(Some(price_id), U64(dur), None));
 }
@@ -122,7 +122,7 @@ fn user_lock_count_increments_on_lock() {
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
     register_buyer(&mut c);
 
-    let dur = c.config.min_lock_duration_ns.0.saturating_add(1);
+    let dur = c.get_config().min_lock_duration_ns.0.saturating_add(1);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
     let _ = unwrap_sync_lock_id(c.lock_for_product(Some(price_id), U64(dur), None));
 

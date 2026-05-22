@@ -14,7 +14,7 @@ fn lock_pipeline_tail_failure_releases_busy_and_schedules_refund() {
 
     let mut validator = c.get_validator(pool.clone()).expect("validator").clone();
     validator.tx_status = TransactionStatus::Busy;
-    c.validators.insert(pool.clone(), validator);
+    c.validators.insert(pool.clone(), validator.into());
 
     let locked = NearToken::from_near(50);
     let cont = UserAction::CommitLock {
@@ -54,7 +54,7 @@ fn lock_pipeline_tail_success_releases_busy_and_returns_lock_id() {
 
     let mut validator = c.get_validator(pool.clone()).expect("validator").clone();
     validator.tx_status = TransactionStatus::Busy;
-    c.validators.insert(pool.clone(), validator);
+    c.validators.insert(pool.clone(), validator.into());
 
     let lock_id = "lock-test-1".to_string();
     let cont = UserAction::CommitLock {

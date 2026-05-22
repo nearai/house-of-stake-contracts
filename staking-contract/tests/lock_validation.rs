@@ -18,7 +18,7 @@ fn lock_for_product_rejects_duration_below_min() {
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
     register_buyer(&mut c);
 
-    let dur = c.config.min_lock_duration_ns.0.saturating_sub(1);
+    let dur = c.get_config().min_lock_duration_ns.0.saturating_sub(1);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
     c.lock_for_product(Some(price_id), U64(dur), None);
 }
@@ -30,7 +30,7 @@ fn lock_for_product_rejects_duration_above_max() {
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
     register_buyer(&mut c);
 
-    let dur = c.config.max_lock_duration_ns.0.saturating_add(1);
+    let dur = c.get_config().max_lock_duration_ns.0.saturating_add(1);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
     c.lock_for_product(Some(price_id), U64(dur), None);
 }
@@ -42,7 +42,7 @@ fn lock_for_product_rejects_deposit_below_min_lock_amount() {
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
     register_buyer(&mut c);
 
-    let dur = c.config.min_lock_duration_ns.0.saturating_add(10_000);
+    let dur = c.get_config().min_lock_duration_ns.0.saturating_add(10_000);
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
     c.lock_for_product(Some(price_id), U64(dur), None);
 }
@@ -91,7 +91,7 @@ fn lock_for_product_fails_when_validator_paused() {
     testing_env!(ctx(acct(OWNER), NearToken::from_yoctonear(1)));
     c.pause_validator(acct(POOL));
 
-    let dur = c.config.min_lock_duration_ns.0.saturating_add(10_000);
+    let dur = c.get_config().min_lock_duration_ns.0.saturating_add(10_000);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
     c.lock_for_product(Some(price_id), U64(dur), None);
 }

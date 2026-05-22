@@ -42,7 +42,7 @@ fn remove_validator_fails_while_pending_stake_exists() {
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
     register_buyer(&mut c);
 
-    let dur = c.config.min_lock_duration_ns.0.saturating_add(10_000);
+    let dur = c.get_config().min_lock_duration_ns.0.saturating_add(10_000);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
     let _ = c.lock_for_product(Some(price_id), U64(dur), None);
 

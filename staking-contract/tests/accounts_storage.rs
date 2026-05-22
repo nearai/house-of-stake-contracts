@@ -28,7 +28,7 @@ fn storage_withdraw_rejects_dropping_below_required_retention() {
     testing_env!(ctx(acct(BUYER), NearToken::from_millinear(200)));
     c.storage_deposit();
 
-    let dur = c.config.min_lock_duration_ns.0.saturating_add(1);
+    let dur = c.get_config().min_lock_duration_ns.0.saturating_add(1);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
     let _ = c.lock_for_product(Some(price_id), near_sdk::json_types::U64(dur), None);
 
