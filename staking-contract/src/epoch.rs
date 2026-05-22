@@ -10,7 +10,7 @@ use crate::gas::{callbacks, staking_pool};
 use crate::utils::{block_timestamp, epoch_height};
 use crate::*;
 use near_sdk::ext_contract;
-use near_sdk::json_types::{U64, U128};
+use near_sdk::json_types::U64;
 use near_sdk::{
     AccountId, NearToken, Promise, PromiseError, PromiseOrValue, env, is_promise_success, near,
     require,
@@ -42,19 +42,9 @@ pub trait ExtSelfEpoch {
         cont: PerEpochContinue,
     ) -> PromiseOrValue<bool>;
     /// **[Pipeline 3b]** Pool `deposit_and_stake` result: updates pending queues, bumps `last_settlement_epoch`.
-    fn on_deposit_and_stake(
-        &mut self,
-        validator_id: ValidatorId,
-        amount: NearToken,
-        absorb_unstake_yocto: U128,
-    ) -> bool;
+    fn on_deposit_and_stake(&mut self, validator_id: ValidatorId) -> bool;
     /// **[Pipeline 3c]** Pool `unstake` result: records `last_unstake_epoch`, adjusts pending queues.
-    fn on_unstake(
-        &mut self,
-        validator_id: ValidatorId,
-        amount: NearToken,
-        absorb_stake_yocto: U128,
-    ) -> bool;
+    fn on_unstake(&mut self, validator_id: ValidatorId) -> bool;
     /// **[Pipeline 4]** Fan-out to user tail (**5a** / **5b** / **5c**), then **6**.
     fn on_epoch_settlement_dispatch_continue(&mut self, cont: PerEpochContinue) -> Promise;
     /// **[Pipeline 5a]** Catalog mint; may re-enter **3** (`lock.rs`).
@@ -353,7 +343,6 @@ impl Contract {
         let pool_settle = if pending_stake_yocto > pending_unstake_yocto {
             let net = NearToken::from_yoctonear(pending_stake_yocto - pending_unstake_yocto);
             events::log_epoch_operation("epoch_settle_stake", &validator_id);
-            self.validators.insert(validator_id.clone(), validator);
             ext_staking_pool::ext(validator_id.clone())
                 .with_static_gas(staking_pool::DEPOSIT_AND_STAKE)
                 .with_attached_deposit(net)
@@ -361,11 +350,7 @@ impl Contract {
                 .then(
                     ext_self_epoch::ext(env::current_account_id())
                         .with_static_gas(callbacks::ON_DEPOSIT_AND_STAKE)
-                        .on_deposit_and_stake(
-                            validator_id.clone(),
-                            net,
-                            U128(pending_unstake_yocto),
-                        ),
+                        .on_deposit_and_stake(validator_id.clone()),
                 )
         } else {
             if validator.last_unstake_epoch > 0 {
@@ -382,7 +367,7 @@ impl Contract {
                 .then(
                     ext_self_epoch::ext(env::current_account_id())
                         .with_static_gas(callbacks::ON_UNSTAKE)
-                        .on_unstake(validator_id.clone(), net, U128(pending_stake_yocto)),
+                        .on_unstake(validator_id.clone()),
                 )
         };
 
@@ -433,90 +418,78 @@ impl Contract {
 
     /// **[Pipeline 3b]** `deposit_and_stake` callback (stays **`Busy`**).
     #[private]
-    pub fn on_deposit_and_stake(
-        &mut self,
-        validator_id: ValidatorId,
-        amount: NearToken,
-        absorb_unstake_yocto: U128,
-    ) -> bool {
+    pub fn on_deposit_and_stake(&mut self, validator_id: ValidatorId) -> bool {
         let ok = is_promise_success();
-        let mut validator = self.require_validator(&validator_id);
-
-        if ok {
-            let net_stake_yocto = amount.as_yoctonear();
-            let absorbed_unstake_yocto = absorb_unstake_yocto.0;
-            let pending_stake_yocto = validator.pending_to_stake.as_yoctonear();
-            let pending_unstake_yocto = validator.pending_to_unstake.as_yoctonear();
-            require!(
-                pending_stake_yocto >= net_stake_yocto.saturating_add(absorbed_unstake_yocto),
-                "After deposit: pending_to_stake underflow vs callback (contract accounting error)"
-            );
-            require!(
-                pending_unstake_yocto >= absorbed_unstake_yocto,
-                "After deposit: pending_to_unstake underflow vs absorb (contract accounting error)"
-            );
-            validator.pending_to_stake = NearToken::from_yoctonear(
-                pending_stake_yocto
-                    .saturating_sub(net_stake_yocto)
-                    .saturating_sub(absorbed_unstake_yocto),
-            );
-            validator.pending_to_unstake = NearToken::from_yoctonear(
-                pending_unstake_yocto.saturating_sub(absorbed_unstake_yocto),
-            );
-            validator.total_staked_balance = validator
-                .total_staked_balance
-                .checked_add(NearToken::from_yoctonear(net_stake_yocto))
-                .expect("total_staked_balance overflow after stake");
-            validator.last_settlement_epoch = epoch_height();
+        if !ok {
+            return false;
         }
+
+        let mut validator = self.require_validator(&validator_id);
+        let pending_stake_yocto = validator.pending_to_stake.as_yoctonear();
+        let pending_unstake_yocto = validator.pending_to_unstake.as_yoctonear();
+        require!(
+            pending_stake_yocto > pending_unstake_yocto,
+            "deposit_and_stake callback requires pending_to_stake > pending_to_unstake"
+        );
+        let net_stake_yocto = pending_stake_yocto - pending_unstake_yocto;
+        if pending_unstake_yocto > 0 {
+            validator.pending_to_claim = NearToken::from_yoctonear(
+                validator
+                    .pending_to_claim
+                    .as_yoctonear()
+                    .saturating_add(pending_unstake_yocto),
+            );
+        }
+        validator.pending_to_stake = NearToken::from_near(0);
+        validator.pending_to_unstake = NearToken::from_near(0);
+        validator.total_staked_balance = validator
+            .total_staked_balance
+            .checked_add(NearToken::from_yoctonear(net_stake_yocto))
+            .expect("total_staked_balance overflow after stake");
+        validator.last_settlement_epoch = epoch_height();
         self.validators.insert(validator_id, validator);
-        ok
+        true
     }
 
     // --- [Pipeline 3c] ---
 
     /// **[Pipeline 3c]** `unstake` callback (stays **`Busy`**).
     #[private]
-    pub fn on_unstake(
-        &mut self,
-        validator_id: ValidatorId,
-        amount: NearToken,
-        absorb_stake_yocto: U128,
-    ) -> bool {
+    pub fn on_unstake(&mut self, validator_id: ValidatorId) -> bool {
         let ok = is_promise_success();
-        let mut validator = self.require_validator(&validator_id);
-        if ok {
-            let current_epoch = epoch_height();
-            validator.last_unstake_epoch = current_epoch;
-            validator.last_settlement_epoch = current_epoch;
-            let net_unstake_yocto = amount.as_yoctonear();
-            let absorbed_stake_yocto = absorb_stake_yocto.0;
-            let pending_stake_yocto = validator.pending_to_stake.as_yoctonear();
-            let pending_unstake_yocto = validator.pending_to_unstake.as_yoctonear();
-            require!(
-                pending_unstake_yocto >= net_unstake_yocto.saturating_add(absorbed_stake_yocto),
-                "After unstake: pending_to_unstake underflow vs callback (contract accounting error)"
-            );
-            require!(
-                pending_stake_yocto >= absorbed_stake_yocto,
-                "After unstake: pending_to_stake underflow vs absorb (contract accounting error)"
-            );
-            validator.pending_to_unstake = NearToken::from_yoctonear(
-                pending_unstake_yocto
-                    .saturating_sub(net_unstake_yocto)
-                    .saturating_sub(absorbed_stake_yocto),
-            );
-            validator.pending_to_withdraw = NearToken::from_yoctonear(
-                validator
-                    .pending_to_withdraw
-                    .as_yoctonear()
-                    .saturating_add(net_unstake_yocto),
-            );
-            validator.pending_to_stake =
-                NearToken::from_yoctonear(pending_stake_yocto.saturating_sub(absorbed_stake_yocto));
+        if !ok {
+            return false;
         }
+
+        let mut validator = self.require_validator(&validator_id);
+        let current_epoch = epoch_height();
+        let pending_stake_yocto = validator.pending_to_stake.as_yoctonear();
+        let pending_unstake_yocto = validator.pending_to_unstake.as_yoctonear();
+        require!(
+            pending_unstake_yocto > pending_stake_yocto,
+            "unstake callback requires pending_to_unstake > pending_to_stake"
+        );
+        let net_unstake_yocto = pending_unstake_yocto - pending_stake_yocto;
+        if pending_stake_yocto > 0 {
+            validator.pending_to_claim = NearToken::from_yoctonear(
+                validator
+                    .pending_to_claim
+                    .as_yoctonear()
+                    .saturating_add(pending_stake_yocto),
+            );
+        }
+        validator.pending_to_unstake = NearToken::from_near(0);
+        validator.pending_to_stake = NearToken::from_near(0);
+        validator.pending_to_withdraw = NearToken::from_yoctonear(
+            validator
+                .pending_to_withdraw
+                .as_yoctonear()
+                .saturating_add(net_unstake_yocto),
+        );
+        validator.last_unstake_epoch = current_epoch;
+        validator.last_settlement_epoch = current_epoch;
         self.validators.insert(validator_id, validator);
-        ok
+        true
     }
 
     // --- [Pipeline 4] ---

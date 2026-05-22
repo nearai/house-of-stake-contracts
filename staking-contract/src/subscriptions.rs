@@ -329,8 +329,7 @@ impl Contract {
         let Some(low_id) = stored.pending_downgrade_price_id.clone() else {
             return;
         };
-        let completed_period_ns =
-            u128::from(stored.end_ns.0.saturating_sub(stored.start_ns.0));
+        let completed_period_ns = u128::from(stored.end_ns.0.saturating_sub(stored.start_ns.0));
         let high_price = self.require_price(&stored.price_id);
         let low_price = self.require_price(&low_id);
 
