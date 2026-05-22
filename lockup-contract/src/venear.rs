@@ -1,9 +1,9 @@
-use crate::venear_ext::{ext_venear, GAS_FOR_VENEAR_LOCKUP_UPDATE};
+use crate::venear_ext::{GAS_FOR_VENEAR_LOCKUP_UPDATE, ext_venear};
 use crate::*;
 use common::lockup_update::{LockupUpdateV1, VLockupUpdate};
-use common::{events, TimestampNs};
+use common::{TimestampNs, events};
 use near_sdk::json_types::U64;
-use near_sdk::{assert_one_yocto, near, NearToken, Promise};
+use near_sdk::{NearToken, Promise, assert_one_yocto, near};
 
 impl LockupContract {
     // get the amount of NEAR that is not locked in venear contract

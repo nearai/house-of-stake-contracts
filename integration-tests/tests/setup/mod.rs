@@ -1,9 +1,9 @@
 pub mod voting_helpers;
 
-#[allow(dead_code)]
-use common::voting::ProposalStatus;
 use common::Fraction;
 use common::TimestampNs;
+#[allow(dead_code)]
+use common::voting::ProposalStatus;
 use near_sdk::json_types::{Base58CryptoHash, U64};
 use near_sdk::{CryptoHash, Gas, NearToken, Timestamp};
 use near_workspaces::network::Sandbox;
@@ -639,10 +639,8 @@ impl VenearTestWorkspace {
             | ProposalStatus::Succeeded
             | ProposalStatus::Defeated
             | ProposalStatus::Executable => {
-                let voting_start: u64 = proposal["voting_start_time_ns"]
-                    .as_str()
-                    .unwrap()
-                    .parse()?;
+                let voting_start: u64 =
+                    proposal["voting_start_time_ns"].as_str().unwrap().parse()?;
                 let voting_duration: u64 =
                     proposal["voting_duration_ns"].as_str().unwrap().parse()?;
                 let timelock_duration: u64 =

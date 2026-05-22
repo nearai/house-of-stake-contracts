@@ -1,0 +1,29 @@
+name: Clippy
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.86.0
+        with:
+          components: clippy
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      # `integration-tests` depends on `near-workspaces` (Linux x86_64 / darwin-arm64 sandbox);
+      # exclude so `cargo clippy` works on all dev machines. Full workspace lints are non `-D` until
+      # historical warnings in `common` / `merkle-tree` / etc. are cleaned up.
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --all-features --exclude integration-tests

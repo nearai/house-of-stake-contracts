@@ -23,3 +23,13 @@ pushd voting-contract
 cargo near build non-reproducible-wasm
 popd
 cp target/near/voting_contract/voting_contract.wasm res/local/
+
+pushd staking-contract
+cargo near build non-reproducible-wasm
+popd
+cp target/near/staking_contract/staking_contract.wasm res/local/
+
+pushd mock-staking-pool-contract
+cargo near build non-reproducible-wasm
+popd
+cp target/near/mock_staking_pool_contract/mock_staking_pool_contract.wasm res/local/

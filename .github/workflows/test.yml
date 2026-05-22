@@ -1,0 +1,37 @@
+name: Test
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.86.0
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      # `res/local` is gitignored; integration tests need wasm from `cargo near build` (see
+      # `build_all.sh`). Plain `cargo build --target wasm32-unknown-unknown` can produce modules
+      # that fail with PrepareError(Deserialization) on the near-workspaces sandbox.
+      - name: Install cargo-near
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/cargo-near/releases/latest/download/cargo-near-installer.sh | sh
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          cargo near --version
+
+      - name: Build contract wasm for integration tests
+        run: bash build_all.sh
+
+      - name: Run all tests
+        run: make test

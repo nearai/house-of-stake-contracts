@@ -12,6 +12,8 @@ members = [
     "lockup-contract",
     "venear-contract",
     "voting-contract",
+    "staking-contract",
+    "mock-staking-pool-contract",
     "merkle-tree",
     "common",
     "integration-tests",

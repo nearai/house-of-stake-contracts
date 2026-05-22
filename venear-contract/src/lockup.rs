@@ -1,11 +1,13 @@
 use crate::account::AccountInternal;
 use crate::config::LockupContractConfig;
 use crate::*;
+use common::events;
 use common::lockup_update::{LockupUpdateV1, VLockupUpdate};
 use common::near_add;
-use common::{events, near_sub};
-use near_sdk::json_types::{Base58CryptoHash, U64};
-use near_sdk::{env, is_promise_success, Gas, IntoStorageKey, Promise};
+use common::near_sub;
+use near_sdk::json_types::Base58CryptoHash;
+use near_sdk::json_types::U64;
+use near_sdk::{Gas, IntoStorageKey, Promise, env, is_promise_success};
 
 const LOCKUP_DEPLOY_MIN_GAS: Gas = Gas::from_tgas(20);
 const ON_LOCKUP_DEPLOYED: Gas = Gas::from_tgas(15);

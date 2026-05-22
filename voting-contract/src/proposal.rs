@@ -1,6 +1,6 @@
 use crate::metadata::ProposalMetadata;
 use crate::*;
-use common::{events, near_add, near_sub, TimestampNs};
+use common::{TimestampNs, events, near_add, near_sub};
 use near_sdk::json_types::{Base64VecU8, U64};
 use near_sdk::{Gas, Promise};
 

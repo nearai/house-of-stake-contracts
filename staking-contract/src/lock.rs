@@ -1,0 +1,442 @@
+use crate::utils::{NS_PER_DAY_TIMESTAMP, block_timestamp, check_near_price_lock};
+use crate::*;
+use near_sdk::json_types::{U64, U128};
+use near_sdk::{AccountId, NearToken, PromiseOrValue, env, near, require};
+
+/// Stripe-style **billing anchor day** (1–31). Not the real UTC calendar day-of-month; it is a stable
+/// fingerprint from block time until civil-calendar billing is implemented (see `subscriptions` / `docs/ACTION_ITEMS.md`).
+fn anchor_day_from_timestamp(ts: u64) -> u8 {
+    let d = (ts / NS_PER_DAY_TIMESTAMP) % 31;
+    (d as u8 + 1).min(31)
+}
+
+#[near]
+impl Contract {
+    /// Lock NEAR for a one-off product purchase. Attach the NEAR to lock.
+    ///
+    /// Provide **exactly one** of **`price_id`** or **`product_id`**:
+    /// - **`price_id: Some`**, **`product_id: null`** — lock using that catalog price (same as always).
+    /// - **`price_id: null`**, **`product_id: Some`** — lock using [`Product::default_price_id`](crate::types::Product::default_price_id) for that product (`set_product_default_price`).
+    #[payable]
+    pub fn lock_for_product(
+        &mut self,
+        price_id: Option<PriceId>,
+        lock_duration_ns: U64,
+        product_id: Option<ProductId>,
+    ) -> PromiseOrValue<LockId> {
+        let resolved = self.resolve_price_id_for_lock(price_id, product_id);
+        self.lock_for_product_with_price_id(resolved, lock_duration_ns)
+    }
+
+    fn lock_for_product_with_price_id(
+        &mut self,
+        price_id: PriceId,
+        lock_duration_ns: U64,
+    ) -> PromiseOrValue<LockId> {
+        self.require_enough_gas_for_epoch_settlement();
+        let (buyer, locked) = self.lock_entry_preamble();
+
+        let dur = lock_duration_ns.0;
+        require!(
+            dur >= self.config.min_lock_duration_ns.0 && dur <= self.config.max_lock_duration_ns.0,
+            "Lock duration is outside the allowed range for this contract"
+        );
+
+        let (price, product) = self.get_active_price_and_product(&price_id);
+        require!(
+            price.price_type == PriceType::OneOff,
+            "Recurring prices: use lock_for_subscription with price_id or product_id"
+        );
+        require!(
+            price.billing_period.is_none(),
+            "One-off price must not set billing_period"
+        );
+
+        let validator_id = product.validator_id.clone();
+        self.assert_validator_active_for_lock(&validator_id);
+
+        let dur_u128 = u128::from(dur);
+        check_near_price_lock(&price, locked.as_yoctonear(), dur_u128)
+            .unwrap_or_else(|e| env::panic_str(e));
+
+        let order = OrderRef::ProductPurchase {
+            product_id: product.product_id.clone(),
+            price_id: price.price_id.clone(),
+        };
+        let _validator = self.require_validator_idle(&validator_id);
+        // WASM production: [`Contract::promise_validator_per_epoch_settlement_then`] then mint (`epoch.rs`).
+        // Host targets (`tests/*.rs`, `cargo check` on the host triple): `near_sdk::testing_env!` does not run
+        // returned promise chains—use synchronous commit (`finalize_lock` → `commit_catalog_lock`).
+        // The library is built **without** `cfg(test)` for integration tests, so this split uses `target_arch`
+        // (not `cfg(test)`): WASM builds always use the real promise path.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            return PromiseOrValue::Value(
+                self.finalize_lock(buyer, price, product, locked, dur_u128, order),
+            );
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            return self
+                .promise_validator_per_epoch_settlement_then(
+                    validator_id.clone(),
+                    PerEpochContinue::CatalogLockMint {
+                        validator_id,
+                        buyer,
+                        locked,
+                        duration_ns: dur_u128,
+                        order,
+                        subscription_followup: None,
+                    },
+                )
+                .into();
+        }
+    }
+
+    /// Lock NEAR for a **monthly recurring** catalog price (NEAR-denominated). One subscription per
+    /// `(account, product_id)`; [`Subscription::price_id`] is the active tier.
+    ///
+    /// Provide **exactly one** of **`price_id`** or **`product_id`** (same rules as [`Contract::lock_for_product`]).
+    #[payable]
+    pub fn lock_for_subscription(
+        &mut self,
+        price_id: Option<PriceId>,
+        product_id: Option<ProductId>,
+    ) -> PromiseOrValue<LockId> {
+        let resolved = self.resolve_price_id_for_lock(price_id, product_id);
+        self.lock_for_subscription_with_price_id(resolved)
+    }
+
+    fn lock_for_subscription_with_price_id(&mut self, price_id: PriceId) -> PromiseOrValue<LockId> {
+        self.require_enough_gas_for_epoch_settlement();
+        let (buyer, locked) = self.lock_entry_preamble();
+
+        let (price, product) = self.get_active_price_and_product(&price_id);
+        self.require_recurring_monthly_price(&price);
+
+        let validator_id = product.validator_id.clone();
+        self.assert_validator_active_for_lock(&validator_id);
+
+        let product_id = product.product_id.clone();
+        let sub_key = (buyer.clone(), product_id.clone());
+        let now = block_timestamp();
+
+        let (subscription, sub_id, is_new_index) = if let Some(sid_ref) =
+            self.subscription_by_account_product.get(&sub_key)
+        {
+            let sid = sid_ref.clone();
+            let mut sub = self.require_subscription_by_id(&sid);
+            require!(
+                sub.account_id == buyer,
+                "Only the subscription owner can perform this action"
+            );
+            if now < sub.end_ns.0 {
+                if let Some(prev) = self.locks.get(&sub.last_lock_id) {
+                    require!(
+                        prev.status != LockStatus::Active,
+                        "This subscription period already has an active lock"
+                    );
+                }
+                (sub, sid, false)
+            } else if sub.cancel_at_period_end {
+                // Period has ended with cancel-at-end: remove stale index and subscription so this call
+                // creates a fresh subscription (same path as first-time subscribe).
+                self.subscription_by_account_product.remove(&sub_key);
+                self.subscriptions.remove(sid.as_str());
+                let anchor = anchor_day_from_timestamp(now);
+                let end = crate::subscriptions::add_months_stripe_style(anchor, 1, now);
+                let sid_new = crate::ids::next_subscription_id(&mut self.id_nonce);
+                let sub_new = Subscription {
+                    subscription_id: sid_new.clone(),
+                    account_id: buyer.clone(),
+                    product_id: product.product_id.clone(),
+                    price_id: price_id.clone(),
+                    start_ns: U64(now),
+                    end_ns: U64(end),
+                    anchor_day: anchor,
+                    last_lock_id: String::new(),
+                    status: SubscriptionStatus::Active,
+                    cancel_at_period_end: false,
+                    pending_downgrade_price_id: None,
+                };
+                (sub_new, sid_new, true)
+            } else {
+                // Renewal window: extend billing period; downgrade prorate runs in
+                // [`commit_catalog_lock`] after settlement succeeds (see `apply_pending_downgrade_before_renewal_lock`).
+                let start = sub.end_ns.0.max(now);
+                let end = crate::subscriptions::add_months_stripe_style(sub.anchor_day, 1, start);
+                sub.start_ns = U64(start);
+                sub.end_ns = U64(end);
+                sub.status = SubscriptionStatus::Active;
+                (sub, sid, false)
+            }
+        } else {
+            let anchor = anchor_day_from_timestamp(now);
+            let end = crate::subscriptions::add_months_stripe_style(anchor, 1, now);
+            let sid = crate::ids::next_subscription_id(&mut self.id_nonce);
+            let sub = Subscription {
+                subscription_id: sid.clone(),
+                account_id: buyer.clone(),
+                product_id: product.product_id.clone(),
+                price_id: price_id.clone(),
+                start_ns: U64(now),
+                end_ns: U64(end),
+                anchor_day: anchor,
+                last_lock_id: String::new(),
+                status: SubscriptionStatus::Active,
+                cancel_at_period_end: false,
+                pending_downgrade_price_id: None,
+            };
+            (sub, sid, true)
+        };
+
+        if !is_new_index {
+            match &subscription.pending_downgrade_price_id {
+                Some(pending_low) => require!(
+                    price_id == *pending_low,
+                    "price_id must match the scheduled downgrade tier for this renewal"
+                ),
+                None => require!(
+                    price_id == subscription.price_id,
+                    "price_id must match current subscription tier"
+                ),
+            }
+        }
+
+        require!(
+            subscription.end_ns.0 > now,
+            "Subscription billing period has already ended"
+        );
+        let duration_ns = u128::from(subscription.end_ns.0.saturating_sub(now));
+        require!(duration_ns > 0, "Lock duration must be positive");
+
+        check_near_price_lock(&price, locked.as_yoctonear(), duration_ns)
+            .unwrap_or_else(|e| env::panic_str(e));
+
+        let order = OrderRef::Subscription {
+            subscription_id: sub_id.clone(),
+            price_id: price_id.clone(),
+            period_start_ns: subscription.start_ns,
+            period_end_ns: subscription.end_ns,
+        };
+
+        let _validator = self.require_validator_idle(&validator_id);
+        // Same host synchronous path as `lock_for_product_with_price_id` (see comment there).
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            return PromiseOrValue::Value(self.commit_catalog_lock(
+                buyer.clone(),
+                locked,
+                duration_ns,
+                order,
+                validator_id,
+                Some((subscription, sub_id.clone(), is_new_index)),
+            ));
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            return self
+                .promise_validator_per_epoch_settlement_then(
+                    validator_id.clone(),
+                    PerEpochContinue::CatalogLockMint {
+                        validator_id,
+                        buyer,
+                        locked,
+                        duration_ns,
+                        order,
+                        subscription_followup: Some((subscription, sub_id, is_new_index)),
+                    },
+                )
+                .into();
+        }
+    }
+
+    pub fn get_lock(&self, lock_id: LockId) -> Option<Lock> {
+        self.locks.get(&lock_id).cloned()
+    }
+}
+
+impl Contract {
+    pub(crate) fn lock_entry_preamble(&self) -> (AccountId, NearToken) {
+        self.assert_not_paused();
+        let buyer = env::predecessor_account_id();
+        self.ensure_min_storage_for_new_lock(&buyer);
+
+        let locked = env::attached_deposit();
+        require!(
+            locked.as_yoctonear() >= self.config.min_lock_amount.as_yoctonear(),
+            "Attached NEAR is below the contract minimum lock amount (min_lock_amount)"
+        );
+        (buyer, locked)
+    }
+
+    /// Picks the catalog price id for a lock from caller input.
+    ///
+    /// Exactly one of `price_id` or `product_id` must be `Some`. If only `product_id` is given,
+    /// the product's default catalog price is used; that price must belong to the same product.
+    fn resolve_price_id_for_lock(
+        &self,
+        price_id: Option<PriceId>,
+        product_id: Option<ProductId>,
+    ) -> PriceId {
+        match (price_id, product_id) {
+            // Use the explicitly chosen price; active-catalog checks happen when the lock is applied.
+            (Some(pid), None) => pid,
+            (None, Some(prod_id)) => {
+                // Resolve via the product's default_price_id, then sanity-check the price.
+                let pr_id = self
+                    .products
+                    .get(&prod_id)
+                    .and_then(|p| p.default_price_id.clone())
+                    .unwrap_or_else(|| env::panic_str("No default price for this product"));
+                let pr = self.require_price(&pr_id);
+                require!(
+                    pr.product_id == prod_id,
+                    "Default price does not belong to this product"
+                );
+                pr_id
+            }
+            // Both `price_id` and `product_id` — caller must pick one.
+            (Some(_), Some(_)) => env::panic_str("Provide only one of price_id or product_id"),
+            // Neither identifier given.
+            (None, None) => env::panic_str("Provide price_id or product_id"),
+        }
+    }
+
+    /// Commits catalog-lock **state**: mints pool shares for `locked` NEAR, stores the lock,
+    /// bumps catalog usage, updates validator pending stake and per-buyer share balance, then
+    /// optionally updates subscription storage (subscription + `(account, product)` index when new).
+    ///
+    /// **Inputs:** Re-reads active catalog price/product from `order` and requires
+    /// `product.validator_id == validator_id` so the mint matches the pool used on the lock path.
+    ///
+    /// **When to call:** Stake figures passed into [`mint_shares`] must match pool reality. Production
+    /// invokes this from [`crate::epoch::Contract::resolve_lock`] after
+    /// the shared per-epoch pre-user settlement pipeline (**0–3**) on the lock promise chain.
+    pub(crate) fn commit_catalog_lock(
+        &mut self,
+        buyer: AccountId,
+        locked: NearToken,
+        duration_ns: u128,
+        order: OrderRef,
+        validator_id: ValidatorId,
+        mut subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
+    ) -> LockId {
+        if let Some((subscription, sub_id, _)) = subscription_followup.as_mut() {
+            self.apply_pending_downgrade_before_renewal_lock(&buyer, sub_id, subscription);
+        }
+
+        // Catalog line item for this lock (one-off or subscription).
+        let price_id = match &order {
+            OrderRef::ProductPurchase { price_id, .. }
+            | OrderRef::Subscription { price_id, .. } => price_id.clone(),
+        };
+        let (mut price, mut product) = self.get_active_price_and_product(&price_id);
+        require!(
+            product.validator_id == validator_id,
+            "Catalog validator for this price does not match the pool used for this lock"
+        );
+
+        let new_shares = self.internal_stake(&buyer, &validator_id, locked);
+
+        // Persist the lock (duration → `end_ns`); `order` ties billing/catalog to this stake.
+        let lock_id = crate::ids::next_lock_id(&mut self.id_nonce);
+        let lock = Lock {
+            lock_id: lock_id.clone(),
+            account_id: buyer.clone(),
+            validator_id: validator_id.clone(),
+            amount_near: locked,
+            shares: U128(new_shares),
+            start_ns: U64(block_timestamp()),
+            end_ns: U64(
+                block_timestamp().saturating_add(u64::try_from(duration_ns).unwrap_or(u64::MAX))
+            ),
+            order: order.clone(),
+            status: LockStatus::Active,
+        };
+        self.locks.insert(lock_id.clone(), lock);
+
+        // Catalog usage counters + persist updated price, product, and validator state.
+        price.usage_count = price.usage_count.saturating_add(1);
+        product.usage_count = product.usage_count.saturating_add(1);
+
+        self.prices.insert(price.price_id.clone(), price);
+        self.products.insert(product.product_id.clone(), product);
+
+        // Drives prepaid lock storage (`per_lock_storage_stake` × count) for this account.
+        let user_lock_count_before = self.user_lock_count.get(&buyer).copied().unwrap_or(0);
+        self.user_lock_count
+            .insert(buyer.clone(), user_lock_count_before.saturating_add(1));
+
+        // Subscription path: caller already built/updated `Subscription`; we only persist + optional index.
+        if let Some((mut subscription, sub_id, is_new_index)) = subscription_followup {
+            subscription.last_lock_id = lock_id.clone();
+            let sub_key = (
+                subscription.account_id.clone(),
+                subscription.product_id.clone(),
+            );
+            self.subscriptions.insert(sub_id.clone(), subscription);
+            if is_new_index {
+                self.subscription_by_account_product.insert(sub_key, sub_id);
+            }
+        }
+
+        crate::events::log_lock(lock_id.as_str(), &buyer);
+
+        lock_id
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    /// Host-only: skips pool balance refresh and stake promises (see module comment on `lock_for_product`).
+    pub(crate) fn finalize_lock(
+        &mut self,
+        buyer: AccountId,
+        _price: Price,
+        product: Product,
+        locked: NearToken,
+        duration_ns: u128,
+        order: OrderRef,
+    ) -> LockId {
+        self.commit_catalog_lock(
+            buyer,
+            locked,
+            duration_ns,
+            order,
+            product.validator_id.clone(),
+            None,
+        )
+    }
+}
+
+// Epoch pipeline: catalog mint tail callback.
+
+#[near]
+impl Contract {
+    /// **[Pipeline 5a]** Catalog mint after **4**. Pre-user settlement (**0–3**) already ran before
+    /// mint; this lock's `pending_to_stake` is queued for a later `unlock` / `withdraw` / `epoch_settle`.
+    /// Returns `lock_id` so user lock calls can decode the minted lock id on WASM.
+    #[private]
+    pub fn resolve_lock(
+        &mut self,
+        buyer: AccountId,
+        locked: NearToken,
+        duration_ns: u128,
+        order: OrderRef,
+        validator_id: ValidatorId,
+        subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
+    ) -> PromiseOrValue<LockId> {
+        let lock_id = self.commit_catalog_lock(
+            buyer,
+            locked,
+            duration_ns,
+            order,
+            validator_id.clone(),
+            subscription_followup,
+        );
+        let _validator = self.require_validator_busy(
+            &validator_id,
+            "Validator pool must be busy after per-epoch settlement",
+        );
+        PromiseOrValue::Value(lock_id)
+    }
+}

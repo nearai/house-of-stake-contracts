@@ -1,5 +1,5 @@
 use crate::*;
-use common::{events, near_add, truncate_to_seconds, VenearBalance, Version};
+use common::{VenearBalance, Version, events, near_add, truncate_to_seconds};
 use near_sdk::json_types::U64;
 
 /// Full information about the account

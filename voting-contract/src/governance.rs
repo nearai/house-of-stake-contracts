@@ -106,8 +106,7 @@ impl Contract {
     pub fn set_proposal_expiration(&mut self, proposal_expiration_sec: u32) {
         assert_one_yocto();
         self.assert_owner();
-        self.config.proposal_expiration_ns =
-            (proposal_expiration_sec as u64 * 10u64.pow(9)).into();
+        self.config.proposal_expiration_ns = (proposal_expiration_sec as u64 * 10u64.pow(9)).into();
     }
 
     /// Updates the quorum threshold in basis points (e.g. 3500 = 35%).

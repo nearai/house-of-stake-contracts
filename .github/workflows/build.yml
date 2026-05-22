@@ -1,0 +1,35 @@
+name: Build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.86.0
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release wasm32
+        run: |
+          set -euo pipefail
+          for pkg in \
+            lockup-contract \
+            venear-contract \
+            voting-contract \
+            staking-contract \
+            sandbox-staking-whitelist-contract; do
+            echo "== wasm32 $pkg =="
+            cargo build -p "$pkg" --target wasm32-unknown-unknown --release
+          done
