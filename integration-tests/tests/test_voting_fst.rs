@@ -1342,7 +1342,7 @@ async fn test_voting_fst_proposal_expiration() -> Result<(), Box<dyn std::error:
     const FST_EXPIRATION_SECS: u64 = 30;
 
     let v = VenearTestWorkspaceBuilder::default()
-        .proposal_expiration_ns(CLASSIC_EXPIRATION_SECS * NS_IN_SECOND)
+        .classic_proposal_expiration_ns(CLASSIC_EXPIRATION_SECS * NS_IN_SECOND)
         .fast_track_proposal_expiration_ns(FST_EXPIRATION_SECS * NS_IN_SECOND)
         .with_voting()
         .build()

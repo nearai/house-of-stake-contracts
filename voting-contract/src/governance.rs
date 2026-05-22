@@ -119,7 +119,7 @@ impl Contract {
     pub fn set_proposal_expiration(&mut self, proposal_expiration_sec: u32) {
         assert_one_yocto();
         self.assert_owner();
-        self.config.proposal_expiration_ns =
+        self.config.classic_proposal_expiration_ns =
             (u64::from(proposal_expiration_sec) * 10u64.pow(9)).into();
     }
 

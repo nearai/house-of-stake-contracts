@@ -44,7 +44,7 @@ pub struct Config {
 
     /// The maximum time in nanoseconds a Classic proposal can stay in Created status before expiring.
     /// 0 means no expiration.
-    pub proposal_expiration_ns: U64,
+    pub classic_proposal_expiration_ns: U64,
 
     /// The maximum time in nanoseconds a FastTrack proposal can stay in Created status before
     /// expiring. 0 means no expiration.

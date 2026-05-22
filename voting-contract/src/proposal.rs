@@ -374,7 +374,7 @@ impl Contract {
         let (flow_expiration_ns, voting_duration_ns, timelock_duration_ns, bond_amount) = match flow
         {
             ProposalFlow::Classic => (
-                self.config.proposal_expiration_ns,
+                self.config.classic_proposal_expiration_ns,
                 self.config.classic_voting_duration_ns,
                 self.config.timelock_duration_ns,
                 NearToken::from_yoctonear(0),

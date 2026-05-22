@@ -285,7 +285,7 @@ fn set_proposal_expiration_round_trips() {
     set_ctx(owner(), 1, TEST_NOW_NS);
     contract.set_proposal_expiration(12_345);
     assert_eq!(
-        contract.get_config().proposal_expiration_ns.0,
+        contract.get_config().classic_proposal_expiration_ns.0,
         12_345u64 * 1_000_000_000
     );
 }

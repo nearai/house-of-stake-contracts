@@ -96,7 +96,7 @@ impl Contract {
                 treasury_account_id: DEFAULT_TREASURY_ACCOUNT_ID.parse().unwrap(),
                 vote_storage_fee: old.config.vote_storage_fee,
                 guardians: old.config.guardians,
-                proposal_expiration_ns: U64(DEFAULT_PROPOSAL_EXPIRATION_NS),
+                classic_proposal_expiration_ns: U64(DEFAULT_PROPOSAL_EXPIRATION_NS),
                 fast_track_proposal_expiration_ns: U64(DEFAULT_FAST_TRACK_PROPOSAL_EXPIRATION_NS),
                 proposed_new_owner_account_id: old.config.proposed_new_owner_account_id,
                 quorum_threshold_bps: Bps::new(old.config.quorum_threshold_bps),

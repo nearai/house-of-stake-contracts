@@ -65,7 +65,7 @@ pub struct VenearTestWorkspaceBuilder {
     pub base_proposal_fee: NearToken,
     pub bond_amount: NearToken,
     pub vote_storage_fee: NearToken,
-    pub proposal_expiration_ns: u64,
+    pub classic_proposal_expiration_ns: u64,
     pub fast_track_proposal_expiration_ns: u64,
     pub quorum_threshold_bps: u16,
     pub quorum_floor: NearToken,
@@ -99,7 +99,7 @@ impl Default for VenearTestWorkspaceBuilder {
             base_proposal_fee: NearToken::from_millinear(100),
             bond_amount: DEFAULT_BOND_AMOUNT,
             vote_storage_fee: NearToken::from_yoctonear(125 * 10u128.pow(19)),
-            proposal_expiration_ns: PROPOSAL_EXPIRATION_SECONDS * NS_IN_SECOND,
+            classic_proposal_expiration_ns: PROPOSAL_EXPIRATION_SECONDS * NS_IN_SECOND,
             fast_track_proposal_expiration_ns: PROPOSAL_EXPIRATION_SECONDS * NS_IN_SECOND,
             quorum_threshold_bps: 3500,
             quorum_floor: NearToken::from_near(1000),
@@ -305,7 +305,7 @@ impl VenearTestWorkspaceBuilder {
                     "treasury_account_id": treasury.id(),
                     "vote_storage_fee": self.vote_storage_fee,
                     "guardians": &[guardian.id()],
-                    "proposal_expiration_ns": self.proposal_expiration_ns.to_string(),
+                    "classic_proposal_expiration_ns": self.classic_proposal_expiration_ns.to_string(),
                     "fast_track_proposal_expiration_ns": self.fast_track_proposal_expiration_ns.to_string(),
                     "quorum_threshold_bps": self.quorum_threshold_bps,
                     "quorum_floor": self.quorum_floor,
@@ -388,8 +388,8 @@ impl VenearTestWorkspaceBuilder {
         self
     }
 
-    pub fn proposal_expiration_ns(mut self, proposal_expiration_ns: u64) -> Self {
-        self.proposal_expiration_ns = proposal_expiration_ns;
+    pub fn classic_proposal_expiration_ns(mut self, classic_proposal_expiration_ns: u64) -> Self {
+        self.classic_proposal_expiration_ns = classic_proposal_expiration_ns;
         self
     }
 

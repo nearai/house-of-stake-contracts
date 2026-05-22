@@ -475,7 +475,7 @@ async fn test_contracts_upgrade() -> Result<(), Box<dyn std::error::Error>> {
         (14 * DAY_NS).to_string()
     );
     assert_eq!(
-        new_voting_config["proposal_expiration_ns"],
+        new_voting_config["classic_proposal_expiration_ns"],
         (7 * DAY_NS).to_string()
     );
     assert_eq!(

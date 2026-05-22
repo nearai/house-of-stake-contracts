@@ -171,7 +171,7 @@ mod lifecycle_tests {
         contract.set_proposal_expiration(3600);
         let id = create_proposal(&mut contract, ProposalFlow::Classic);
 
-        let expiration_ns = TEST_NOW_NS + contract.get_config().proposal_expiration_ns.0;
+        let expiration_ns = TEST_NOW_NS + contract.get_config().classic_proposal_expiration_ns.0;
         assert_eq!(
             status_at(&contract, id, expiration_ns - 1),
             ProposalStatus::Created
@@ -710,7 +710,7 @@ mod create_proposal_tests {
         let p: Proposal = contract.proposals.get(id).cloned().unwrap().into();
         assert_eq!(
             p.expiration_ns,
-            U64(TEST_NOW_NS + contract.get_config().proposal_expiration_ns.0)
+            U64(TEST_NOW_NS + contract.get_config().classic_proposal_expiration_ns.0)
         );
     }
 

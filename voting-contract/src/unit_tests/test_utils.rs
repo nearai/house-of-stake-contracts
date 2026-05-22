@@ -39,7 +39,7 @@ pub fn default_config() -> Config {
         treasury_account_id: acc("treasury.test.near"),
         vote_storage_fee: NearToken::from_millinear(10),
         guardians: vec![guardian()],
-        proposal_expiration_ns: U64(7 * 24 * 3600 * 1_000_000_000),
+        classic_proposal_expiration_ns: U64(7 * 24 * 3600 * 1_000_000_000),
         fast_track_proposal_expiration_ns: U64(2 * 24 * 3600 * 1_000_000_000),
         proposed_new_owner_account_id: None,
         quorum_threshold_bps: Bps::new(3_500),
