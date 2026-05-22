@@ -122,17 +122,6 @@ impl Contract {
         self.assert_storage_deposit_at_least(&account, min, "Top up storage (minimum prepaid)");
     }
 
-    /// Full prepaid requirement including `per_lock_storage_stake` × locks recorded in [`crate::Contract::user_lock_count`].
-    pub(crate) fn ensure_min_storage(&self, account_id: &AccountId) {
-        let account = self.require_registered_account(account_id);
-        let need = self.required_storage_deposit_yocto(account_id, 0);
-        self.assert_storage_deposit_at_least(
-            &account,
-            need,
-            "Prepaid storage is too low; call storage_deposit to top up (minimum plus per-lock stake)",
-        );
-    }
-
     /// Before creating a lock: require prepaid storage for one more lock entry.
     pub(crate) fn ensure_min_storage_for_new_lock(&self, account_id: &AccountId) {
         let account = self.require_registered_account(account_id);

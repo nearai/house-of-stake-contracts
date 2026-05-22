@@ -8,7 +8,7 @@
 
 use crate::*;
 use common::U256;
-use near_sdk::{env, near};
+use near_sdk::env;
 
 // =============================================================================
 // Time constants

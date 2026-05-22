@@ -53,7 +53,7 @@ The contract is **NEAR-only**: no oracle, no USD catalog path, no `oracle-relay-
 
 ## P3 — Testing & docs
 
-- [x] **Unit tests** — Pro-rata claim, share mint (`internal.rs`, `withdraw.rs`, `subscriptions.rs`).
+- [x] **Unit tests** — Pro-rata claim, share mint (`utils.rs`, `withdraw.rs`, `subscriptions.rs`).
 - [x] **README** — User-driven lazy cadence (see [README.md](README.md)).
 - [x] **Integration / sandbox tests** — [`integration-tests/tests/test_staking_contract.rs`](../integration-tests/tests/test_staking_contract.rs) deploy + `get_config` (requires built WASM: `make staking-contract`).
 
