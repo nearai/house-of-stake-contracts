@@ -180,6 +180,10 @@ impl Contract {
         validator_id: ValidatorId,
     ) -> Promise {
         let credit = self.claim_from_withdraw_bucket(account_id.clone(), validator_id);
+        require!(
+            env::account_balance().as_yoctonear() >= credit.as_yoctonear(),
+            "Contract does not hold enough NEAR to complete this withdraw transfer yet; retry after pool funds arrive"
+        );
         Promise::new(account_id).transfer(credit)
     }
 }

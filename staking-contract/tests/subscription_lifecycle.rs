@@ -81,6 +81,32 @@ fn resume_subscription_clears_cancel_before_period_end() {
 }
 
 #[test]
+#[should_panic(expected = "Current billing period has ended")]
+fn resume_subscription_fails_after_period_end() {
+    let mut c = deploy();
+    let (product_id, price_id) = setup_catalog_near_subscription(&mut c);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_id), None));
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    c.cancel_subscription(product_id.clone());
+
+    let sub = c
+        .get_subscription_for_product(acct(BUYER), product_id.clone())
+        .expect("subscription");
+    let after_period_ts = sub.end_ns.0.saturating_add(1);
+
+    testing_env!(ctx_ts(
+        acct(BUYER),
+        NearToken::from_yoctonear(1),
+        after_period_ts
+    ));
+    c.resume_subscription(product_id);
+}
+
+#[test]
 fn upgrade_subscription_updates_tier_and_lock_amount() {
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);

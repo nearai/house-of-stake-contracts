@@ -52,6 +52,10 @@ impl Contract {
             sub.cancel_at_period_end,
             "Subscription is not scheduled to cancel at period end"
         );
+        require!(
+            block_timestamp() < sub.end_ns.0,
+            "Current billing period has ended; subscribe again with lock_for_subscription instead"
+        );
         sub.cancel_at_period_end = false;
         self.internal_set_subscription(sid.clone(), sub.clone());
         crate::events::log_subscription_resume(&buyer, &product_id);
