@@ -16,7 +16,7 @@ Review energy should go to **new staking code and tests**, not re-litigating vot
 
 ## Strengths
 
-- **Documented constraints:** `README.md`, `DESIGN.md`, `LAZY_EPOCH_PIPELINE.md`, and `EPOCH_SETTLEMENT_CHAIN.md` spell out per-epoch pool limits, net settle, and fast-path rules.
+- **Documented constraints:** `README.md`, `DESIGN.md`, and `LAZY_EPOCH_PIPELINE.md` spell out per-epoch pool limits, net settle, fast-path rules, and the promise pipeline.
 - **Modular layout:** pool promises in `epoch.rs`; user entrypoints in `lock` / `unlock` / `withdraw` / `subscriptions`.
 - **Test matrix:** focused host unit modules plus `sandbox_mock_pool.rs` / `sandbox_epoch_settlement.rs` for cross-contract behavior.
 - **CI:** build / format / clippy / test workflows; test job builds WASM via `build_all.sh` before `make test`.

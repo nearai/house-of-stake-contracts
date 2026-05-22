@@ -11,7 +11,7 @@ NEAR smart contract for pooled staking tied to NEAR AI **products** and **prices
 | [docs/PLAN.md](docs/PLAN.md) | Full detailed design (exported from planning session) |
 | [docs/ACTION_ITEMS.md](docs/ACTION_ITEMS.md) | Open work / backlog vs design |
 | [docs/CORE_FEATURES.md](docs/CORE_FEATURES.md) | Reviewer quick reference (features + file priority) |
-| [docs/LAZY_EPOCH_PIPELINE.md](docs/LAZY_EPOCH_PIPELINE.md) | Pool scheduling rules (authoritative) |
+| [docs/LAZY_EPOCH_PIPELINE.md](docs/LAZY_EPOCH_PIPELINE.md) | Pool scheduling, settlement chain, callbacks (authoritative) |
 | [docs/REVIEW.md](docs/REVIEW.md) | Pre-merge review checklist |
 | [tests/README.md](tests/README.md) | Unit vs sandbox test layout |
 

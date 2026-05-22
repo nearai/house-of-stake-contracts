@@ -87,7 +87,7 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 
 | Method | Access | Deposit | Returns | Description |
 |--------|--------|---------|---------|-------------|
-| `lock_for_product` | Buyer | **Attach NEAR** | **`PromiseOrValue<LockId>`** | One-off: **`price_id`**, **`lock_duration_ns`** (`U64`), **`product_id`** — provide **exactly one** of **`price_id`** or **`product_id`** (other **`null`**). Default price from **`Product.default_price_id`** when only **`product_id`** is set (must be **one-off**). **WASM:** shared per-epoch pipeline (**0–3**) then mint (**5a**); see [EPOCH_SETTLEMENT_CHAIN.md](EPOCH_SETTLEMENT_CHAIN.md). **Host tests:** synchronous mint (no promise chain). |
+| `lock_for_product` | Buyer | **Attach NEAR** | **`PromiseOrValue<LockId>`** | One-off: **`price_id`**, **`lock_duration_ns`** (`U64`), **`product_id`** — provide **exactly one** of **`price_id`** or **`product_id`** (other **`null`**). Default price from **`Product.default_price_id`** when only **`product_id`** is set (must be **one-off**). **WASM:** shared per-epoch pipeline (**0–3**) then mint (**5a**); see [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md). **Host tests:** synchronous mint (no promise chain). |
 | `lock_for_subscription` | Subscriber | **Attach NEAR** | **`PromiseOrValue<LockId>`** | Recurring (monthly): same XOR rule; default price must be **recurring** monthly. Same settlement + mint pipeline as **`lock_for_product`**. |
 
 ---
@@ -138,7 +138,7 @@ Public **`epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator
 |--------|--------|---------|---------|-------------|
 | `epoch_settle` | Any | **None** | **`Promise`** | **`validator_id`** — manual retry / advance pending stake or unstake; same rules as automatic flows. |
 
-Step-by-step callbacks: [EPOCH_SETTLEMENT_CHAIN.md](EPOCH_SETTLEMENT_CHAIN.md). Product rules: [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md).
+Pipeline steps and callbacks: [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md).
 
 ---
 
@@ -229,7 +229,6 @@ For EVENT_JSON shapes and naming, see [`../src/events.rs`](../src/events.rs).
 
 | Doc | Content |
 |-----|---------|
-| [EPOCH_SETTLEMENT_CHAIN.md](EPOCH_SETTLEMENT_CHAIN.md) | Promise pipeline steps **0–6**, callbacks, `PerEpochContinue` |
-| [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md) | Per-epoch limits, fast path, user-driven cadence |
+| [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md) | Per-epoch limits, fast path, promise pipeline **0–6**, callbacks |
 | [DESIGN.md](DESIGN.md) | Architecture overview |
 | [PLAN.md](PLAN.md) | Detailed design notes |
