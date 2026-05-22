@@ -97,6 +97,15 @@ fn set_min_lock_amount_rejects_below_protocol_floor() {
     c.set_min_lock_amount(NearToken::from_millinear(500));
 }
 
+#[test]
+#[should_panic(expected = "Minimum lock duration cannot exceed maximum lock duration")]
+fn set_lock_bounds_rejects_inverted_range() {
+    let mut c = deploy();
+
+    testing_env!(ctx(acct(OWNER), one_yocto()));
+    c.set_lock_bounds(U64(10), U64(9));
+}
+
 /// Guardian (not owner) may pause when listed in `guardians`.
 #[test]
 fn guardian_can_pause() {

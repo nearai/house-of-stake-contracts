@@ -77,36 +77,9 @@ impl Contract {
             "Attached NEAR is below the contract minimum lock amount (min_lock_amount)"
         );
 
-        let (new_price, product) = self.get_active_price_and_product(&new_price_id);
-        self.require_recurring_monthly_price(&new_price);
-
-        let (sid, sub) = self.require_subscription_owned_by(&buyer, &new_price.product_id);
-
-        let old_price = self.require_price(&sub.price_id);
-        require!(
-            new_price.product_id == sub.product_id,
-            "Price must belong to this subscription product"
-        );
-        require!(
-            new_price.amount.0 > old_price.amount.0,
-            "New tier must have a higher catalog amount than current tier"
-        );
-
-        let lock = self.require_subscription_lock_owned_by(&sub, &buyer);
-
-        let now = block_timestamp();
-        require!(
-            now < lock.end_ns.0,
-            "Current period already ended; renew instead"
-        );
-
-        let rem_ns = u128::from(lock.end_ns.0.saturating_sub(now));
-        let total_locked = lock
-            .amount_near
-            .as_yoctonear()
-            .saturating_add(deposit.as_yoctonear());
-        check_near_price_lock(&new_price, total_locked, rem_ns)
-            .unwrap_or_else(|e| env::panic_str(e));
+        let (sid, _sub, _new_price, product, _lock) =
+            self.checked_subscription_upgrade_inputs(&buyer, deposit, &new_price_id, None, None);
+        let sid = sid.expect("Subscription id is available when looked up by product");
 
         let validator_id = product.validator_id.clone();
         self.assert_validator_active_for_lock(&validator_id);
@@ -120,6 +93,7 @@ impl Contract {
                 deposit,
                 new_price_id,
                 sid,
+                validator_id,
             ));
         }
         #[cfg(target_arch = "wasm32")]
@@ -213,8 +187,13 @@ impl Contract {
         subscription_id: SubscriptionId,
         validator_id: ValidatorId,
     ) -> PromiseOrValue<LockId> {
-        let lock_id =
-            self.commit_subscription_upgrade(buyer, deposit, new_price_id, subscription_id);
+        let lock_id = self.commit_subscription_upgrade(
+            buyer,
+            deposit,
+            new_price_id,
+            subscription_id,
+            validator_id.clone(),
+        );
         let _validator = self.require_validator_busy(
             &validator_id,
             "Validator pool must be busy after per-epoch settlement",
@@ -285,21 +264,84 @@ impl Contract {
         );
     }
 
+    fn checked_subscription_upgrade_inputs(
+        &self,
+        buyer: &AccountId,
+        deposit: NearToken,
+        new_price_id: &PriceId,
+        subscription_id: Option<&SubscriptionId>,
+        expected_validator_id: Option<&ValidatorId>,
+    ) -> (Option<SubscriptionId>, Subscription, Price, Product, Lock) {
+        let (new_price, product) = self.get_active_price_and_product(new_price_id);
+        self.require_recurring_monthly_price(&new_price);
+
+        let (sid, sub) = match subscription_id {
+            Some(sid) => (None, self.require_subscription_owned_by_id(buyer, sid)),
+            None => {
+                let (sid, sub) = self.require_subscription_owned_by(buyer, &new_price.product_id);
+                (Some(sid), sub)
+            }
+        };
+        Self::assert_subscription_active(&sub);
+        // Same virtual billing window as [`Contract::get_subscription`] / `get_subscription_for_product`.
+        let sub = self.project_subscription_view_now(sub);
+
+        require!(
+            new_price.product_id == sub.product_id,
+            "Price must belong to this subscription product"
+        );
+        let old_price = self.require_price(&sub.price_id);
+        require!(
+            new_price.amount.0 > old_price.amount.0,
+            "New tier must have a higher catalog amount than current tier"
+        );
+
+        let lock = self.require_subscription_lock_owned_by(&sub, buyer);
+        if let Some(expected) = expected_validator_id {
+            require!(
+                product.validator_id == *expected,
+                "Catalog validator for this price does not match the pool used for this subscription upgrade"
+            );
+            require!(
+                lock.validator_id == *expected,
+                "Subscription lock validator does not match the upgrade validator"
+            );
+        }
+
+        let now = block_timestamp();
+        require!(
+            now < sub.end_ns.0,
+            "Current period already ended; renew instead"
+        );
+        let rem_ns = u128::from(sub.end_ns.0.saturating_sub(now));
+        let total_locked = lock
+            .amount_near
+            .as_yoctonear()
+            .saturating_add(deposit.as_yoctonear());
+        check_near_price_lock(&new_price, total_locked, rem_ns)
+            .unwrap_or_else(|e| env::panic_str(e));
+
+        (sid, sub, new_price, product, lock)
+    }
+
     pub(crate) fn commit_subscription_upgrade(
         &mut self,
         buyer: AccountId,
         deposit: NearToken,
         new_price_id: PriceId,
         subscription_id: SubscriptionId,
+        expected_validator_id: ValidatorId,
     ) -> LockId {
-        let mut sub = self.require_subscription_owned_by_id(&buyer, &subscription_id);
+        let (_sid, mut sub, mut new_price, mut product, mut lock) = self
+            .checked_subscription_upgrade_inputs(
+                &buyer,
+                deposit,
+                &new_price_id,
+                Some(&subscription_id),
+                Some(&expected_validator_id),
+            );
 
-        let (_, product) = self.require_price_and_product(&new_price_id);
-
-        let mut lock = self.require_subscription_lock_owned_by(&sub, &buyer);
-
-        let validator_id = product.validator_id.clone();
-        let add_shares = self.internal_stake(&buyer, &validator_id, deposit);
+        let add_shares = self.internal_stake(&buyer, &expected_validator_id, deposit);
 
         lock.amount_near = lock
             .amount_near
@@ -314,10 +356,14 @@ impl Contract {
         };
 
         sub.price_id = new_price_id.clone();
+        new_price.usage_count = new_price.usage_count.saturating_add(1);
+        product.usage_count = product.usage_count.saturating_add(1);
 
         let lock_id_out = lock.lock_id.clone();
         self.internal_set_lock(lock_id_out.clone(), lock);
         self.internal_set_subscription(subscription_id, sub);
+        self.internal_set_price(new_price.price_id.clone(), new_price);
+        self.internal_set_product(product.product_id.clone(), product);
 
         crate::events::log_subscription_upgrade(&buyer, &new_price_id);
         crate::events::log_lock(lock_id_out.as_str(), &buyer);

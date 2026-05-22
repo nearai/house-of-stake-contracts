@@ -42,6 +42,10 @@ impl Contract {
     #[payable]
     pub fn set_lock_bounds(&mut self, min_lock_duration_ns: U64, max_lock_duration_ns: U64) {
         self.assert_owner_payable();
+        require!(
+            min_lock_duration_ns.0 <= max_lock_duration_ns.0,
+            "Minimum lock duration cannot exceed maximum lock duration"
+        );
         self.internal_get_config_mut().min_lock_duration_ns = min_lock_duration_ns;
         self.internal_get_config_mut().max_lock_duration_ns = max_lock_duration_ns;
     }

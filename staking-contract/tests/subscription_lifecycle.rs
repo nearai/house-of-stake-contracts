@@ -3,11 +3,13 @@
 mod common;
 
 use common::{
-    BUYER, POOL, acct, add_subscription_price, ctx, ctx_ts, deploy, register_buyer,
-    setup_catalog_near_subscription, unwrap_sync_lock_id,
+    BUYER, POOL, VALIDATOR_OWNER_ACCOUNT, acct, add_subscription_price, ctx, ctx_ts, deploy,
+    register_buyer, setup_catalog_near_subscription, testing_env_catalog_callback,
+    unwrap_sync_lock_id,
 };
 use near_sdk::NearToken;
 use near_sdk::testing_env;
+use staking_contract::types::TransactionStatus;
 use staking_contract::types::{LockStatus, SubscriptionStatus};
 use staking_contract::utils::AVG_MONTH_NS;
 
@@ -129,6 +131,104 @@ fn upgrade_subscription_updates_tier_and_lock_amount() {
     let lock_after = c.get_lock(lock_low).expect("lock");
     assert!(lock_after.amount_near.as_yoctonear() > amt_before);
     assert_eq!(lock_after.status, LockStatus::Active);
+}
+
+#[test]
+fn upgrade_subscription_uses_projected_billing_window_after_stale_end_ns() {
+    let mut c = deploy();
+    let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
+    let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_low), None));
+
+    let stored_end = c
+        .get_subscription_for_product(acct(BUYER), product_id.clone())
+        .expect("subscription")
+        .end_ns
+        .0;
+    let past_period_ts = stored_end.saturating_add(1);
+    testing_env!(ctx_ts(
+        acct(BUYER),
+        NearToken::from_near(40),
+        past_period_ts
+    ));
+
+    let projected_end = c
+        .get_subscription_for_product(acct(BUYER), product_id.clone())
+        .expect("subscription")
+        .end_ns
+        .0;
+    assert!(projected_end > past_period_ts);
+
+    let _ = unwrap_sync_lock_id(c.upgrade_subscription(price_high.clone()));
+
+    let sub = c
+        .get_subscription_for_product(acct(BUYER), product_id)
+        .expect("subscription");
+    assert_eq!(sub.price_id, price_high);
+    assert_eq!(sub.end_ns.0, projected_end);
+}
+
+#[test]
+#[should_panic(expected = "Cannot delete this price while it is in use")]
+fn upgraded_subscription_price_is_marked_in_use() {
+    let mut c = deploy();
+    let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
+    let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_low), None));
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_near(40)));
+    let _ = unwrap_sync_lock_id(c.upgrade_subscription(price_high.clone()));
+
+    let high = c.get_price(price_high.clone()).expect("high price");
+    assert_eq!(high.usage_count, 1);
+
+    testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
+    c.delete_price_after_get_owner(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        price_high,
+        acct(VALIDATOR_OWNER_ACCOUNT),
+    );
+}
+
+#[test]
+#[should_panic(expected = "This price is not active")]
+fn upgrade_callback_rejects_price_archived_after_entry_checks() {
+    let mut c = deploy();
+    let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
+    let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_low), None));
+    let sub = c
+        .get_subscription_for_product(acct(BUYER), product_id)
+        .expect("subscription");
+
+    testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
+    c.archive_price_after_get_owner(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        price_high.clone(),
+        acct(VALIDATOR_OWNER_ACCOUNT),
+    );
+
+    let mut validator = c.get_validator(acct(POOL)).expect("validator");
+    validator.tx_status = TransactionStatus::Busy;
+    c.validators.insert(acct(POOL), validator.into());
+
+    testing_env!(ctx(acct(common::STAKING), NearToken::from_near(0)));
+    let _ = c.on_subscription_upgrade_after_settle(
+        acct(BUYER),
+        NearToken::from_near(40),
+        price_high,
+        sub.subscription_id,
+        acct(POOL),
+    );
 }
 
 #[test]
