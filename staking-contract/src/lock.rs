@@ -161,20 +161,8 @@ impl Contract {
                 };
                 (sub_new, sid_new, true)
             } else {
-                // Renewal window: scheduled downgrade / extend billing period.
-                if let Some(low_id) = sub.pending_downgrade_price_id.take() {
-                    let high_price = self.require_price(&sub.price_id);
-                    let low_price = self.require_price(&low_id);
-                    let completed_ns = u128::from(sub.end_ns.0.saturating_sub(sub.start_ns.0));
-                    self.apply_downgrade_prorate_at_renewal(
-                        &buyer,
-                        &sub,
-                        &high_price,
-                        &low_price,
-                        completed_ns,
-                    );
-                    sub.price_id = low_id;
-                }
+                // Renewal window: extend billing period; downgrade prorate runs in
+                // [`commit_catalog_lock`] after settlement succeeds (see `apply_pending_downgrade_before_renewal_lock`).
                 let start = sub.end_ns.0.max(now);
                 let end = crate::subscriptions::add_months_stripe_style(sub.anchor_day, 1, start);
                 sub.start_ns = U64(start);
@@ -203,10 +191,16 @@ impl Contract {
         };
 
         if !is_new_index {
-            require!(
-                price_id == subscription.price_id,
-                "price_id must match current subscription tier"
-            );
+            match &subscription.pending_downgrade_price_id {
+                Some(pending_low) => require!(
+                    price_id == *pending_low,
+                    "price_id must match the scheduled downgrade tier for this renewal"
+                ),
+                None => require!(
+                    price_id == subscription.price_id,
+                    "price_id must match current subscription tier"
+                ),
+            }
         }
 
         require!(
@@ -230,17 +224,14 @@ impl Contract {
         // Same host synchronous path as `lock_for_product_with_price_id` (see comment there).
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let mut subscription = subscription;
-            let lock_id = self.finalize_lock(
+            let lock_id = self.commit_catalog_lock(
                 buyer.clone(),
-                price,
-                product,
                 locked,
                 duration_ns,
-                order.clone(),
+                order,
+                validator_id,
+                Some((subscription, sub_id.clone(), is_new_index)),
             );
-            subscription.last_lock_id = lock_id.clone();
-            self.subscriptions.insert(sub_id.clone(), subscription);
             if is_new_index {
                 self.subscription_by_account_product.insert(sub_key, sub_id);
             }
@@ -333,8 +324,12 @@ impl Contract {
         duration_ns: u128,
         order: OrderRef,
         validator_id: ValidatorId,
-        subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
+        mut subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
     ) -> LockId {
+        if let Some((subscription, sub_id, _)) = subscription_followup.as_mut() {
+            self.apply_pending_downgrade_before_renewal_lock(&buyer, sub_id, subscription);
+        }
+
         // Catalog line item for this lock (one-off or subscription).
         let price_id = match &order {
             OrderRef::ProductPurchase { price_id, .. }

@@ -315,6 +315,47 @@ impl Contract {
         lock_id_out
     }
 
+    /// At subscription renewal commit: apply scheduled downgrade proration from **stored** subscription
+    /// (completed period + `last_lock_id`), then clear `pending_downgrade_price_id` on `subscription`.
+    ///
+    /// Idempotent: if storage already has no pending downgrade, returns without mutating locks.
+    pub(crate) fn apply_pending_downgrade_before_renewal_lock(
+        &mut self,
+        buyer: &AccountId,
+        subscription_id: &SubscriptionId,
+        subscription: &mut Subscription,
+    ) {
+        let stored = self.require_subscription_by_id(subscription_id);
+        let Some(low_id) = stored.pending_downgrade_price_id.clone() else {
+            return;
+        };
+        let completed_period_ns =
+            u128::from(stored.end_ns.0.saturating_sub(stored.start_ns.0));
+        let high_price = self.require_price(&stored.price_id);
+        let low_price = self.require_price(&low_id);
+
+        if completed_period_ns > 0 {
+            self.apply_downgrade_prorate_at_renewal(
+                buyer,
+                &stored,
+                &high_price,
+                &low_price,
+                completed_period_ns,
+            );
+        }
+
+        subscription.price_id = low_id.clone();
+        subscription.pending_downgrade_price_id = None;
+
+        // Clear pending downgrade in storage before the renewal lock is minted so a failed async
+        // pipeline cannot apply the same proration again on retry.
+        let mut stored_update = stored;
+        stored_update.price_id = low_id;
+        stored_update.pending_downgrade_price_id = None;
+        self.subscriptions
+            .insert(subscription_id.clone(), stored_update);
+    }
+
     /// Phase B: at scheduled downgrade renewal, release catalog **tier-gap** stake (min high − min low for
     /// the completed period) as shares → same unstake queue as [`crate::unlock::Contract::unlock`].
     pub(crate) fn apply_downgrade_prorate_at_renewal(
