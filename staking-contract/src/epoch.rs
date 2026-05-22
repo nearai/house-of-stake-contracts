@@ -177,6 +177,9 @@ impl Contract {
         let pool_account = match pool_account_result {
             Ok(pool_account) => pool_account,
             Err(_) => {
+                if let Some((buyer, amount)) = cont.payable_refund() {
+                    return self.refund_payable_pipeline(&validator_id, buyer, amount);
+                }
                 events::log_epoch_operation("epoch_get_account_failed_release", &validator_id);
                 return ext_self_epoch::ext(env::current_account_id())
                     .with_static_gas(callbacks::ON_EPOCH_PIPELINE_TERMINAL_RELEASE)
@@ -613,6 +616,19 @@ impl Contract {
     // `lock.rs` (5a), `unlock.rs` (5b), `withdraw.rs` (5c), `subscriptions.rs` (5d).
 
     // --- [Pipeline 6] ---
+
+    /// Refund NEAR from a payable pipeline entry (`lock_*`, `upgrade_subscription`) after pre-user
+    /// settlement aborts (e.g. `get_account` failure). Clears **`Busy`** and returns the refund transfer.
+    pub(crate) fn refund_payable_pipeline(
+        &mut self,
+        validator_id: &ValidatorId,
+        buyer: AccountId,
+        amount: NearToken,
+    ) -> Promise {
+        self.release_validator_pool_pipeline(validator_id);
+        events::log_epoch_operation("epoch_payable_pipeline_refund", validator_id);
+        Promise::new(buyer).transfer(amount)
+    }
 
     /// Used by **6** (and error paths in `unlock.rs`).
     pub(crate) fn release_validator_pool_pipeline(&mut self, validator_id: &ValidatorId) {

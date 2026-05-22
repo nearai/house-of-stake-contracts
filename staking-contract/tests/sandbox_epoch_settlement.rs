@@ -9,13 +9,13 @@
 mod mock_pool;
 
 use mock_pool::{
-    buyer_cancel_subscription, buyer_lock_for_product, buyer_lock_for_subscription,
-    buyer_storage_deposit, buyer_unlock, buyer_withdraw, buyer_withdraw_result, call_epoch_settle,
-    create_subscription_product_and_price, eprintln_wait_window_stage, fast_forward_blocks_chunked,
-    fast_forward_until_epoch_delta, fast_forward_until_timestamp, fetch_validator,
-    json_near_token_yocto, json_tx_status, json_u64_field, pool_set_fail_get_account,
-    pool_total_balance_yocto, set_mock_timestamp, setup_staking_fixture,
-    setup_staking_fixture_with_unstake_settle_epochs, top_up_buyer_near,
+    SETTLEMENT_PIPELINE_GAS_TGAS, buyer_cancel_subscription, buyer_lock_for_product,
+    buyer_lock_for_subscription, buyer_storage_deposit, buyer_unlock, buyer_withdraw,
+    buyer_withdraw_result, call_epoch_settle, create_subscription_product_and_price,
+    eprintln_wait_window_stage, fast_forward_blocks_chunked, fast_forward_until_epoch_delta,
+    fast_forward_until_timestamp, fetch_validator, json_near_token_yocto, json_tx_status,
+    json_u64_field, pool_set_fail_get_account, pool_total_balance_yocto, set_mock_timestamp,
+    setup_staking_fixture, setup_staking_fixture_with_unstake_settle_epochs, top_up_buyer_near,
 };
 use serde_json::json;
 use std::time::Instant;
@@ -98,6 +98,58 @@ async fn epoch_settle_get_account_failure_releases_busy_and_allows_retry()
 
     let v_after_retry = fetch_validator(&worker, staking.id(), pool.id()).await?;
     assert_eq!(json_tx_status(&v_after_retry["tx_status"]), Some("Idle"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn lock_refunds_deposit_when_get_account_fails() -> Result<(), Box<dyn std::error::Error>> {
+    let worker = near_workspaces::sandbox().await?;
+    let (staking, pool, owner, _product_id, price_id) = setup_staking_fixture(&worker).await?;
+    let buyer = worker.dev_create_account().await?;
+
+    buyer_storage_deposit(&buyer, staking.id()).await?;
+    let balance_before = buyer.view_account().await?.balance;
+
+    pool_set_fail_get_account(&owner, pool.id(), true).await?;
+
+    let lock_outcome = buyer
+        .call(staking.id(), "lock_for_product")
+        .args_json(json!({
+            "price_id": price_id,
+            "lock_duration_ns": SHORT_LOCK_NS,
+            "product_id": null,
+        }))
+        .deposit(near_workspaces::types::NearToken::from_near(50))
+        .gas(near_workspaces::types::Gas::from_tgas(
+            SETTLEMENT_PIPELINE_GAS_TGAS,
+        ))
+        .transact()
+        .await?;
+
+    pool_set_fail_get_account(&owner, pool.id(), false).await?;
+
+    let balance_after = buyer.view_account().await?.balance;
+    assert!(
+        balance_after
+            >= balance_before.saturating_sub(near_workspaces::types::NearToken::from_millinear(50)),
+        "lock deposit must be refunded after get_account failure (balance_before={balance_before:?} balance_after={balance_after:?})"
+    );
+
+    let v = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    assert_eq!(
+        json_tx_status(&v["tx_status"]),
+        Some("Idle"),
+        "payable abort must release pipeline Busy"
+    );
+
+    let pending_stake = json_near_token_yocto(&v["pending_to_stake"]).unwrap_or(0);
+    assert_eq!(
+        pending_stake, 0,
+        "failed lock must not queue pending_to_stake"
+    );
+
+    let _ = lock_outcome;
 
     Ok(())
 }

@@ -227,4 +227,14 @@ impl PerEpochContinue {
             | Self::SubscriptionUpgrade { validator_id, .. } => validator_id,
         }
     }
+
+    /// NEAR attached on the entry receipt for payable flows (`lock_*`, `upgrade_subscription`).
+    /// Used to refund when the async pre-user pipeline aborts before mint / upgrade commits.
+    pub fn payable_refund(&self) -> Option<(AccountId, NearToken)> {
+        match self {
+            Self::CatalogLockMint { buyer, locked, .. } => Some((buyer.clone(), *locked)),
+            Self::SubscriptionUpgrade { buyer, deposit, .. } => Some((buyer.clone(), *deposit)),
+            _ => None,
+        }
+    }
 }
