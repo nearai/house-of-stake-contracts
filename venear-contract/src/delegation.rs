@@ -79,6 +79,7 @@ impl Contract {
         owner.delegations = entries;
         self.internal_set_account(predecessor_id.clone(), owner);
 
+        self.tree.flush();
         let storage_after = env::storage_usage();
         if storage_after > storage_before {
             let storage_cost = env::storage_byte_cost()

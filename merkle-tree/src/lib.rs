@@ -177,6 +177,14 @@ where
             .and_then(|index| self.data.get(&index))
     }
 
+    /// Flushes pending writes from the lazy `near_sdk::store` maps to storage.
+    /// Call before reading `env::storage_usage()` to see writes made through `set`.
+    pub fn flush(&mut self) {
+        self.hashes.flush();
+        self.data.flush();
+        self.accounts.flush();
+    }
+
     /// Sets the value for the given account_id and returns the old value if it existed.
     pub fn set(&mut self, account_id: AccountId, new_value: V) -> Option<V> {
         self.internal_pre_update();
