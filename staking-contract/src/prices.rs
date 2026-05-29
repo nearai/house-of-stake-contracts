@@ -298,12 +298,6 @@ impl Contract {
         );
     }
 
-    pub(crate) fn require_active_recurring_monthly_price(&self, price_id: &PriceId) -> Price {
-        let (price, _) = self.get_active_price_and_product(price_id);
-        self.require_recurring_monthly_price(&price);
-        price
-    }
-
     /// Resolve price → product → pool, run catalog admin preamble, then `get_owner_id` → `build_tail(caller, price_id)`.
     pub(crate) fn promise_catalog_admin_on_price(
         &self,

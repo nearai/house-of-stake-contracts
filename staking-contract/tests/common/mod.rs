@@ -182,11 +182,19 @@ pub fn add_subscription_price(
 pub fn setup_catalog_near_subscription(contract: &mut Contract) -> (String, String) {
     add_validator_allowlisted(contract);
 
+    add_subscription_product(contract, "Sub product", 1)
+}
+
+pub fn add_subscription_product(
+    contract: &mut Contract,
+    name: &str,
+    amount_yocto: u128,
+) -> (String, String) {
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
     let product_id = contract.create_product_after_get_owner(
         acct(VALIDATOR_OWNER_ACCOUNT),
         acct(POOL),
-        "Sub product".into(),
+        name.into(),
         "Desc".into(),
         acct(VALIDATOR_OWNER_ACCOUNT),
     );
@@ -197,7 +205,7 @@ pub fn setup_catalog_near_subscription(contract: &mut Contract) -> (String, Stri
         product_id.clone(),
         "Monthly".into(),
         "".into(),
-        U128(1),
+        U128(amount_yocto),
         PriceType::Recurring,
         Some(BillingPeriod::Monthly),
         U128(LOCK_FACTOR_DENOM),

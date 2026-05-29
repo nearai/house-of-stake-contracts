@@ -3,9 +3,9 @@
 mod common;
 
 use common::{
-    BUYER, POOL, VALIDATOR_OWNER_ACCOUNT, acct, add_subscription_price, ctx, ctx_ts, deploy,
-    register_buyer, setup_catalog_near_subscription, testing_env_catalog_callback,
-    unwrap_sync_lock_id,
+    BUYER, POOL, VALIDATOR_OWNER_ACCOUNT, acct, add_subscription_price, add_subscription_product,
+    ctx, ctx_ts, deploy, register_buyer, setup_catalog_near_subscription,
+    testing_env_catalog_callback, unwrap_sync_lock_id,
 };
 use near_sdk::NearToken;
 use near_sdk::testing_env;
@@ -121,7 +121,7 @@ fn upgrade_subscription_updates_tier_and_lock_amount() {
     let amt_before = lock_before.amount_near.as_yoctonear();
 
     testing_env!(ctx(acct(BUYER), NearToken::from_near(40)));
-    let _lock_same = unwrap_sync_lock_id(c.upgrade_subscription(price_high.clone()));
+    let _lock_same = unwrap_sync_lock_id(c.upgrade_subscription(price_high.clone(), None));
 
     let sub = c
         .get_subscription_for_product(acct(BUYER), product_id)
@@ -131,6 +131,66 @@ fn upgrade_subscription_updates_tier_and_lock_amount() {
     let lock_after = c.get_lock(lock_low).expect("lock");
     assert!(lock_after.amount_near.as_yoctonear() > amt_before);
     assert_eq!(lock_after.status, LockStatus::Active);
+}
+
+#[test]
+fn upgrade_subscription_allows_different_product_on_same_validator() {
+    let mut c = deploy();
+    let (product_low, price_low) = setup_catalog_near_subscription(&mut c);
+    let (product_high, price_high) = add_subscription_product(&mut c, "High product", 10);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_low), None));
+    let sub_before = c
+        .get_subscription_for_product(acct(BUYER), product_low.clone())
+        .expect("subscription");
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_near(40)));
+    let _ = unwrap_sync_lock_id(
+        c.upgrade_subscription(price_high.clone(), Some(sub_before.subscription_id.clone())),
+    );
+
+    assert!(
+        c.get_subscription_for_product(acct(BUYER), product_low)
+            .is_none(),
+        "old product index should be removed after cross-product upgrade"
+    );
+    let sub_after = c
+        .get_subscription_for_product(acct(BUYER), product_high.clone())
+        .expect("subscription moved to new product");
+    assert_eq!(sub_after.subscription_id, sub_before.subscription_id);
+    assert_eq!(sub_after.product_id, product_high);
+    assert_eq!(sub_after.price_id, price_high);
+}
+
+#[test]
+fn get_subscriptions_for_account_lists_all_owned_subscriptions() {
+    let mut c = deploy();
+    let (product_one, price_one) = setup_catalog_near_subscription(&mut c);
+    let (product_two, price_two) = add_subscription_product(&mut c, "Second product", 2);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_one.clone()), None));
+
+    testing_env!(ctx_ts(
+        acct(BUYER),
+        NearToken::from_near(50),
+        BASE_TS.saturating_add(1)
+    ));
+    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_two.clone()), None));
+
+    let subs = c.get_subscriptions_for_account(acct(BUYER), 0, 10);
+    assert_eq!(subs.len(), 2);
+    assert!(
+        subs.iter()
+            .any(|sub| { sub.product_id == product_one && sub.price_id == price_one })
+    );
+    assert!(
+        subs.iter()
+            .any(|sub| { sub.product_id == product_two && sub.price_id == price_two })
+    );
 }
 
 #[test]
@@ -162,7 +222,7 @@ fn upgrade_subscription_uses_projected_billing_window_after_stale_end_ns() {
         .0;
     assert!(projected_end > past_period_ts);
 
-    let _ = unwrap_sync_lock_id(c.upgrade_subscription(price_high.clone()));
+    let _ = unwrap_sync_lock_id(c.upgrade_subscription(price_high.clone(), None));
 
     let sub = c
         .get_subscription_for_product(acct(BUYER), product_id)
@@ -183,7 +243,7 @@ fn upgraded_subscription_price_is_marked_in_use() {
     let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_low), None));
 
     testing_env!(ctx(acct(BUYER), NearToken::from_near(40)));
-    let _ = unwrap_sync_lock_id(c.upgrade_subscription(price_high.clone()));
+    let _ = unwrap_sync_lock_id(c.upgrade_subscription(price_high.clone(), None));
 
     let high = c.get_price(price_high.clone()).expect("high price");
     assert_eq!(high.usage_count, 1);
@@ -242,7 +302,7 @@ fn downgrade_applies_at_next_renewal() {
     let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_high.clone()), None));
 
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
-    c.schedule_downgrade_subscription(price_low.clone());
+    c.schedule_downgrade_subscription(price_low.clone(), None);
 
     let sub = c
         .get_subscription_for_product(acct(BUYER), product_id.clone())
@@ -272,6 +332,52 @@ fn downgrade_applies_at_next_renewal() {
         pending_yocto > 0,
         "Phase B tier-gap should queue NEAR to pending unstake"
     );
+}
+
+#[test]
+fn downgrade_applies_to_different_product_at_next_renewal() {
+    let mut c = deploy();
+    let (product_low, price_low) = setup_catalog_near_subscription(&mut c);
+    let (product_high, price_high) = add_subscription_product(&mut c, "High product", 10);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_high.clone()), None));
+    let sub_before = c
+        .get_subscription_for_product(acct(BUYER), product_high.clone())
+        .expect("subscription");
+    let subscription_id = sub_before.subscription_id.clone();
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    c.schedule_downgrade_subscription(price_low.clone(), Some(subscription_id.clone()));
+
+    let sub = c
+        .get_subscription_for_product(acct(BUYER), product_high.clone())
+        .expect("subscription");
+    assert_eq!(sub.pending_downgrade_price_id.as_ref(), Some(&price_low));
+    assert!(
+        c.get_subscription_for_product(acct(BUYER), product_low.clone())
+            .is_none(),
+        "target product index should not move before renewal"
+    );
+
+    let renew_ts = sub.end_ns.0.saturating_add(1);
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), renew_ts));
+    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_low.clone()), None));
+
+    assert!(
+        c.get_subscription_for_product(acct(BUYER), product_high)
+            .is_none(),
+        "old product index should be removed after cross-product downgrade renewal"
+    );
+    let sub_after = c
+        .get_subscription_for_product(acct(BUYER), product_low.clone())
+        .expect("subscription moved to target product");
+    assert_eq!(sub_after.subscription_id, subscription_id);
+    assert_eq!(sub_after.product_id, product_low);
+    assert_eq!(sub_after.price_id, price_low);
+    assert!(sub_after.pending_downgrade_price_id.is_none());
+    assert_eq!(sub_after.status, SubscriptionStatus::Active);
 }
 
 #[test]

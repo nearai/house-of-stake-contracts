@@ -790,7 +790,7 @@ pub async fn buyer_upgrade_subscription(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let lock_id: String = buyer
         .call(staking_id, "upgrade_subscription")
-        .args_json(json!({ "new_price_id": new_price_id }))
+        .args_json(json!({ "new_price_id": new_price_id, "subscription_id": null }))
         .deposit(NearToken::from_near(deposit_near))
         .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
@@ -807,7 +807,7 @@ pub async fn buyer_schedule_downgrade_subscription(
 ) -> Result<(), Box<dyn std::error::Error>> {
     buyer
         .call(staking_id, "schedule_downgrade_subscription")
-        .args_json(json!({ "target_price_id": target_price_id }))
+        .args_json(json!({ "target_price_id": target_price_id, "subscription_id": null }))
         .deposit(NearToken::from_yoctonear(1))
         .gas(WsGas::from_tgas(50))
         .transact()

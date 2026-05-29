@@ -122,10 +122,15 @@ impl Contract {
         let sub_key = (buyer.clone(), product_id.clone());
         let now = block_timestamp();
 
-        let (subscription, sub_id, is_new_index) = if let Some(sid_ref) =
-            self.subscription_by_account_product.get(&sub_key)
-        {
-            let sid = sid_ref.clone();
+        let existing_subscription_id = self.subscription_by_account_product.get(&sub_key).cloned();
+        let existing_subscription_id = if existing_subscription_id.is_some() {
+            existing_subscription_id
+        } else {
+            self.find_subscription_owned_by_pending_downgrade(&buyer, &price_id)
+                .map(|(sid, _)| sid)
+        };
+
+        let (subscription, sub_id, is_new_index) = if let Some(sid) = existing_subscription_id {
             let mut sub = self.require_subscription_by_id(&sid);
             require!(
                 sub.account_id == buyer,
@@ -142,7 +147,9 @@ impl Contract {
             } else if sub.cancel_at_period_end {
                 // Period has ended with cancel-at-end: remove stale index and subscription so this call
                 // creates a fresh subscription (same path as first-time subscribe).
-                self.subscription_by_account_product.remove(&sub_key);
+                let old_sub_key = (buyer.clone(), sub.product_id.clone());
+                self.subscription_by_account_product.remove(&old_sub_key);
+                self.remove_subscription_from_account_index(&buyer, &sid);
                 self.subscriptions.remove(sid.as_str());
                 let anchor = anchor_day_from_timestamp(now);
                 let end = crate::subscriptions::add_months_stripe_style(anchor, 1, now);
@@ -384,8 +391,10 @@ impl Contract {
                 subscription.product_id.clone(),
             );
             self.internal_set_subscription(sub_id.clone(), subscription);
+            self.add_subscription_to_account_index(&buyer, &sub_id);
             if is_new_index {
-                self.subscription_by_account_product.insert(sub_key, sub_id);
+                self.subscription_by_account_product
+                    .insert(sub_key, sub_id.clone());
             }
         }
 

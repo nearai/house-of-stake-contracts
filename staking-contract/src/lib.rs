@@ -40,6 +40,7 @@ enum StorageKeys {
     UserPendingUnstake,
     UserLockCount,
     SubscriptionByAccountProduct,
+    SubscriptionsByAccount,
 }
 
 #[derive(PanicOnDefault)]
@@ -76,6 +77,9 @@ pub struct Contract {
     pub user_lock_count: LookupMap<AccountId, u32>,
     /// Secondary index: `(subscriber, product_id)` → `subscription_id` for at-most-one subscription per product per account.
     pub subscription_by_account_product: LookupMap<(AccountId, ProductId), SubscriptionId>,
+    /// Secondary index: `subscriber` → owned subscription ids. Used for account-level listing and
+    /// subscription-specific plan changes without scanning the full catalog.
+    pub subscriptions_by_account: LookupMap<AccountId, Vec<SubscriptionId>>,
     /// Counter mixed into deterministic ids ([`crate::ids`]) for products, prices, subscriptions, locks.
     pub id_nonce: u64,
 }
@@ -102,6 +106,7 @@ impl Contract {
             subscription_by_account_product: LookupMap::new(
                 StorageKeys::SubscriptionByAccountProduct,
             ),
+            subscriptions_by_account: LookupMap::new(StorageKeys::SubscriptionsByAccount),
             id_nonce: 0,
         }
     }
