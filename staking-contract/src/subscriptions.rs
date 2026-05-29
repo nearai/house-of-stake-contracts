@@ -1,5 +1,5 @@
 //! Subscription billing helpers (Stripe-style linear months) and subscription **lifecycle** RPCs
-//! (`cancel_subscription`, `update_subscription`, …). Subscription **locking** (`lock_for_subscription`)
+//! (`cancel_subscription`, `update_subscription`, …). Subscription **locking** (`lock`)
 //! stays in [`crate::lock`] because it shares the pool refresh / mint pipeline with product locks.
 
 use crate::utils::{AVG_MONTH_NS, block_timestamp, check_near_price_lock, near_from_shares};
@@ -58,7 +58,7 @@ impl Contract {
         );
         require!(
             block_timestamp() < sub.end_ns.0,
-            "Current billing period has ended; subscribe again with lock_for_subscription instead"
+            "Current billing period has ended; subscribe again with lock instead"
         );
         sub.cancel_at_period_end = false;
         self.internal_set_subscription(sid.clone(), sub.clone());
@@ -68,7 +68,7 @@ impl Contract {
     /// Update a subscription to a target recurring tier and explicit target stake amount.
     ///
     /// Stake increases apply immediately after the shared validator settlement pipeline. Stake decreases
-    /// are scheduled for the next billing period and applied by `lock_for_subscription` at renewal.
+    /// are scheduled for the next billing period and applied by `lock` at renewal.
     #[payable]
     pub fn update_subscription(
         &mut self,

@@ -11,7 +11,7 @@ use std::path::Path;
 /// `10^24` — matches `staking_contract::utils::LOCK_FACTOR_DENOM`.
 pub const LOCK_FACTOR_DENOM: &str = "1000000000000000000000000";
 
-/// Prepaid gas for `lock_for_product`, `unlock`, `withdraw`, and `epoch_settle`.
+/// Prepaid gas for `lock`, `unlock`, `withdraw`, and `epoch_settle`.
 /// NEAR caps prepaid gas at 300 TGas per transaction; long settlement promise chains
 /// forward unused gas from this budget.
 pub const SETTLEMENT_PIPELINE_GAS_TGAS: u64 = 300;
@@ -368,7 +368,7 @@ pub async fn top_up_buyer_near(
     Ok(())
 }
 
-pub async fn buyer_lock_for_product(
+pub async fn buyer_lock_one_off(
     buyer: &near_workspaces::Account,
     staking_id: &near_workspaces::AccountId,
     price_id: &str,
@@ -376,7 +376,7 @@ pub async fn buyer_lock_for_product(
     deposit_near: u128,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let lock_id: String = buyer
-        .call(staking_id, "lock_for_product")
+        .call(staking_id, "lock")
         .args_json(json!({
             "price_id": price_id,
             "lock_duration_ns": lock_duration_ns,
@@ -391,17 +391,18 @@ pub async fn buyer_lock_for_product(
     Ok(lock_id)
 }
 
-pub async fn buyer_lock_for_subscription(
+pub async fn buyer_lock_subscription(
     buyer: &near_workspaces::Account,
     staking_id: &near_workspaces::AccountId,
     price_id: &str,
     deposit_near: u128,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let lock_id: String = buyer
-        .call(staking_id, "lock_for_subscription")
+        .call(staking_id, "lock")
         .args_json(json!({
             "price_id": price_id,
             "product_id": null,
+            "lock_duration_ns": null,
         }))
         .deposit(NearToken::from_near(deposit_near))
         .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))

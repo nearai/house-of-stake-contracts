@@ -34,7 +34,7 @@ pub fn one_yocto() -> NearToken {
     NearToken::from_yoctonear(1)
 }
 
-/// `lock_for_product` / `lock_for_subscription` return [`PromiseOrValue`] on the WASM ABI. On **non-WASM**
+/// `lock` returns [`PromiseOrValue`] on the WASM ABI. On **non-WASM**
 /// targets (host `tests/*.rs`, `cargo check` on the host triple), the contract uses a synchronous mint path
 /// so `testing_env!` does not need to resolve promise chains. Integration tests build the library without
 /// `cfg(test)` but still hit that path via `not(target_arch = "wasm32")` in `lock.rs`.

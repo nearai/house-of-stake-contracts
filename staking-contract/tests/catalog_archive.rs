@@ -11,7 +11,7 @@ use near_sdk::{NearToken, testing_env};
 
 #[test]
 #[should_panic(expected = "This price is not active")]
-fn lock_for_product_rejects_archived_price() {
+fn lock_rejects_archived_price() {
     let mut c = deploy();
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
     register_buyer(&mut c);
@@ -25,12 +25,12 @@ fn lock_for_product_rejects_archived_price() {
 
     let dur = c.get_config().min_lock_duration_ns.0.saturating_add(10_000);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    c.lock_for_product(Some(price_id), U64(dur), None);
+    c.lock(Some(price_id), None, Some(U64(dur)));
 }
 
 #[test]
 #[should_panic(expected = "This product is not active")]
-fn lock_for_product_rejects_archived_product() {
+fn lock_rejects_archived_product() {
     let mut c = deploy();
     let (product_id, price_id) = setup_catalog_near_oneoff(&mut c);
     register_buyer(&mut c);
@@ -44,5 +44,5 @@ fn lock_for_product_rejects_archived_product() {
 
     let dur = c.get_config().min_lock_duration_ns.0.saturating_add(10_000);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    c.lock_for_product(Some(price_id), U64(dur), None);
+    c.lock(Some(price_id), None, Some(U64(dur)));
 }

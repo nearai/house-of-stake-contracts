@@ -12,41 +12,68 @@ fn anchor_day_from_timestamp(ts: u64) -> u8 {
 
 #[near]
 impl Contract {
-    /// Lock NEAR for a one-off product purchase. Attach the NEAR to lock.
+    /// Lock NEAR for a catalog price. Attach the NEAR to lock.
     ///
     /// Provide **exactly one** of **`price_id`** or **`product_id`**:
     /// - **`price_id: Some`**, **`product_id: null`** — lock using that catalog price (same as always).
     /// - **`price_id: null`**, **`product_id: Some`** — lock using [`Product::default_price_id`](crate::types::Product::default_price_id) for that product (`set_product_default_price`).
+    ///
+    /// One-off prices require `lock_duration_ns`. Recurring monthly subscription prices must omit
+    /// `lock_duration_ns`; the lock duration is derived from the subscription billing period.
     #[payable]
-    pub fn lock_for_product(
+    pub fn lock(
         &mut self,
         price_id: Option<PriceId>,
-        lock_duration_ns: U64,
         product_id: Option<ProductId>,
+        lock_duration_ns: Option<U64>,
     ) -> PromiseOrValue<LockId> {
         let resolved = self.resolve_price_id_for_lock(price_id, product_id);
-        self.lock_for_product_with_price_id(resolved, lock_duration_ns)
+        self.lock_with_price_id(resolved, lock_duration_ns)
     }
 
-    fn lock_for_product_with_price_id(
+    fn lock_with_price_id(
         &mut self,
         price_id: PriceId,
-        lock_duration_ns: U64,
+        lock_duration_ns: Option<U64>,
     ) -> PromiseOrValue<LockId> {
         self.require_enough_gas_for_epoch_settlement();
         let (buyer, locked) = self.lock_entry_preamble();
+        let (price, product) = self.get_active_price_and_product(&price_id);
 
+        match price.price_type {
+            PriceType::OneOff => {
+                let lock_duration_ns = lock_duration_ns.unwrap_or_else(|| {
+                    env::panic_str("lock_duration_ns is required for one-off prices")
+                });
+                self.lock_one_off_with_catalog(buyer, locked, price, product, lock_duration_ns)
+            }
+            PriceType::Recurring => {
+                require!(
+                    lock_duration_ns.is_none(),
+                    "lock_duration_ns must be omitted for recurring subscription prices"
+                );
+                self.lock_recurring_subscription_with_catalog(buyer, locked, price, product)
+            }
+        }
+    }
+
+    fn lock_one_off_with_catalog(
+        &mut self,
+        buyer: AccountId,
+        locked: NearToken,
+        price: Price,
+        product: Product,
+        lock_duration_ns: U64,
+    ) -> PromiseOrValue<LockId> {
         let dur = lock_duration_ns.0;
         require!(
             dur >= self.internal_get_config().min_lock_duration_ns.0
                 && dur <= self.internal_get_config().max_lock_duration_ns.0,
             "Lock duration is outside the allowed range for this contract"
         );
-
-        let (price, product) = self.get_active_price_and_product(&price_id);
         require!(
             price.price_type == PriceType::OneOff,
-            "Recurring prices: use lock_for_subscription with price_id or product_id"
+            "This price is not a one-off product price"
         );
         require!(
             price.billing_period.is_none(),
@@ -94,30 +121,19 @@ impl Contract {
         }
     }
 
-    /// Lock NEAR for a **monthly recurring** catalog price (NEAR-denominated). One subscription per
-    /// `(account, product_id)`; [`Subscription::price_id`] is the active tier.
-    ///
-    /// Provide **exactly one** of **`price_id`** or **`product_id`** (same rules as [`Contract::lock_for_product`]).
-    #[payable]
-    pub fn lock_for_subscription(
+    fn lock_recurring_subscription_with_catalog(
         &mut self,
-        price_id: Option<PriceId>,
-        product_id: Option<ProductId>,
+        buyer: AccountId,
+        locked: NearToken,
+        price: Price,
+        product: Product,
     ) -> PromiseOrValue<LockId> {
-        let resolved = self.resolve_price_id_for_lock(price_id, product_id);
-        self.lock_for_subscription_with_price_id(resolved)
-    }
-
-    fn lock_for_subscription_with_price_id(&mut self, price_id: PriceId) -> PromiseOrValue<LockId> {
-        self.require_enough_gas_for_epoch_settlement();
-        let (buyer, locked) = self.lock_entry_preamble();
-
-        let (price, product) = self.get_active_price_and_product(&price_id);
         self.require_recurring_monthly_price(&price);
 
         let validator_id = product.validator_id.clone();
         self.assert_validator_active_for_lock(&validator_id);
 
+        let price_id = price.price_id.clone();
         let product_id = product.product_id.clone();
         let sub_key = (buyer.clone(), product_id.clone());
         let now = block_timestamp();
@@ -252,7 +268,7 @@ impl Contract {
         };
 
         let _validator = self.require_validator_idle(&validator_id);
-        // Same host synchronous path as `lock_for_product_with_price_id` (see comment there).
+        // Same host synchronous path as the one-off branch (see comment there).
         #[cfg(not(target_arch = "wasm32"))]
         {
             return PromiseOrValue::Value(self.commit_catalog_lock(
@@ -427,7 +443,7 @@ impl Contract {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    /// Host-only: skips pool balance refresh and stake promises (see module comment on `lock_for_product`).
+    /// Host-only: skips pool balance refresh and stake promises (see module comment on `lock`).
     pub(crate) fn finalize_lock(
         &mut self,
         buyer: AccountId,

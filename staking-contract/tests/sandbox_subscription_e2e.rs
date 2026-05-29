@@ -8,7 +8,7 @@
 mod mock_pool;
 
 use mock_pool::{
-    buyer_lock_for_subscription, buyer_schedule_downgrade_subscription, buyer_storage_deposit,
+    buyer_lock_subscription, buyer_schedule_downgrade_subscription, buyer_storage_deposit,
     buyer_upgrade_subscription, create_recurring_price_on_product,
     create_subscription_product_and_price, json_near_token_yocto, json_u64_field,
     set_mock_timestamp, setup_staking_fixture, top_up_buyer_near,
@@ -32,7 +32,7 @@ async fn sandbox_upgrade_subscription_raises_tier_and_lock_amount()
 
     let buyer = worker.dev_create_account().await?;
     buyer_storage_deposit(&buyer, staking.id()).await?;
-    let lock_id = buyer_lock_for_subscription(&buyer, staking.id(), &price_low, 50).await?;
+    let lock_id = buyer_lock_subscription(&buyer, staking.id(), &price_low, 50).await?;
 
     let lock_before: serde_json::Value = worker
         .view(staking.id(), "get_lock")
@@ -100,7 +100,7 @@ async fn sandbox_schedule_downgrade_applies_on_renewal() -> Result<(), Box<dyn s
 
     let buyer = worker.dev_create_account().await?;
     buyer_storage_deposit(&buyer, staking.id()).await?;
-    let _lock_high = buyer_lock_for_subscription(&buyer, staking.id(), &price_high, 50).await?;
+    let _lock_high = buyer_lock_subscription(&buyer, staking.id(), &price_high, 50).await?;
     let sub_before: serde_json::Value = worker
         .view(staking.id(), "get_subscription_for_product")
         .args_json(json!({
@@ -139,7 +139,7 @@ async fn sandbox_schedule_downgrade_applies_on_renewal() -> Result<(), Box<dyn s
     set_mock_timestamp(&buyer, staking.id(), end_ns.saturating_add(1)).await?;
 
     top_up_buyer_near(&worker, &buyer, 50).await?;
-    let _renew = buyer_lock_for_subscription(&buyer, staking.id(), &price_low, 25).await?;
+    let _renew = buyer_lock_subscription(&buyer, staking.id(), &price_low, 25).await?;
 
     let sub_after: serde_json::Value = worker
         .view(staking.id(), "get_subscription_for_product")

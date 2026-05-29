@@ -30,7 +30,7 @@ fn storage_withdraw_rejects_dropping_below_required_retention() {
 
     let dur = c.get_config().min_lock_duration_ns.0.saturating_add(1);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    let _ = c.lock_for_product(Some(price_id), near_sdk::json_types::U64(dur), None);
+    let _ = c.lock(Some(price_id), None, Some(near_sdk::json_types::U64(dur)));
 
     // After one lock, required prepaid is min 100m + 50m × 1 lock = 150m; withdrawing 60m would drop below.
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));

@@ -44,7 +44,7 @@ fn remove_validator_fails_while_pending_stake_exists() {
 
     let dur = c.get_config().min_lock_duration_ns.0.saturating_add(10_000);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    let _ = c.lock_for_product(Some(price_id), U64(dur), None);
+    let _ = c.lock(Some(price_id), None, Some(U64(dur)));
 
     testing_env!(ctx(acct(OWNER), one_yocto()));
     c.remove_validator(acct(POOL));

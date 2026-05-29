@@ -85,7 +85,7 @@ async fn staking_epoch_settle_fast_path_succeeds_after_lock_consumed_slot()
         .into_result()?;
 
     buyer
-        .call(staking.id(), "lock_for_product")
+        .call(staking.id(), "lock")
         .args_json(json!({
             "price_id": price_id,
             "lock_duration_ns": "1000000000000000",
@@ -97,7 +97,7 @@ async fn staking_epoch_settle_fast_path_succeeds_after_lock_consumed_slot()
         .await?
         .into_result()?;
 
-    // `lock_for_product` already ran the per-epoch pipeline; a second `epoch_settle` is a fast-path no-op.
+    // `lock` already ran the per-epoch pipeline; a second `epoch_settle` is a fast-path no-op.
     call_epoch_settle(&buyer, staking.id(), pool.id())
         .await?
         .into_result()?;
@@ -142,7 +142,7 @@ async fn staking_two_locks_aggregate_then_epoch_settle_next_epoch_clears_pending
             .into_result()?;
 
         buyer
-            .call(staking.id(), "lock_for_product")
+            .call(staking.id(), "lock")
             .args_json(json!({
                 "price_id": price_id,
                 "lock_duration_ns": lock_dur,
@@ -196,8 +196,7 @@ async fn staking_two_locks_aggregate_then_epoch_settle_next_epoch_clears_pending
 }
 
 #[tokio::test]
-async fn staking_pause_validator_blocks_new_lock_for_product()
--> Result<(), Box<dyn std::error::Error>> {
+async fn staking_pause_validator_blocks_new_lock() -> Result<(), Box<dyn std::error::Error>> {
     let staking_wasm = staking_wasm_bytes_test().map_err(|e| format!("staking wasm: {e}"))?;
     let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
 
@@ -238,7 +237,7 @@ async fn staking_pause_validator_blocks_new_lock_for_product()
         .into_result()?;
 
     let outcome = buyer
-        .call(staking.id(), "lock_for_product")
+        .call(staking.id(), "lock")
         .args_json(json!({
             "price_id": price_id,
             "lock_duration_ns": "1000000000000000",
@@ -251,7 +250,7 @@ async fn staking_pause_validator_blocks_new_lock_for_product()
 
     assert!(
         outcome.is_failure(),
-        "lock_for_product should fail while validator is paused"
+        "lock should fail while validator is paused"
     );
 
     Ok(())
@@ -290,7 +289,7 @@ async fn staking_contract_pause_blocks_epoch_settle() -> Result<(), Box<dyn std:
         .into_result()?;
 
     buyer
-        .call(staking.id(), "lock_for_product")
+        .call(staking.id(), "lock")
         .args_json(json!({
             "price_id": price_id,
             "lock_duration_ns": "1000000000000000",
@@ -356,7 +355,7 @@ async fn staking_withdraw_succeeds_after_unlock_and_epoch_gates()
     // Short lock so `fast_forward_until_timestamp` reaches `end_ns` quickly (config allows `min_lock_duration_ns` = 1).
     let lock_duration_ns = "1000000000";
     let lock_id: String = buyer
-        .call(staking.id(), "lock_for_product")
+        .call(staking.id(), "lock")
         .args_json(json!({
             "price_id": price_id,
             "lock_duration_ns": lock_duration_ns,
@@ -442,7 +441,7 @@ async fn staking_withdraw_fails_when_pool_withdraw_bucket_not_ready()
 
     let lock_duration_ns = "1000000000";
     let lock_id: String = buyer
-        .call(staking.id(), "lock_for_product")
+        .call(staking.id(), "lock")
         .args_json(json!({
             "price_id": price_id,
             "lock_duration_ns": lock_duration_ns,
@@ -663,7 +662,7 @@ async fn staking_validator_total_staked_balance_matches_pool_after_lock()
         .into_result()?;
 
     buyer
-        .call(staking.id(), "lock_for_product")
+        .call(staking.id(), "lock")
         .args_json(json!({
             "price_id": price_id,
             "lock_duration_ns": "1000000000000000",
@@ -691,7 +690,7 @@ async fn staking_validator_total_staked_balance_matches_pool_after_lock()
 
     assert_eq!(
         recorded, pool_total,
-        "after `lock_for_product`, pre-user settlement should align Validator.total_staked_balance with the pool view"
+        "after `lock`, pre-user settlement should align Validator.total_staked_balance with the pool view"
     );
 
     Ok(())

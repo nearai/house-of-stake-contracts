@@ -24,7 +24,7 @@ todos:
     content: "Implement accounts.rs: Account struct, NEP-145 storage_deposit/withdraw, per-validator share holdings"
     status: pending
   - id: lock_module
-    content: "Implement lock.rs: lock_for_product, lock_for_subscription, NEAR price check, share minting, pending_to_stake accounting"
+    content: "Implement lock.rs: lock, lock, NEAR price check, share minting, pending_to_stake accounting"
     status: pending
   - id: unlock_module
     content: "Implement unlock.rs: user-driven unlock; shared per-epoch settlement then queue unstake (see LAZY_EPOCH_PIPELINE.md)"
@@ -117,7 +117,7 @@ Add a new crate inside the workspace mirroring sibling crates. Suggested files (
 - `utils.rs` — share pool math, `check_near_price_lock` (NEAR-only duration-weighted sufficiency vs catalog line item).
 - `accounts.rs` — `Account` (prepaid storage only), NEP-145-style `storage_deposit` / `storage_withdraw`.
 - `ids.rs` — Stripe-style identifier wrappers (`ProductId`, `PriceId`, `SubscriptionId`, `LockId`) plus deterministic on-chain ID generator.
-- `lock.rs` — `lock_for_product`, `lock_for_subscription`, `check_near_price_lock`, finalize lock and `pending_to_stake` accounting.
+- `lock.rs` — `lock`, `lock`, `check_near_price_lock`, finalize lock and `pending_to_stake` accounting.
 - `unlock.rs` — `unlock(lock_id)`, user-initiated only.
 - `withdraw.rs` — user **`withdraw(validator_id)`** (tranche claims + transfer; may chain pool withdraw per lazy pipeline).
 - `epoch.rs` — `try_epoch_stake_or_unstake`, `try_epoch_withdraw`, promise chains and self-callbacks for pool operations; public **`epoch_settle(validator_id)`** for manual retry. No separate `pool_callbacks.rs` module in-tree.
@@ -304,14 +304,14 @@ Notes:
 
 ## 5. Lifecycle flows
 
-### 5.1 Locking for a one-off product purchase (`lock_for_product`)
+### 5.1 Locking for a one-off product purchase (`lock`)
 
 ```mermaid
 sequenceDiagram
     participant User
     participant StakeDao as stake.dao
 
-    User->>StakeDao: lock_for_product(price_id XOR product_id, duration_ns) attached_deposit=N NEAR
+    User->>StakeDao: lock(price_id XOR product_id, duration_ns) attached_deposit=N NEAR
     StakeDao->>StakeDao: assert_not_paused, load Price and Product, assert validator Active
     StakeDao->>StakeDao: check_near_price_lock(price, N, duration_ns)
     StakeDao->>StakeDao: mint shares for N at validator (last balance + pending_to_stake)
@@ -321,10 +321,10 @@ sequenceDiagram
 ```
 
 Notes:
-- Production `lock_for_product` / `lock_for_subscription` return `PromiseOrValue<LockId>`: after optional pre-user balance sync and `try_epoch_stake_or_unstake`, the contract mints shares and records `pending_to_stake`; actual `deposit_and_stake` follows the per-epoch rules in [`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md) (not a separate public `epoch_stake` call).
+- Production `lock` / `lock` return `PromiseOrValue<LockId>`: after optional pre-user balance sync and `try_epoch_stake_or_unstake`, the contract mints shares and records `pending_to_stake`; actual `deposit_and_stake` follows the per-epoch rules in [`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md) (not a separate public `epoch_stake` call).
 - Catalog mutations (`create_product`, `create_price`, …) use a pool `get_owner_id` callback to verify the validator owner; that is unrelated to pricing—locks are priced purely in NEAR on-chain as above.
 
-### 5.2 Locking for a subscription (`lock_for_subscription`)
+### 5.2 Locking for a subscription (`lock`)
 
 - Caller passes `price_id` with `Price.price_type == Recurring` (monthly billing period in the implementation).
 - Contract creates a new `Subscription` (or extends an existing active one for the same price), pinning `Subscription.anchor_day = day_of_month(start_ns)` on creation, then extends and creates a corresponding `Lock`.
@@ -451,7 +451,7 @@ Extend [common/src/events.rs](house-of-stake-contracts/common/src/events.rs) (ne
 ## 12. Testing strategy
 
 - Unit tests inside each module using `near_sdk::testing_env!` for share math, `check_near_price_lock`, lock duration bounds, paused/owner asserts.
-- Integration-style tests in [staking-contract/tests/](../tests/) (deploy catalog via pool-owner callbacks, `lock_for_product` / `lock_for_subscription`, storage). Full epoch/pool pipelines may use workspace integration tests or sandbox later.
+- Integration-style tests in [staking-contract/tests/](../tests/) (deploy catalog via pool-owner callbacks, `lock` / `lock`, storage). Full epoch/pool pipelines may use workspace integration tests or sandbox later.
 - Scenarios worth covering:
   - Owner setup → add validator → create product+price → user lock → (sandbox: advance epochs / drive `unlock` / `withdraw` / `epoch_settle` as needed) → claim path.
   - Insufficient NEAR or duration for catalog line → lock panics.

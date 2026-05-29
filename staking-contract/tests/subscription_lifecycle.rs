@@ -24,7 +24,7 @@ fn cancel_then_renew_after_period_opens_fresh_subscription() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let lock_first = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_id.clone()), None));
+    let lock_first = unwrap_sync_lock_id(c.lock(Some(price_id.clone()), None, None));
 
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
     c.cancel_subscription(product_id.clone());
@@ -36,7 +36,7 @@ fn cancel_then_renew_after_period_opens_fresh_subscription() {
 
     let renew_ts = sub.end_ns.0.saturating_add(1);
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), renew_ts));
-    let lock_second = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_id.clone()), None));
+    let lock_second = unwrap_sync_lock_id(c.lock(Some(price_id.clone()), None, None));
     assert_ne!(
         lock_first, lock_second,
         "renewal after cancelled period should mint a new lock"
@@ -59,7 +59,7 @@ fn resume_subscription_clears_cancel_before_period_end() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let _lock_first = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_id.clone()), None));
+    let _lock_first = unwrap_sync_lock_id(c.lock(Some(price_id.clone()), None, None));
 
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
     c.cancel_subscription(product_id.clone());
@@ -92,7 +92,7 @@ fn resume_subscription_fails_after_period_end() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_id), None));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_id), None, None));
 
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
     c.cancel_subscription(product_id.clone());
@@ -118,7 +118,7 @@ fn upgrade_subscription_updates_tier_and_lock_amount() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let lock_low = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_low.clone()), None));
+    let lock_low = unwrap_sync_lock_id(c.lock(Some(price_low.clone()), None, None));
     let lock_before = c.get_lock(lock_low.clone()).expect("lock");
     let amt_before = lock_before.amount_near.as_yoctonear();
 
@@ -156,7 +156,7 @@ fn upgrade_subscription_allows_different_product_on_same_validator() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_low), None));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_low), None, None));
     let sub_before = c
         .get_subscription_for_product(acct(BUYER), product_low.clone())
         .expect("subscription");
@@ -189,14 +189,14 @@ fn get_subscriptions_for_account_lists_all_owned_subscriptions() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_one.clone()), None));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_one.clone()), None, None));
 
     testing_env!(ctx_ts(
         acct(BUYER),
         NearToken::from_near(50),
         BASE_TS.saturating_add(1)
     ));
-    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_two.clone()), None));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_two.clone()), None, None));
 
     let subs = c.get_subscriptions_for_account(acct(BUYER), 0, 10);
     assert_eq!(subs.len(), 2);
@@ -218,7 +218,7 @@ fn upgrade_subscription_uses_projected_billing_window_after_stale_end_ns() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_low), None));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_low), None, None));
 
     let stored_end = c
         .get_subscription_for_product(acct(BUYER), product_id.clone())
@@ -264,7 +264,7 @@ fn upgraded_subscription_price_is_marked_in_use() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_low), None));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_low), None, None));
 
     let sub = c
         .get_subscription_for_product(acct(BUYER), product_id.clone())
@@ -296,7 +296,7 @@ fn upgrade_callback_rejects_price_archived_after_entry_checks() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_low), None));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_low), None, None));
     let sub = c
         .get_subscription_for_product(acct(BUYER), product_id)
         .expect("subscription");
@@ -331,7 +331,7 @@ fn downgrade_applies_at_next_renewal() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_high.clone()), None));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_high.clone()), None, None));
 
     let sub_high = c
         .get_subscription_for_product(acct(BUYER), product_id.clone())
@@ -350,7 +350,7 @@ fn downgrade_applies_at_next_renewal() {
 
     let renew_ts = sub.end_ns.0.saturating_add(1);
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(25), renew_ts));
-    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_low.clone()), None));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_low.clone()), None, None));
 
     let sub_after = c
         .get_subscription_for_product(acct(BUYER), product_id)
@@ -381,7 +381,7 @@ fn downgrade_applies_to_different_product_at_next_renewal() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_high.clone()), None));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_high.clone()), None, None));
     let sub_before = c
         .get_subscription_for_product(acct(BUYER), product_high.clone())
         .expect("subscription");
@@ -406,7 +406,7 @@ fn downgrade_applies_to_different_product_at_next_renewal() {
 
     let renew_ts = sub.end_ns.0.saturating_add(1);
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(25), renew_ts));
-    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_low.clone()), None));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_low.clone()), None, None));
 
     assert!(
         c.get_subscription_for_product(acct(BUYER), product_high)
@@ -441,7 +441,7 @@ fn active_subscription_view_projects_next_cycle_after_period_end() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_id.clone()), None));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_id.clone()), None, None));
 
     let stored = c
         .get_subscription_for_product(acct(BUYER), product_id.clone())
@@ -476,7 +476,7 @@ fn cancelled_subscription_view_does_not_project_after_period_end() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_id.clone()), None));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_id.clone()), None, None));
 
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
     c.cancel_subscription(product_id.clone());
@@ -510,7 +510,7 @@ fn cancel_subscription_normalizes_stale_window_before_marking_cancel_at_end() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_id), None));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_id), None, None));
     let initial = c
         .get_subscription_for_product(acct(BUYER), product_id.clone())
         .expect("subscription");

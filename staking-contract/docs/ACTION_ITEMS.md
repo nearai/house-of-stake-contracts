@@ -30,7 +30,7 @@ Backlog for taking **`stake.dao`** (`staking-contract`) from **implemented v1** 
 
 ### End-to-end funds path
 
-- [x] **Sandbox E2E (mock pool)** — Golden path in [`sandbox_golden_path.rs`](../tests/sandbox_golden_path.rs): **`lock_for_product`** → **`epoch_settle`** → **`unlock`** → settlement epochs → **`withdraw(validator_id)`** with NEAR received by buyer. Deeper pipeline cases remain in [`sandbox_mock_pool.rs`](../tests/sandbox_mock_pool.rs) and [`sandbox_epoch_settlement.rs`](../tests/sandbox_epoch_settlement.rs).
+- [x] **Sandbox E2E (mock pool)** — Golden path in [`sandbox_golden_path.rs`](../tests/sandbox_golden_path.rs): **`lock`** → **`epoch_settle`** → **`unlock`** → settlement epochs → **`withdraw(validator_id)`** with NEAR received by buyer. Deeper pipeline cases remain in [`sandbox_mock_pool.rs`](../tests/sandbox_mock_pool.rs) and [`sandbox_epoch_settlement.rs`](../tests/sandbox_epoch_settlement.rs).
 - [ ] **Testnet validation on a real pool** — Deploy via [`scripts/deploy_testnet_staking_stack.sh`](../../scripts/deploy_testnet_staking_stack.sh) (mock pool) **and** exercise at least one **production-shaped** staking pool account on testnet (allowlist, catalog, lock, unlock, withdraw). Mock pool behavior must not be the only pre-mainnet evidence.
 - [ ] **Concurrent / retry behavior** — QA `tx_status == Busy` (overlapping lock/unlock/withdraw), failed pool callbacks, and **`epoch_settle`** recovery; ensure users are never permanently stuck.
 
@@ -49,7 +49,7 @@ Backlog for taking **`stake.dao`** (`staking-contract`) from **implemented v1** 
 
 ### Integrator-facing
 
-- [ ] **Minimum prepaid gas** — Publish recommended TGas for `lock_for_product`, `lock_for_subscription`, `unlock`, `withdraw`, `upgrade_subscription` (see [`gas.rs`](../src/gas.rs) `EPOCH_SETTLEMENT_MIN_GAS` and callback budgets). Verify `require_enough_gas_for_epoch_settlement` thresholds against worst-case chains on testnet.
+- [ ] **Minimum prepaid gas** — Publish recommended TGas for `lock`, `lock`, `unlock`, `withdraw`, `upgrade_subscription` (see [`gas.rs`](../src/gas.rs) `EPOCH_SETTLEMENT_MIN_GAS` and callback budgets). Verify `require_enough_gas_for_epoch_settlement` thresholds against worst-case chains on testnet.
 - [ ] **Wallet / SDK copy** — Clear errors for: insufficient storage deposit, below `min_lock_amount`, lock not ended, withdraw before tranche `available_epoch_height`, validator paused/removed.
 
 ---
@@ -63,7 +63,7 @@ Backlog for taking **`stake.dao`** (`staking-contract`) from **implemented v1** 
 
 ### Product / economics
 
-- [ ] **Automatic downgrade at period end** — Today downgrade applies only when the user calls **`lock_for_subscription`** after `end_ns` ([issue](issues/automatic-subscription-downgrade-at-period-end.md)). Decide: ship v1 with manual renewal + docs, or implement keeper/callback at period boundary before launch.
+- [ ] **Automatic downgrade at period end** — Today downgrade applies only when the user calls **`lock`** after `end_ns` ([issue](issues/automatic-subscription-downgrade-at-period-end.md)). Decide: ship v1 with manual renewal + docs, or implement keeper/callback at period boundary before launch.
 - [ ] **Calendar-accurate billing** — Replace linear [`add_months_stripe_style`](../src/subscriptions.rs) with true calendar month / anchor-day end dates (anchor_day is stored; logic is approximate today).
 - [ ] **Stranded `pending_to_withdraw` dust** — Rounding can leave bucket balance with zero user liability ([DESIGN.md](DESIGN.md) §7). Either implement owner-only **`sweep_stranded_withdraw_bucket`**, or accept dust and document for governance.
 
@@ -89,7 +89,7 @@ Backlog for taking **`stake.dao`** (`staking-contract`) from **implemented v1** 
 | Lazy pool pipeline | `lock` / `unlock` / `withdraw` / `epoch_settle`; no public batch `epoch_*` ([`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md)) |
 | Unlock → withdraw | Pro-rata tranches, pool withdraw chain, NEAR transfer to user |
 | NEAR-only catalog | No oracle / USD path |
-| Subscriptions | `lock_for_subscription`, cancel / resume / upgrade / schedule downgrade, Phase B prorate at renewal |
+| Subscriptions | `lock`, cancel / resume / upgrade / schedule downgrade, Phase B prorate at renewal |
 | Storage | NEP-145 `storage_deposit` / `storage_withdraw`, per-lock storage stake |
 | Governance | Owner, guardians, pause, upgrade, validator allowlist, catalog via pool `get_owner_id` |
 | Events | `EVENT_JSON` for indexing |

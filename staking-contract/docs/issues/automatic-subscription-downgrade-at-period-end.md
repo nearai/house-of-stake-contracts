@@ -8,7 +8,7 @@
 
 ## Summary
 
-Scheduled subscription downgrades (`schedule_downgrade_subscription`) are **not applied when the current billing period ends**. The contract only records `pending_downgrade_price_id` and waits for the subscriber to manually call `lock_for_subscription` with the lower tier after `subscription.end_ns`.
+Scheduled subscription downgrades (`schedule_downgrade_subscription`) are **not applied when the current billing period ends**. The contract only records `pending_downgrade_price_id` and waits for the subscriber to manually call `lock` with the lower tier after `subscription.end_ns`.
 
 From a subscriber and product perspective, this is a **bug**: users expect “downgrade at end of period” to take effect automatically at period boundary, similar to Stripe-style cancel-at-period-end / tier changes at renewal.
 
@@ -24,7 +24,7 @@ From a subscriber and product perspective, this is a **bug**: users expect “do
 
 ### Phase B — manual renewal required
 
-Downgrade **completes** only when the user sends a successful **`lock_for_subscription`** transaction **after** `block_timestamp >= subscription.end_ns`, with:
+Downgrade **completes** only when the user sends a successful **`lock`** transaction **after** `block_timestamp >= subscription.end_ns`, with:
 
 - `price_id` equal to the scheduled lower tier, and  
 - Attached NEAR satisfying `check_near_price_lock` for the new period.
@@ -42,9 +42,9 @@ There is **no on-chain cron, keeper, or callback at `end_ns`**. Period end alone
 | Step | Location |
 |------|----------|
 | Schedule downgrade | `subscriptions.rs` — `schedule_downgrade_subscription` |
-| Renewal gate (`now >= end_ns`) | `lock.rs` — `lock_for_subscription_with_price_id` |
+| Renewal gate (`now >= end_ns`) | `lock.rs` — `lock_with_price_id` |
 | Prorate at commit | `subscriptions.rs` — `apply_pending_downgrade_before_renewal_lock` |
-| Docs | `docs/API.md` — “lower tier applied at next `lock_for_subscription` renewal” |
+| Docs | `docs/API.md` — “lower tier applied at next `lock` renewal” |
 
 ---
 
@@ -53,7 +53,7 @@ There is **no on-chain cron, keeper, or callback at `end_ns`**. Period end alone
 When a user schedules a downgrade:
 
 1. **Through the current period:** remain on the higher tier (no mid-cycle refund) — acceptable.
-2. **When the current period ends (`end_ns`):** downgrade should **complete automatically** without requiring a separate `lock_for_subscription` call, including:
+2. **When the current period ends (`end_ns`):** downgrade should **complete automatically** without requiring a separate `lock` call, including:
    - `price_id` → lower tier  
    - Tier-gap prorate applied (Phase B)  
    - Next billing period opened (or clearly defined stake/lock state for the lower tier)  
@@ -90,13 +90,13 @@ Any fix should preserve recent pipeline safety work: prorate must not run before
 ### Option B — Auto-apply tier + prorate only; lock still manual
 
 - At period end (via keeper call): run prorate + update `price_id` + extend `start_ns`/`end_ns` **without** minting a new lock.
-- User still calls `lock_for_subscription` to stake for the new period.
+- User still calls `lock` to stake for the new period.
 
 Smaller change but still not fully “automatic subscription renewal.”
 
 ### Option C — Off-chain automation only
 
-- Indexer + backend calls `lock_for_subscription` on behalf of users after `end_ns` (signed meta-tx / account abstraction).
+- Indexer + backend calls `lock` on behalf of users after `end_ns` (signed meta-tx / account abstraction).
 
 No contract change; operational burden and trust model shift.
 
@@ -104,7 +104,7 @@ No contract change; operational burden and trust model shift.
 
 ## Acceptance criteria (suggested)
 
-- [ ] After `schedule_downgrade_subscription`, when `block_timestamp >= subscription.end_ns`, tier change can complete **without** the user calling `lock_for_subscription` manually (define exact method: on-chain keeper vs documented off-chain service).
+- [ ] After `schedule_downgrade_subscription`, when `block_timestamp >= subscription.end_ns`, tier change can complete **without** the user calling `lock` manually (define exact method: on-chain keeper vs documented off-chain service).
 - [ ] Phase B prorate runs **once**, only after successful settlement (no regression of idempotent commit path).
 - [ ] `pending_downgrade_price_id` cleared when downgrade completes; `price_id` reflects lower tier.
 - [ ] Behavior documented in `API.md` / `CORE_FEATURES.md`.
@@ -121,5 +121,5 @@ No contract change; operational burden and trust model shift.
 
 ## References
 
-- Review thread: scheduled downgrade applied only at manual `lock_for_subscription` renewal.  
+- Review thread: scheduled downgrade applied only at manual `lock` renewal.  
 - Test (happy path, manual renewal): `tests/subscription_lifecycle.rs` — `downgrade_applies_at_next_renewal`.

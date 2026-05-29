@@ -1,6 +1,6 @@
 //! Documented golden-path sandbox E2E for one-off catalog locks:
 //!
-//! `lock_for_product` → `epoch_settle` (stake on pool) → wait for `lock.end_ns` → `unlock` →
+//! `lock` → `epoch_settle` (stake on pool) → wait for `lock.end_ns` → `unlock` →
 //! two `epoch_settle` passes (pool unstake + withdraw into contract) → `withdraw(validator_id)` → buyer receives NEAR.
 //!
 //! Build: `make staking-contract-test mock-staking-pool-contract` (from repo root).
@@ -9,9 +9,9 @@
 mod mock_pool;
 
 use mock_pool::{
-    buyer_lock_for_product, buyer_storage_deposit, buyer_withdraw,
-    drive_validator_settlement_epochs, fetch_validator, json_near_token_yocto, json_tx_status,
-    setup_staking_fixture, unlock_lock_after_expiry,
+    buyer_lock_one_off, buyer_storage_deposit, buyer_withdraw, drive_validator_settlement_epochs,
+    fetch_validator, json_near_token_yocto, json_tx_status, setup_staking_fixture,
+    unlock_lock_after_expiry,
 };
 use serde_json::json;
 
@@ -27,8 +27,7 @@ async fn golden_path_lock_settle_unlock_withdraw_pays_buyer()
     let operator = worker.dev_create_account().await?;
 
     buyer_storage_deposit(&buyer, staking.id()).await?;
-    let lock_id =
-        buyer_lock_for_product(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
+    let lock_id = buyer_lock_one_off(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
 
     // Step 1 — stake queued NEAR from the lock onto the mock pool.
     drive_validator_settlement_epochs(&worker, &operator, staking.id(), pool.id(), 1).await?;

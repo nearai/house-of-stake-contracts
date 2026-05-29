@@ -9,8 +9,8 @@
 mod mock_pool;
 
 use mock_pool::{
-    SETTLEMENT_PIPELINE_GAS_TGAS, buyer_cancel_subscription, buyer_lock_for_product,
-    buyer_lock_for_subscription, buyer_storage_deposit, buyer_unlock, buyer_withdraw,
+    SETTLEMENT_PIPELINE_GAS_TGAS, buyer_cancel_subscription, buyer_lock_one_off,
+    buyer_lock_subscription, buyer_storage_deposit, buyer_unlock, buyer_withdraw,
     buyer_withdraw_result, call_epoch_settle, create_subscription_product_and_price,
     eprintln_wait_window_stage, fast_forward_blocks_chunked, fast_forward_until_epoch_delta,
     fast_forward_until_timestamp, fetch_validator, json_near_token_yocto, json_tx_status,
@@ -30,7 +30,7 @@ async fn lock_runs_settlement_pipeline_and_clears_tx_status()
     let buyer = worker.dev_create_account().await?;
 
     buyer_storage_deposit(&buyer, staking.id()).await?;
-    buyer_lock_for_product(&buyer, staking.id(), &price_id, "1000000000000000", 50).await?;
+    buyer_lock_one_off(&buyer, staking.id(), &price_id, "1000000000000000", 50).await?;
 
     let v = fetch_validator(&worker, staking.id(), pool.id()).await?;
     assert_eq!(
@@ -60,7 +60,7 @@ async fn epoch_settle_fast_path_succeeds_when_slot_already_consumed()
     let buyer = worker.dev_create_account().await?;
 
     buyer_storage_deposit(&buyer, staking.id()).await?;
-    buyer_lock_for_product(&buyer, staking.id(), &price_id, "1000000000000000", 50).await?;
+    buyer_lock_one_off(&buyer, staking.id(), &price_id, "1000000000000000", 50).await?;
 
     let again = call_epoch_settle(&buyer, staking.id(), pool.id()).await?;
     again.into_result()?;
@@ -114,7 +114,7 @@ async fn lock_refunds_deposit_when_get_account_fails() -> Result<(), Box<dyn std
     pool_set_fail_get_account(&owner, pool.id(), true).await?;
 
     let lock_outcome = buyer
-        .call(staking.id(), "lock_for_product")
+        .call(staking.id(), "lock")
         .args_json(json!({
             "price_id": price_id,
             "lock_duration_ns": SHORT_LOCK_NS,
@@ -164,7 +164,7 @@ async fn epoch_settle_same_epoch_fast_path_leaves_pending_until_next_epoch()
 
     for buyer in [&buyer_a, &buyer_b] {
         buyer_storage_deposit(buyer, staking.id()).await?;
-        buyer_lock_for_product(buyer, staking.id(), &price_id, "1000000000000000", 50).await?;
+        buyer_lock_one_off(buyer, staking.id(), &price_id, "1000000000000000", 50).await?;
     }
 
     let v_mid = fetch_validator(&worker, staking.id(), pool.id()).await?;
@@ -199,7 +199,7 @@ async fn two_locks_then_epoch_settle_next_epoch_stakes_on_pool()
 
     for buyer in [&buyer_a, &buyer_b] {
         buyer_storage_deposit(buyer, staking.id()).await?;
-        buyer_lock_for_product(buyer, staking.id(), &price_id, "1000000000000000", 50).await?;
+        buyer_lock_one_off(buyer, staking.id(), &price_id, "1000000000000000", 50).await?;
     }
 
     let pool_before = pool_total_balance_yocto(&worker, pool.id(), staking.id()).await?;
@@ -233,8 +233,7 @@ async fn unlock_queues_unstake_then_epoch_settle_next_epoch_clears_pending()
     let buyer = worker.dev_create_account().await?;
 
     buyer_storage_deposit(&buyer, staking.id()).await?;
-    let lock_id =
-        buyer_lock_for_product(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
+    let lock_id = buyer_lock_one_off(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
     fast_forward_until_epoch_delta(&worker, 1, Some(&buyer), Some(staking.id())).await?;
     call_epoch_settle(&buyer, staking.id(), pool.id())
         .await?
@@ -293,10 +292,8 @@ async fn repeated_unstake_wait_window_does_not_wedge_busy() -> Result<(), Box<dy
     for buyer in [&buyer_a, &buyer_b] {
         buyer_storage_deposit(buyer, staking.id()).await?;
     }
-    let lock_a =
-        buyer_lock_for_product(&buyer_a, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
-    let lock_b =
-        buyer_lock_for_product(&buyer_b, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
+    let lock_a = buyer_lock_one_off(&buyer_a, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
+    let lock_b = buyer_lock_one_off(&buyer_b, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
 
     let v_after_locks = fetch_validator(&worker, staking.id(), pool.id()).await?;
     eprintln_wait_window_stage(&worker, staking.id(), "after both locks", &v_after_locks).await?;
@@ -413,8 +410,7 @@ async fn epoch_settle_net_zero_when_stake_and_unstake_pending_match()
     let buyer = worker.dev_create_account().await?;
 
     buyer_storage_deposit(&buyer, staking.id()).await?;
-    let lock_id =
-        buyer_lock_for_product(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
+    let lock_id = buyer_lock_one_off(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
 
     // Stake the first lock's pending queue in a fresh epoch.
     fast_forward_until_epoch_delta(&worker, 1, Some(&buyer), Some(staking.id())).await?;
@@ -439,7 +435,7 @@ async fn epoch_settle_net_zero_when_stake_and_unstake_pending_match()
     // Same NEAR epoch: unlock queues unstake; a second lock queues matching stake (no pool op yet).
     top_up_buyer_near(&worker, &buyer, 50).await?;
     buyer_unlock(&buyer, staking.id(), &lock_id).await?;
-    buyer_lock_for_product(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
+    buyer_lock_one_off(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
 
     let v_before = fetch_validator(&worker, staking.id(), pool.id()).await?;
     let stake_p = json_near_token_yocto(&v_before["pending_to_stake"]).unwrap_or(0);
@@ -487,8 +483,7 @@ async fn withdraw_runs_settlement_prefetch_before_payout() -> Result<(), Box<dyn
     let operator = worker.dev_create_account().await?;
 
     buyer_storage_deposit(&buyer, staking.id()).await?;
-    let lock_id =
-        buyer_lock_for_product(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
+    let lock_id = buyer_lock_one_off(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
 
     let lock: serde_json::Value = worker
         .view(staking.id(), "get_lock")
@@ -538,8 +533,7 @@ async fn early_withdraw_failure_still_releases_busy_and_later_retry_succeeds()
     let operator = worker.dev_create_account().await?;
 
     buyer_storage_deposit(&buyer, staking.id()).await?;
-    let lock_id =
-        buyer_lock_for_product(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
+    let lock_id = buyer_lock_one_off(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
 
     let lock: serde_json::Value = worker
         .view(staking.id(), "get_lock")
@@ -617,9 +611,9 @@ async fn cancel_subscription_after_long_idle_normalizes_end_and_renews_from_fres
     buyer_storage_deposit(&buyer, staking.id()).await?;
     eprintln!("[timing] buyer_storage_deposit: {:?}", t_step.elapsed());
     let t_step = Instant::now();
-    let _first_lock = buyer_lock_for_subscription(&buyer, staking.id(), &sub_price_id, 50).await?;
+    let _first_lock = buyer_lock_subscription(&buyer, staking.id(), &sub_price_id, 50).await?;
     eprintln!(
-        "[timing] first buyer_lock_for_subscription: {:?}",
+        "[timing] first buyer_lock_subscription: {:?}",
         t_step.elapsed()
     );
 
@@ -673,7 +667,7 @@ async fn cancel_subscription_after_long_idle_normalizes_end_and_renews_from_fres
 
     // Renewal needs another 50 NEAR attached; dev account is ~50 NEAR after the first lock + gas.
     top_up_buyer_near(&worker, &buyer, 50).await?;
-    let _second_lock = buyer_lock_for_subscription(&buyer, staking.id(), &sub_price_id, 50).await?;
+    let _second_lock = buyer_lock_subscription(&buyer, staking.id(), &sub_price_id, 50).await?;
 
     let sub_after_renew: serde_json::Value = worker
         .view(staking.id(), "get_subscription_for_product")
@@ -708,7 +702,7 @@ async fn cancel_subscription_after_long_idle_then_unlock_requests_unstake()
     let buyer = worker.dev_create_account().await?;
 
     buyer_storage_deposit(&buyer, staking.id()).await?;
-    let lock_id = buyer_lock_for_subscription(&buyer, staking.id(), &sub_price_id, 50).await?;
+    let lock_id = buyer_lock_subscription(&buyer, staking.id(), &sub_price_id, 50).await?;
 
     // Ensure initial pending stake is settled before we run unlock later.
     fast_forward_until_epoch_delta(&worker, 1, Some(&buyer), Some(staking.id())).await?;

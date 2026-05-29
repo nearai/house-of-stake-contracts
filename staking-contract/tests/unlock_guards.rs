@@ -19,7 +19,7 @@ fn unlock_rejects_wrong_predecessor() {
     let dur = c.get_config().min_lock_duration_ns.0.saturating_add(50_000);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), start_ts));
-    let lock_id = unwrap_sync_lock_id(c.lock_for_product(Some(price_id), U64(dur), None));
+    let lock_id = unwrap_sync_lock_id(c.lock(Some(price_id), None, Some(U64(dur))));
 
     let lock = c.get_lock(lock_id.clone()).expect("lock");
     let end_ns = lock.end_ns.0;
@@ -39,7 +39,7 @@ fn unlock_rejects_before_end_ns() {
     let dur = c.get_config().min_lock_duration_ns.0.saturating_add(50_000);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), start_ts));
-    let lock_id = unwrap_sync_lock_id(c.lock_for_product(Some(price_id), U64(dur), None));
+    let lock_id = unwrap_sync_lock_id(c.lock(Some(price_id), None, Some(U64(dur))));
 
     testing_env!(ctx_ts(acct(BUYER), one_yocto(), start_ts.saturating_add(1)));
     c.unlock(lock_id);
@@ -56,7 +56,7 @@ fn unlock_rejects_unknown_lock_id() {
     let dur = c.get_config().min_lock_duration_ns.0.saturating_add(50_000);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), start_ts));
-    let _ = unwrap_sync_lock_id(c.lock_for_product(Some(price_id), U64(dur), None));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_id), None, Some(U64(dur))));
 
     testing_env!(ctx_ts(
         acct(BUYER),
@@ -78,7 +78,7 @@ fn unlock_rejects_second_call_after_unlock_requested() {
     let dur = c.get_config().min_lock_duration_ns.0.saturating_add(50_000);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), start_ts));
-    let lock_id = unwrap_sync_lock_id(c.lock_for_product(Some(price_id), U64(dur), None));
+    let lock_id = unwrap_sync_lock_id(c.lock(Some(price_id), None, Some(U64(dur))));
 
     let lock = c.get_lock(lock_id.clone()).expect("lock");
     let end_ns = lock.end_ns.0;

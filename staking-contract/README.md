@@ -33,7 +33,7 @@ For **sandbox integration tests** that exercise real pool cross-contract calls, 
 
 Typical sequence after locks exist (no public `epoch_stake` / `epoch_unstake` / `epoch_withdraw` batch APIs; pool work is driven from user methods and optional **`epoch_settle`**; see [`docs/LAZY_EPOCH_PIPELINE.md`](docs/LAZY_EPOCH_PIPELINE.md)):
 
-1. **`lock_for_product` / `lock_for_subscription`** — Mints shares, queues `pending_to_stake`, then [`try_epoch_stake_or_unstake`](src/epoch.rs) runs after balance refresh (one pool **`deposit_and_stake`** or **`unstake`** per NEAR epoch, net of pending buckets).
+1. **`lock` / `lock`** — Mints shares, queues `pending_to_stake`, then [`try_epoch_stake_or_unstake`](src/epoch.rs) runs after balance refresh (one pool **`deposit_and_stake`** or **`unstake`** per NEAR epoch, net of pending buckets).
 2. User **`unlock`** — After lock period; refresh balance, queue unstake, then **`unstake`** / withdraw-from-pool as needed.
 3. Wait **`epoch_unstake_settle_epochs`** (config) after each successful pool **`unstake`**.
 4. User **`withdraw(validator_id)`** — May pull unstaked NEAR from the pool into `pending_to_withdraw` when allowed, then pro-rata claim and **transfer** that NEAR to the caller in one flow.
@@ -50,12 +50,12 @@ Implemented in code:
 - On-contract validator **allowlist** (`add_validator`, `pause_validator`, `remove_validator`)
 - Validator-owner **catalog** (`create_product`, `create_price`, …)
 - Stripe-like deterministic IDs (`prod_*`, `price_*`, `lock_*`, `sub_*`)
-- Share minting and lock pricing helpers ([`utils.rs`](src/utils.rs)) and NEAR-denominated `lock_for_product` / `lock_for_subscription`
+- Share minting and lock pricing helpers ([`utils.rs`](src/utils.rs)) and NEAR-denominated `lock` / `lock`
 - Subscriptions keyed by `(account_id, product_id)` with tier = [`Subscription::price_id`](src/types.rs): **`cancel_subscription`**, **`update_subscription`** ([`subscriptions.rs`](src/subscriptions.rs)). On renewal with a scheduled decrease, **Phase B prorate** releases stake above the target amount into the normal unstake queue ([`subscriptions.rs`](src/subscriptions.rs) / [`lock.rs`](src/lock.rs) / [`unlock.rs`](src/unlock.rs)).
 - `unlock` (user-driven pool unstake path); **`lock_for_*`** schedules refresh + net pool settle; **`withdraw`** may chain pool withdraw then pro-rata payout; **`epoch_settle`** retries settlement
 - Pool callbacks in [`epoch.rs`](src/epoch.rs); **`storage_withdraw`**
 - **EVENT_JSON** for lock/unlock, catalog, validators, epoch ops, claim/withdraw, pool withdraw-in ([`events.rs`](src/events.rs)) — `standard: "stake.dao"`, `version: "1.0.0"`, nested `data`
-- **`get_products`**, **`get_product_default_price`**, catalog **`unarchive_*`**, **`set_product_default_price`**; **`lock_for_product`** / **`lock_for_subscription`** accept explicit **`price_id`** or **`product_id`** (uses **`Product.default_price_id`**) ([`products.rs`](src/products.rs), [`lock.rs`](src/lock.rs))
+- **`get_products`**, **`get_product_default_price`**, catalog **`unarchive_*`**, **`set_product_default_price`**; **`lock`** / **`lock`** accept explicit **`price_id`** or **`product_id`** (uses **`Product.default_price_id`**) ([`products.rs`](src/products.rs), [`lock.rs`](src/lock.rs))
 
 **Before mainnet:** see [docs/ACTION_ITEMS.md](docs/ACTION_ITEMS.md) for the production readiness checklist (audit, real-pool testnet validation, deploy runbook, E2E tests, and launch follow-ups).
 

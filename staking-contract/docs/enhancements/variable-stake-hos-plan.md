@@ -118,7 +118,7 @@ pending_downgrade_target_amount: Option<NearToken or U128>
 
 At renewal:
 
-- Require `lock_for_subscription` to use the pending target price.
+- Require `lock` to use the pending target price.
 - Require the attached lock amount to match the pending target amount.
 - Apply the pending price and target amount.
 - Release surplus stake from the previous subscription lock.
@@ -142,7 +142,7 @@ Keep:
 
 No migration is needed because the staking contract has not launched.
 
-One-off credit purchase remains on `lock_for_product` and is not changed by this plan.
+One-off credit purchase remains on `lock` and is not changed by this plan.
 
 ## chat-api Changes
 
@@ -228,8 +228,8 @@ Credit behavior:
 
 Add or update host tests for:
 
-- Initial `lock_for_subscription` accepts any amount within the plan range.
-- Initial `lock_for_subscription` rejects amounts below min or at/above max.
+- Initial `lock` accepts any amount within the plan range.
+- Initial `lock` rejects amounts below min or at/above max.
 - Immediate stake increase returns `changed_immediately` and a `lock_id`.
 - Stake decrease returns `scheduled_for_period_end`.
 - Scheduled decrease applies at renewal.

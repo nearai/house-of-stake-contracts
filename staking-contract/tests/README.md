@@ -25,7 +25,7 @@ cargo test -p staking-contract --test sandbox_golden_path
 cargo test -p staking-contract --test sandbox_subscription_e2e
 ```
 
-**Golden path** (`sandbox_golden_path`): one documented flow — `lock_for_product` → `epoch_settle` → `unlock` → two settlement epochs → `withdraw(validator_id)` with NEAR received by the buyer.
+**Golden path** (`sandbox_golden_path`): one documented flow — `lock` → `epoch_settle` → `unlock` → two settlement epochs → `withdraw(validator_id)` with NEAR received by the buyer.
 
 **Subscriptions** (`sandbox_subscription_e2e`): `update_subscription` increase/decrease + renewal under sandbox (complements host [`subscription_lifecycle.rs`](subscription_lifecycle.rs)).
 
