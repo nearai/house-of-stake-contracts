@@ -16,7 +16,7 @@ fn storage_withdraw_rejects_amount_above_prepaid() {
 }
 
 #[test]
-#[should_panic(expected = "Must retain required storage (min + per-lock stake)")]
+#[should_panic(expected = "Must retain required storage (min + per-record stake)")]
 fn storage_withdraw_rejects_dropping_below_required_retention() {
     let mut cfg = base_config();
     cfg.per_lock_storage_stake = NearToken::from_millinear(50);

@@ -27,6 +27,9 @@ pub struct Config {
     /// Per **lock ever created** (see [`crate::Contract::user_lock_count`]); zero disables the extra
     /// requirement beyond [`Self::min_storage_deposit`].
     pub per_lock_storage_stake: NearToken,
+    /// Per **direct purchase ever created** (see [`crate::Contract::user_purchase_count`]); zero disables
+    /// the extra requirement beyond [`Self::min_storage_deposit`].
+    pub per_purchase_storage_stake: NearToken,
     /// Minimum NEAR attached for locks and subscription payments. Governance cannot set this below
     /// [`PROTOCOL_MIN_LOCK_AMOUNT_YOCTO`] (see [`require_min_lock_amount_at_protocol_floor`]).
     pub min_lock_amount: NearToken,

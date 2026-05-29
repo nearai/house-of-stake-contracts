@@ -145,6 +145,7 @@ pub struct Config {
     pub epoch_unstake_settle_epochs: u64,
     pub min_storage_deposit: NearToken,
     pub per_lock_storage_stake: NearToken,
+    pub per_purchase_storage_stake: NearToken,
     pub min_lock_amount: NearToken,
 }
 ```
@@ -372,7 +373,7 @@ Two distinct roles. The contract owner administers the protocol; each validator 
 
 - `propose_new_owner_account_id`, `accept_ownership`.
 - `set_guardians`.
-- `set_lock_bounds`, `set_min_lock_amount`, `set_min_storage_deposit`, `set_per_lock_storage_stake`, `set_epoch_unstake_settle_epochs` (see [governance.rs](../src/governance.rs)).
+- `set_lock_bounds`, `set_min_lock_amount`, `set_min_storage_deposit`, `set_per_lock_storage_stake`, `set_per_purchase_storage_stake`, `set_epoch_unstake_settle_epochs` (see [governance.rs](../src/governance.rs)).
 
 Validator allowlist (contract owner only):
 - `add_validator(validator_id)` — synchronous; inserts into the on-contract `validators` map with `total_shares = 0`, `status = Active` (the on-contract `validators` map is itself the allowlist; see §4.2). Pool ownership for catalog changes is always verified via on-chain `get_owner_id` (§6).

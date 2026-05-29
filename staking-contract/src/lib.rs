@@ -9,6 +9,7 @@ pub mod governance;
 pub mod ids;
 pub mod lock;
 pub mod pause;
+pub mod payments;
 pub mod prices;
 pub mod products;
 pub mod subscriptions;
@@ -23,7 +24,7 @@ pub use config::Config;
 pub use types::*;
 
 use near_sdk::store::{LookupMap, Vector};
-use near_sdk::{AccountId, BorshStorageKey, PanicOnDefault, near};
+use near_sdk::{AccountId, BorshStorageKey, NearToken, PanicOnDefault, near};
 
 #[derive(BorshStorageKey)]
 #[near]
@@ -41,6 +42,13 @@ enum StorageKeys {
     UserLockCount,
     SubscriptionByAccountProduct,
     SubscriptionsByAccount,
+    Purchases,
+    PurchaseIds,
+    PurchasesByAccount,
+    PurchasesByProduct,
+    UserPurchaseCount,
+    RevenueByValidator,
+    RevenueByProduct,
 }
 
 #[derive(PanicOnDefault)]
@@ -75,6 +83,20 @@ pub struct Contract {
     pub user_pending_unstake: LookupMap<(AccountId, ValidatorId), Vec<PendingUnstakeTranche>>,
     /// Monotonic count of locks created per account; multiplied by [`Config::per_lock_storage_stake`] for prepaid lock storage.
     pub user_lock_count: LookupMap<AccountId, u32>,
+    /// Direct one-off payment records keyed by [`Purchase::purchase_id`] (`pay_*`).
+    pub purchases: LookupMap<PurchaseId, VPurchase>,
+    /// Creation order of direct payment records; drives paginated purchase views.
+    pub purchase_ids: Vector<PurchaseId>,
+    /// Secondary index: purchaser account → purchase ids.
+    pub purchases_by_account: LookupMap<AccountId, Vec<PurchaseId>>,
+    /// Secondary index: product id → purchase ids.
+    pub purchases_by_product: LookupMap<ProductId, Vec<PurchaseId>>,
+    /// Monotonic count of direct purchases created per account; multiplied by [`Config::per_purchase_storage_stake`].
+    pub user_purchase_count: LookupMap<AccountId, u32>,
+    /// Withdrawable direct-payment revenue aggregated by validator pool account.
+    pub revenue_by_validator: LookupMap<ValidatorId, NearToken>,
+    /// Direct-payment revenue aggregated by product for accounting views.
+    pub revenue_by_product: LookupMap<ProductId, NearToken>,
     /// Secondary index: `(subscriber, product_id)` → `subscription_id` for at-most-one subscription per product per account.
     pub subscription_by_account_product: LookupMap<(AccountId, ProductId), SubscriptionId>,
     /// Secondary index: `subscriber` → owned subscription ids. Used for account-level listing and
@@ -103,6 +125,13 @@ impl Contract {
             user_validator_shares: LookupMap::new(StorageKeys::UserValidatorShares),
             user_pending_unstake: LookupMap::new(StorageKeys::UserPendingUnstake),
             user_lock_count: LookupMap::new(StorageKeys::UserLockCount),
+            purchases: LookupMap::new(StorageKeys::Purchases),
+            purchase_ids: Vector::new(StorageKeys::PurchaseIds),
+            purchases_by_account: LookupMap::new(StorageKeys::PurchasesByAccount),
+            purchases_by_product: LookupMap::new(StorageKeys::PurchasesByProduct),
+            user_purchase_count: LookupMap::new(StorageKeys::UserPurchaseCount),
+            revenue_by_validator: LookupMap::new(StorageKeys::RevenueByValidator),
+            revenue_by_product: LookupMap::new(StorageKeys::RevenueByProduct),
             subscription_by_account_product: LookupMap::new(
                 StorageKeys::SubscriptionByAccountProduct,
             ),

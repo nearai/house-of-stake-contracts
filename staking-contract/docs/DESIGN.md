@@ -21,7 +21,7 @@ Non-goals (for v1):
 - Granting veNEAR voting power for `stake.dao` locks (kept independent of `venear-contract` in the shipped v1 contract). See [VENEAR_INTEGRATION.md](VENEAR_INTEGRATION.md) for the v2 design (opt-in per lock, `on_stake_dao_update` to veNEAR).
 - Liquid staking tokens (no fungible share token issued; shares are internal).
 - Cross-validator rebalancing / autocompounding (stake stays where the user purchased).
-- On-chain credit redemption — "credits" are an off-chain billing concept driven by `lock` events.
+- On-chain credit redemption — "credits" are an off-chain billing concept driven by `lock` events or direct `pay` purchase records.
 
 ## 2. System architecture
 
@@ -49,15 +49,16 @@ Key roles:
 
 ## 3. Crate layout
 
-See source files under [src/](../src/). Key modules: `config`, `types`, `ids`, `validators`, `products`, `accounts`, `governance`, `pause`, `upgrade`, `lock`, `unlock`, `withdraw`, **`epoch`** (pool cross-contract calls and self-callbacks; `try_epoch_stake_or_unstake` / `try_epoch_withdraw`, `epoch_settle`), `prices`, `subscriptions`, `events`, `gas`, `utils` (share math and NEAR price lock check).
+See source files under [src/](../src/). Key modules: `config`, `types`, `ids`, `validators`, `products`, `accounts`, `governance`, `pause`, `upgrade`, `lock`, `payments`, `unlock`, `withdraw`, **`epoch`** (pool cross-contract calls and self-callbacks; `try_epoch_stake_or_unstake` / `try_epoch_withdraw`, `epoch_settle`), `prices`, `subscriptions`, `events`, `gas`, `utils` (share math and NEAR price lock check).
 
 ## 4. Data model (summary)
 
-- **Contract state**: `config`, `paused`, `validators` (allowlist + pool accounting), `validator_ids`, `product_ids`, catalog maps (`products`, `prices`), `accounts`, `subscriptions`, `locks`, `user_validator_shares`, `user_pending_unstake`, `user_lock_count` (locks ever created; drives per-lock storage requirement), `subscription_by_account_product`, `id_nonce`.
-- **Config**: owner, guardians, min/max lock duration, `epoch_unstake_settle_epochs`, min storage deposit, `per_lock_storage_stake`, min lock amount. No oracle, no **`operators`** field (removed with the lazy pipeline).
+- **Contract state**: `config`, `paused`, `validators` (allowlist + pool accounting), `validator_ids`, `product_ids`, catalog maps (`products`, `prices`), `accounts`, `subscriptions`, `locks`, direct-payment `purchases`, `user_validator_shares`, `user_pending_unstake`, `user_lock_count` (locks ever created; drives per-lock storage requirement), `user_purchase_count` (direct purchases ever created; drives per-purchase storage requirement), `subscription_by_account_product`, `id_nonce`.
+- **Config**: owner, guardians, min/max lock duration, `epoch_unstake_settle_epochs`, min storage deposit, `per_lock_storage_stake`, `per_purchase_storage_stake`, min lock amount. No oracle, no **`operators`** field (removed with the lazy pipeline).
 - **Validator**: `validator_id` (staking pool account id), status, `total_shares`, `total_staked_balance`, pending stake/unstake/withdraw, `last_unstake_epoch`, `last_settlement_epoch`, and `tx_status` (Idle/Busy), etc. (see [validators.rs](../src/validators.rs)). Catalog auth uses the pool’s `get_owner_id()`, not a cached owner on `Validator`.
 - **Price**: NEAR amount in yocto, `price_type` (one-off vs recurring), optional `billing_period`, `lock_factor_near_months` for the duration-weighted sufficiency check.
 - **IDs**: `prod_*`, `price_*`, `sub_*`, `lock_*` with deterministic base62 suffixes (details in [PLAN.md](PLAN.md)).
+- **Direct payments**: `pay` accepts exact NEAR for active one-off prices, stores `pay_*` `Purchase` records, and accrues validator-level revenue withdrawable by the pool owner through `withdraw_revenue`.
 - **Unlock**: The lock owner calls `unlock(lock_id)` once `now >= lock.end_ns`; after the shared per-epoch pipeline, shares convert to NEAR liability and unstake is queued (see [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md)).
 
 ## 5. Governance

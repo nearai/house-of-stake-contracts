@@ -329,7 +329,7 @@ impl Contract {
     ///
     /// Exactly one of `price_id` or `product_id` must be `Some`. If only `product_id` is given,
     /// the product's default catalog price is used; that price must belong to the same product.
-    fn resolve_price_id_for_lock(
+    pub(crate) fn resolve_price_id_for_lock(
         &self,
         price_id: Option<PriceId>,
         product_id: Option<ProductId>,

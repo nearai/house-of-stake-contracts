@@ -6,7 +6,8 @@ impl Contract {
     /// NEP-145-style: attach NEAR to register an account for locks and withdrawals.
     /// **Storage:** [`crate::config::Config::min_storage_deposit`] +
     /// [`crate::config::Config::per_lock_storage_stake`] × [`crate::Contract::user_lock_count`] (locks ever
-    /// created; not decremented on unlock).
+    /// created; not decremented on unlock) +
+    /// [`crate::config::Config::per_purchase_storage_stake`] × [`crate::Contract::user_purchase_count`].
     #[payable]
     pub fn storage_deposit(&mut self) {
         self.assert_not_paused();
@@ -44,13 +45,13 @@ impl Contract {
             "Withdraw exceeds prepaid storage"
         );
 
-        let required_yocto = self.required_storage_deposit_yocto(&account_id, 0);
+        let required_yocto = self.required_storage_deposit_yocto(&account_id, 0, 0);
         let after = storage_yocto
             .checked_sub(amount.as_yoctonear())
             .expect("Internal error: storage withdraw amount was not bounded correctly");
         require!(
             after >= required_yocto,
-            "Must retain required storage (min + per-lock stake)"
+            "Must retain required storage (min + per-record stake)"
         );
 
         account.storage_deposit = NearToken::from_yoctonear(after);
@@ -90,24 +91,36 @@ impl Contract {
         );
     }
 
-    /// `extra_locks` = additional locks we are about to add (0 when not creating a lock).
+    /// `extra_locks` / `extra_purchases` = additional records we are about to add.
     pub(crate) fn required_storage_deposit_yocto(
         &self,
         account_id: &AccountId,
         extra_locks: u32,
+        extra_purchases: u32,
     ) -> u128 {
         let base = self
             .internal_get_config()
             .min_storage_deposit
             .as_yoctonear();
-        let per = self
+        let per_lock = self
             .internal_get_config()
             .per_lock_storage_stake
             .as_yoctonear();
+        let per_purchase = self
+            .internal_get_config()
+            .per_purchase_storage_stake
+            .as_yoctonear();
         let recorded_lock_count =
             self.user_lock_count.get(account_id).copied().unwrap_or(0) as u128;
+        let recorded_purchase_count = self
+            .user_purchase_count
+            .get(account_id)
+            .copied()
+            .unwrap_or(0) as u128;
         let total_locks = recorded_lock_count.saturating_add(u128::from(extra_locks));
-        base.saturating_add(per.saturating_mul(total_locks))
+        let total_purchases = recorded_purchase_count.saturating_add(u128::from(extra_purchases));
+        base.saturating_add(per_lock.saturating_mul(total_locks))
+            .saturating_add(per_purchase.saturating_mul(total_purchases))
     }
 
     /// Account registered and still meets global [`crate::config::Config::min_storage_deposit`] only (no per-lock surcharge).
@@ -124,7 +137,14 @@ impl Contract {
     /// Before creating a lock: require prepaid storage for one more lock entry.
     pub(crate) fn ensure_min_storage_for_new_lock(&self, account_id: &AccountId) {
         let account = self.require_registered_account(account_id);
-        let need = self.required_storage_deposit_yocto(account_id, 1);
+        let need = self.required_storage_deposit_yocto(account_id, 1, 0);
         self.assert_storage_deposit_at_least(&account, need, "Top up storage for another lock");
+    }
+
+    /// Before creating a direct purchase: require prepaid storage for one more purchase entry.
+    pub(crate) fn ensure_min_storage_for_new_purchase(&self, account_id: &AccountId) {
+        let account = self.require_registered_account(account_id);
+        let need = self.required_storage_deposit_yocto(account_id, 0, 1);
+        self.assert_storage_deposit_at_least(&account, need, "Top up storage for another purchase");
     }
 }

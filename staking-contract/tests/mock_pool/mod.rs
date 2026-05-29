@@ -68,6 +68,7 @@ pub fn staking_new_args_e2e(owner: &near_workspaces::AccountId) -> serde_json::V
             "epoch_unstake_settle_epochs": 1,
             "min_storage_deposit": "10000000000000000000000",
             "per_lock_storage_stake": "0",
+            "per_purchase_storage_stake": "0",
             "min_lock_amount": "1000000000000000000000000",
         }
     })
@@ -598,6 +599,7 @@ pub async fn setup_staking_fixture_with_unstake_settle_epochs(
                         "epoch_unstake_settle_epochs": epoch_unstake_settle_epochs,
                         "min_storage_deposit": "10000000000000000000000",
                         "per_lock_storage_stake": "0",
+                        "per_purchase_storage_stake": "0",
                         "min_lock_amount": "1000000000000000000000000",
                     }
                 }))

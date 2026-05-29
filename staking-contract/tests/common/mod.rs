@@ -58,6 +58,7 @@ pub fn base_config() -> Config {
         epoch_unstake_settle_epochs: 4,
         min_storage_deposit: NearToken::from_millinear(100),
         per_lock_storage_stake: NearToken::from_near(0),
+        per_purchase_storage_stake: NearToken::from_near(0),
         min_lock_amount: NearToken::from_near(1),
     }
 }
