@@ -372,14 +372,14 @@ pub async fn buyer_lock_one_off(
     buyer: &near_workspaces::Account,
     staking_id: &near_workspaces::AccountId,
     price_id: &str,
-    lock_duration_ns: &str,
+    duration_ns: &str,
     deposit_near: u128,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let lock_id: String = buyer
         .call(staking_id, "lock")
         .args_json(json!({
             "price_id": price_id,
-            "lock_duration_ns": lock_duration_ns,
+            "duration_ns": duration_ns,
             "product_id": null,
         }))
         .deposit(NearToken::from_near(deposit_near))
@@ -402,7 +402,7 @@ pub async fn buyer_lock_subscription(
         .args_json(json!({
             "price_id": price_id,
             "product_id": null,
-            "lock_duration_ns": null,
+            "duration_ns": null,
         }))
         .deposit(NearToken::from_near(deposit_near))
         .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))

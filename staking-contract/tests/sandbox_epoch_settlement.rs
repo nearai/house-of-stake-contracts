@@ -117,7 +117,7 @@ async fn lock_refunds_deposit_when_get_account_fails() -> Result<(), Box<dyn std
         .call(staking.id(), "lock")
         .args_json(json!({
             "price_id": price_id,
-            "lock_duration_ns": SHORT_LOCK_NS,
+            "duration_ns": SHORT_LOCK_NS,
             "product_id": null,
         }))
         .deposit(near_workspaces::types::NearToken::from_near(50))

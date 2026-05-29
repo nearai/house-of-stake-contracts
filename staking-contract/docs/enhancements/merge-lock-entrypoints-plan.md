@@ -9,7 +9,7 @@ pub fn lock(
     &mut self,
     price_id: Option<PriceId>,
     product_id: Option<ProductId>,
-    lock_duration_ns: Option<U64>,
+    duration_ns: Option<U64>,
 ) -> PromiseOrValue<LockId>
 ```
 
@@ -20,13 +20,13 @@ The method resolves `price_id` vs `product_id` using the existing XOR/default-pr
 - Remove the old public methods `lock` and `lock`.
 - Keep one internal implementation path that performs the shared preamble, gas check, active price/product lookup, validator checks, settlement pipeline, and `commit_catalog_lock`.
 - For `PriceType::OneOff`:
-  - Require `lock_duration_ns: Some`.
+  - Require `duration_ns: Some`.
   - Reject prices with `billing_period`.
   - Preserve current duration min/max validation and one-off price check.
   - Create `OrderRef::ProductPurchase`.
   - Do not update subscription state.
 - For recurring subscription prices:
-  - Require `lock_duration_ns: None`.
+  - Require `duration_ns: None`.
   - Require recurring monthly price using existing `require_recurring_monthly_price`.
   - Preserve existing subscription creation, renewal, cancellation-at-period-end reset, pending downgrade, target amount, and current amount validations.
   - Derive duration from `subscription.end_ns - now`.
@@ -41,7 +41,7 @@ The method resolves `price_id` vs `product_id` using the existing XOR/default-pr
 - Request payload from chat-api/client for subscription purchase should pass:
   - `price_id: Some(...)`
   - `product_id: None`
-  - `lock_duration_ns: None`
+  - `duration_ns: None`
   - attached NEAR amount as before.
 
 ## Test Plan
@@ -49,8 +49,8 @@ The method resolves `price_id` vs `product_id` using the existing XOR/default-pr
 - Update existing `lock_*` tests to call `lock(..., Some(duration))`.
 - Update existing `lock_*` tests to call `lock(..., None)`.
 - Add or preserve validation coverage for:
-  - one-off price rejects missing `lock_duration_ns`
-  - recurring price rejects provided `lock_duration_ns`
+  - one-off price rejects missing `duration_ns`
+  - recurring price rejects provided `duration_ns`
   - one-off product default price still resolves via `product_id`
   - recurring product default price still resolves via `product_id`
   - both `price_id` and `product_id` rejected

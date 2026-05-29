@@ -88,7 +88,7 @@ async fn staking_epoch_settle_fast_path_succeeds_after_lock_consumed_slot()
         .call(staking.id(), "lock")
         .args_json(json!({
             "price_id": price_id,
-            "lock_duration_ns": "1000000000000000",
+            "duration_ns": "1000000000000000",
             "product_id": null,
         }))
         .deposit(NearToken::from_near(50))
@@ -145,7 +145,7 @@ async fn staking_two_locks_aggregate_then_epoch_settle_next_epoch_clears_pending
             .call(staking.id(), "lock")
             .args_json(json!({
                 "price_id": price_id,
-                "lock_duration_ns": lock_dur,
+                "duration_ns": lock_dur,
                 "product_id": null,
             }))
             .deposit(NearToken::from_near(50))
@@ -240,7 +240,7 @@ async fn staking_pause_validator_blocks_new_lock() -> Result<(), Box<dyn std::er
         .call(staking.id(), "lock")
         .args_json(json!({
             "price_id": price_id,
-            "lock_duration_ns": "1000000000000000",
+            "duration_ns": "1000000000000000",
             "product_id": null,
         }))
         .deposit(NearToken::from_near(50))
@@ -292,7 +292,7 @@ async fn staking_contract_pause_blocks_epoch_settle() -> Result<(), Box<dyn std:
         .call(staking.id(), "lock")
         .args_json(json!({
             "price_id": price_id,
-            "lock_duration_ns": "1000000000000000",
+            "duration_ns": "1000000000000000",
             "product_id": null,
         }))
         .deposit(NearToken::from_near(50))
@@ -353,12 +353,12 @@ async fn staking_withdraw_succeeds_after_unlock_and_epoch_gates()
         .into_result()?;
 
     // Short lock so `fast_forward_until_timestamp` reaches `end_ns` quickly (config allows `min_lock_duration_ns` = 1).
-    let lock_duration_ns = "1000000000";
+    let duration_ns = "1000000000";
     let lock_id: String = buyer
         .call(staking.id(), "lock")
         .args_json(json!({
             "price_id": price_id,
-            "lock_duration_ns": lock_duration_ns,
+            "duration_ns": duration_ns,
             "product_id": null,
         }))
         .deposit(NearToken::from_near(50))
@@ -439,12 +439,12 @@ async fn staking_withdraw_fails_when_pool_withdraw_bucket_not_ready()
         .await?
         .into_result()?;
 
-    let lock_duration_ns = "1000000000";
+    let duration_ns = "1000000000";
     let lock_id: String = buyer
         .call(staking.id(), "lock")
         .args_json(json!({
             "price_id": price_id,
-            "lock_duration_ns": lock_duration_ns,
+            "duration_ns": duration_ns,
             "product_id": null,
         }))
         .deposit(NearToken::from_near(50))
@@ -665,7 +665,7 @@ async fn staking_validator_total_staked_balance_matches_pool_after_lock()
         .call(staking.id(), "lock")
         .args_json(json!({
             "price_id": price_id,
-            "lock_duration_ns": "1000000000000000",
+            "duration_ns": "1000000000000000",
             "product_id": null,
         }))
         .deposit(NearToken::from_near(50))

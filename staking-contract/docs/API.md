@@ -87,7 +87,7 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 
 | Method | Access | Deposit | Returns | Description |
 |--------|--------|---------|---------|-------------|
-| `lock` | Buyer / subscriber | **Attach NEAR** | **`PromiseOrValue<LockId>`** | **`price_id`**, **`product_id`**, **`lock_duration_ns`** — provide exactly one of **`price_id`** or **`product_id`**. One-off prices require **`lock_duration_ns`** (`U64`). Recurring monthly subscription prices require **`lock_duration_ns: null`** and derive the duration from the billing period. Default price from **`Product.default_price_id`** when only **`product_id`** is set. **WASM:** shared per-epoch pipeline (**0–3**) then mint (**5a**); see [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md). **Host tests:** synchronous mint (no promise chain). |
+| `lock` | Buyer / subscriber | **Attach NEAR** | **`PromiseOrValue<LockId>`** | **`price_id`**, **`product_id`**, **`duration_ns`** — provide exactly one of **`price_id`** or **`product_id`**. One-off prices require **`duration_ns`** (`U64`). Recurring monthly subscription prices require **`duration_ns: null`** and derive the duration from the billing period. Default price from **`Product.default_price_id`** when only **`product_id`** is set. **WASM:** shared per-epoch pipeline (**0–3**) then mint (**5a**); see [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md). **Host tests:** synchronous mint (no promise chain). |
 
 ---
 

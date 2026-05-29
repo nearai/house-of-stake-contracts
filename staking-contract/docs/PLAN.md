@@ -249,7 +249,7 @@ pub struct Subscription {
 NEAR pricing rule (implemented in [`utils::check_near_price_lock`](../src/utils.rs)):
 - Compute required NEAR-months from the catalog line: `required_nm = amount * lock_factor_near_months / LOCK_FACTOR_DENOM` (yocto-scale integers).
 - Require `locked_yocto * duration_ns >= required_nm * AVG_MONTH_NS` so the user’s attached lock and chosen duration jointly satisfy the price.
-- Product locks pass explicit `lock_duration_ns`; subscription locks derive duration from the active billing window (`end_ns - now`).
+- Product locks pass explicit `duration_ns`; subscription locks derive duration from the active billing window (`end_ns - now`).
 
 ### 4.5 Account & Lock
 

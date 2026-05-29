@@ -10,7 +10,7 @@ The existing subscription flow already uses `house_of_stake` intents for recurri
 - House of Stake returns an on-chain one-off lock intent when the credits provider is `house-of-stake`.
 - chat-api credits the user's purchased balance only after it verifies the resulting on-chain lock.
 
-The contract already has the required primitive for one-off purchases: `lock(price_id, lock_duration_ns, product_id)`.
+The contract already has the required primitive for one-off purchases: `lock(price_id, duration_ns, product_id)`.
 
 ## Current State
 
@@ -31,7 +31,7 @@ The contract already has the required primitive for one-off purchases: `lock(pri
 
 ### staking-contract
 
-- `lock(price_id, lock_duration_ns, product_id)` supports one-off product purchases.
+- `lock(price_id, duration_ns, product_id)` supports one-off product purchases.
 - It resolves `price_id` or `product_id`, requires `PriceType::OneOff`, validates lock duration bounds, and validates the attached deposit using `check_near_price_lock`.
 - `get_lock(lock_id)` exposes the lock record needed for backend verification.
 
@@ -87,7 +87,7 @@ or:
   "kind": "house_of_stake",
   "price_id": "price_hos_credits",
   "credits": 100,
-  "lock_duration_ns": "31536000000000000",
+  "duration_ns": "31536000000000000",
   "network_id": "mainnet"
 }
 ```
@@ -152,7 +152,7 @@ Update `useCreateCreditCheckout`:
 
 - If the response has `checkout_url`, keep the current redirect behavior.
 - If `kind === "house_of_stake"`, sign `lock`.
-- Pass `{ price_id, product_id: null, lock_duration_ns }`.
+- Pass `{ price_id, product_id: null, duration_ns }`.
 - Attach the required deposit for the requested credit count.
 - Extract `lock_id` from the transaction outcome.
 - Call `POST /v1/credits/near/sync`.
@@ -180,7 +180,7 @@ There are two possible ways to decide the attached NEAR deposit:
   "kind": "house_of_stake",
   "price_id": "price_hos_credits",
   "credits": 100,
-  "lock_duration_ns": "31536000000000000",
+  "duration_ns": "31536000000000000",
   "deposit": "..."
 }
 ```
@@ -201,7 +201,7 @@ Frontend fetches `get_price`, reads `amount` and `lock_factor_near_months`, then
 
 ```text
 required_near_months = price.amount * credits * lock_factor_near_months / LOCK_FACTOR_DENOM
-deposit = ceil(required_near_months * AVG_MONTH_NS / lock_duration_ns)
+deposit = ceil(required_near_months * AVG_MONTH_NS / duration_ns)
 ```
 
 Pros:
@@ -228,7 +228,7 @@ The current contract already provides:
 
 Potential future contract enhancement:
 
-- Add a view helper that returns the minimum required lock deposit for `(price_id, quantity, lock_duration_ns)`.
+- Add a view helper that returns the minimum required lock deposit for `(price_id, quantity, duration_ns)`.
 - This would remove duplicated pricing math from chat-api and frontend.
 
 ## Implementation Sequence

@@ -18,23 +18,23 @@ impl Contract {
     /// - **`price_id: Some`**, **`product_id: null`** — lock using that catalog price (same as always).
     /// - **`price_id: null`**, **`product_id: Some`** — lock using [`Product::default_price_id`](crate::types::Product::default_price_id) for that product (`set_product_default_price`).
     ///
-    /// One-off prices require `lock_duration_ns`. Recurring monthly subscription prices must omit
-    /// `lock_duration_ns`; the lock duration is derived from the subscription billing period.
+    /// One-off prices require `duration_ns`. Recurring monthly subscription prices must omit
+    /// `duration_ns`; the lock duration is derived from the subscription billing period.
     #[payable]
     pub fn lock(
         &mut self,
         price_id: Option<PriceId>,
         product_id: Option<ProductId>,
-        lock_duration_ns: Option<U64>,
+        duration_ns: Option<U64>,
     ) -> PromiseOrValue<LockId> {
         let resolved = self.resolve_price_id_for_lock(price_id, product_id);
-        self.lock_with_price_id(resolved, lock_duration_ns)
+        self.lock_with_price_id(resolved, duration_ns)
     }
 
     fn lock_with_price_id(
         &mut self,
         price_id: PriceId,
-        lock_duration_ns: Option<U64>,
+        duration_ns: Option<U64>,
     ) -> PromiseOrValue<LockId> {
         self.require_enough_gas_for_epoch_settlement();
         let (buyer, locked) = self.lock_entry_preamble();
@@ -42,15 +42,15 @@ impl Contract {
 
         match price.price_type {
             PriceType::OneOff => {
-                let lock_duration_ns = lock_duration_ns.unwrap_or_else(|| {
-                    env::panic_str("lock_duration_ns is required for one-off prices")
+                let duration_ns = duration_ns.unwrap_or_else(|| {
+                    env::panic_str("duration_ns is required for one-off prices")
                 });
-                self.lock_one_off_with_catalog(buyer, locked, price, product, lock_duration_ns)
+                self.lock_one_off_with_catalog(buyer, locked, price, product, duration_ns)
             }
             PriceType::Recurring => {
                 require!(
-                    lock_duration_ns.is_none(),
-                    "lock_duration_ns must be omitted for recurring subscription prices"
+                    duration_ns.is_none(),
+                    "duration_ns must be omitted for recurring subscription prices"
                 );
                 self.lock_recurring_subscription_with_catalog(buyer, locked, price, product)
             }
@@ -63,9 +63,9 @@ impl Contract {
         locked: NearToken,
         price: Price,
         product: Product,
-        lock_duration_ns: U64,
+        duration_ns: U64,
     ) -> PromiseOrValue<LockId> {
-        let dur = lock_duration_ns.0;
+        let dur = duration_ns.0;
         require!(
             dur >= self.internal_get_config().min_lock_duration_ns.0
                 && dur <= self.internal_get_config().max_lock_duration_ns.0,

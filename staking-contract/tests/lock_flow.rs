@@ -79,7 +79,7 @@ fn lock_recurring_creates_subscription_row() {
 }
 
 #[test]
-#[should_panic(expected = "lock_duration_ns is required for one-off prices")]
+#[should_panic(expected = "duration_ns is required for one-off prices")]
 fn lock_one_off_rejects_missing_duration() {
     let mut c = deploy();
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
@@ -90,7 +90,7 @@ fn lock_one_off_rejects_missing_duration() {
 }
 
 #[test]
-#[should_panic(expected = "lock_duration_ns must be omitted for recurring subscription prices")]
+#[should_panic(expected = "duration_ns must be omitted for recurring subscription prices")]
 fn lock_recurring_rejects_duration() {
     let mut c = deploy();
     let (_pid, price_id) = setup_catalog_near_subscription(&mut c);
