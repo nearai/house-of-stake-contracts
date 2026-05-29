@@ -8,6 +8,8 @@ use common::{
     testing_env_catalog_callback, unwrap_sync_lock_id,
 };
 use near_sdk::NearToken;
+use near_sdk::PromiseOrValue;
+use near_sdk::json_types::U128;
 use near_sdk::testing_env;
 use staking_contract::types::TransactionStatus;
 use staking_contract::types::{LockStatus, SubscriptionStatus};
@@ -120,16 +122,29 @@ fn upgrade_subscription_updates_tier_and_lock_amount() {
     let lock_before = c.get_lock(lock_low.clone()).expect("lock");
     let amt_before = lock_before.amount_near.as_yoctonear();
 
+    let sub_before = c
+        .get_subscription_for_product(acct(BUYER), product_id.clone())
+        .expect("subscription");
+    let target_amount = NearToken::from_near(90).as_yoctonear();
     testing_env!(ctx(acct(BUYER), NearToken::from_near(40)));
-    let _lock_same = unwrap_sync_lock_id(c.upgrade_subscription(price_high.clone(), None));
+    let outcome = c.update_subscription(
+        sub_before.subscription_id,
+        price_high.clone(),
+        U128(target_amount),
+    );
 
     let sub = c
         .get_subscription_for_product(acct(BUYER), product_id)
         .expect("subscription");
     assert_eq!(sub.price_id, price_high);
+    let PromiseOrValue::Value(outcome) = outcome else {
+        panic!("host tests expect synchronous subscription update")
+    };
+    assert_eq!(outcome.kind, "changed_immediately");
 
     let lock_after = c.get_lock(lock_low).expect("lock");
     assert!(lock_after.amount_near.as_yoctonear() > amt_before);
+    assert_eq!(lock_after.amount_near.as_yoctonear(), target_amount);
     assert_eq!(lock_after.status, LockStatus::Active);
 }
 
@@ -147,8 +162,10 @@ fn upgrade_subscription_allows_different_product_on_same_validator() {
         .expect("subscription");
 
     testing_env!(ctx(acct(BUYER), NearToken::from_near(40)));
-    let _ = unwrap_sync_lock_id(
-        c.upgrade_subscription(price_high.clone(), Some(sub_before.subscription_id.clone())),
+    let _ = c.update_subscription(
+        sub_before.subscription_id.clone(),
+        price_high.clone(),
+        U128(NearToken::from_near(90).as_yoctonear()),
     );
 
     assert!(
@@ -222,7 +239,14 @@ fn upgrade_subscription_uses_projected_billing_window_after_stale_end_ns() {
         .0;
     assert!(projected_end > past_period_ts);
 
-    let _ = unwrap_sync_lock_id(c.upgrade_subscription(price_high.clone(), None));
+    let sub_before = c
+        .get_subscription_for_product(acct(BUYER), product_id.clone())
+        .expect("subscription");
+    let _ = c.update_subscription(
+        sub_before.subscription_id,
+        price_high.clone(),
+        U128(NearToken::from_near(90).as_yoctonear()),
+    );
 
     let sub = c
         .get_subscription_for_product(acct(BUYER), product_id)
@@ -242,8 +266,15 @@ fn upgraded_subscription_price_is_marked_in_use() {
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
     let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_low), None));
 
+    let sub = c
+        .get_subscription_for_product(acct(BUYER), product_id.clone())
+        .expect("subscription");
     testing_env!(ctx(acct(BUYER), NearToken::from_near(40)));
-    let _ = unwrap_sync_lock_id(c.upgrade_subscription(price_high.clone(), None));
+    let _ = c.update_subscription(
+        sub.subscription_id,
+        price_high.clone(),
+        U128(NearToken::from_near(90).as_yoctonear()),
+    );
 
     let high = c.get_price(price_high.clone()).expect("high price");
     assert_eq!(high.usage_count, 1);
@@ -282,10 +313,11 @@ fn upgrade_callback_rejects_price_archived_after_entry_checks() {
     c.validators.insert(acct(POOL), validator.into());
 
     testing_env!(ctx(acct(common::STAKING), NearToken::from_near(0)));
-    let _ = c.on_subscription_upgrade_after_settle(
+    let _ = c.on_subscription_update_after_settle(
         acct(BUYER),
         NearToken::from_near(40),
         price_high,
+        U128(NearToken::from_near(90).as_yoctonear()),
         sub.subscription_id,
         acct(POOL),
     );
@@ -301,8 +333,15 @@ fn downgrade_applies_at_next_renewal() {
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
     let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_high.clone()), None));
 
+    let sub_high = c
+        .get_subscription_for_product(acct(BUYER), product_id.clone())
+        .expect("subscription");
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
-    c.schedule_downgrade_subscription(price_low.clone(), None);
+    c.update_subscription(
+        sub_high.subscription_id,
+        price_low.clone(),
+        U128(NearToken::from_near(25).as_yoctonear()),
+    );
 
     let sub = c
         .get_subscription_for_product(acct(BUYER), product_id.clone())
@@ -310,7 +349,7 @@ fn downgrade_applies_at_next_renewal() {
     assert_eq!(sub.pending_downgrade_price_id.as_ref(), Some(&price_low));
 
     let renew_ts = sub.end_ns.0.saturating_add(1);
-    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), renew_ts));
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(25), renew_ts));
     let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_low.clone()), None));
 
     let sub_after = c
@@ -349,7 +388,11 @@ fn downgrade_applies_to_different_product_at_next_renewal() {
     let subscription_id = sub_before.subscription_id.clone();
 
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
-    c.schedule_downgrade_subscription(price_low.clone(), Some(subscription_id.clone()));
+    c.update_subscription(
+        subscription_id.clone(),
+        price_low.clone(),
+        U128(NearToken::from_near(25).as_yoctonear()),
+    );
 
     let sub = c
         .get_subscription_for_product(acct(BUYER), product_high.clone())
@@ -362,7 +405,7 @@ fn downgrade_applies_to_different_product_at_next_renewal() {
     );
 
     let renew_ts = sub.end_ns.0.saturating_add(1);
-    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), renew_ts));
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(25), renew_ts));
     let _ = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_low.clone()), None));
 
     assert!(

@@ -227,6 +227,13 @@ pub struct Product {
 
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
+pub struct PriceMetadata {
+    /// Optional inclusive upper bound for variable subscription stake amounts.
+    pub max_amount: Option<U128>,
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh, json])]
 pub struct Price {
     pub price_id: PriceId,
     pub product_id: ProductId,
@@ -238,6 +245,9 @@ pub struct Price {
     pub billing_period: Option<BillingPeriod>,
     /// Fixed-point lock-weight; see [`crate::utils::LOCK_FACTOR_DENOM`] and [`crate::utils::check_near_price_lock`].
     pub lock_factor_near_months: U128,
+    /// Optional metadata for price-specific constraints. For recurring subscription prices,
+    /// `max_amount` is the inclusive upper bound for the selected stake amount.
+    pub metadata: Option<PriceMetadata>,
     pub status: CatalogStatus,
     pub usage_count: u64,
 }
@@ -258,6 +268,18 @@ pub struct Subscription {
     pub cancel_at_period_end: bool,
     /// Lower tier to apply at the start of the **next** billing period (Phase A: no mid-cycle refund).
     pub pending_downgrade_price_id: Option<PriceId>,
+    /// Target stake amount to apply with `pending_downgrade_price_id` at the next renewal.
+    pub pending_downgrade_target_amount: Option<NearToken>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [json])]
+pub struct SubscriptionPlanChangeOutcome {
+    pub kind: String,
+    pub subscription_id: SubscriptionId,
+    pub target_price_id: PriceId,
+    pub target_amount: U128,
+    pub lock_id: Option<LockId>,
 }
 
 #[derive(Clone)]
@@ -303,12 +325,13 @@ pub enum UserAction {
     },
     /// Public [`crate::epoch::Contract::epoch_settle`]: no user tail after the shared pipeline.
     SettleOnly { validator_id: ValidatorId },
-    /// Mid-period subscription tier upgrade after pre-user settlement (`subscriptions.rs`).
-    SubscriptionUpgrade {
+    /// Mid-period subscription update after pre-user settlement (`subscriptions.rs`).
+    SubscriptionUpdate {
         validator_id: ValidatorId,
         buyer: AccountId,
         deposit: NearToken,
-        new_price_id: PriceId,
+        target_price_id: PriceId,
+        target_amount: U128,
         subscription_id: SubscriptionId,
     },
 }
@@ -320,16 +343,16 @@ impl UserAction {
             | Self::UnlockQueueUnstake { validator_id, .. }
             | Self::WithdrawUserTransfer { validator_id, .. }
             | Self::SettleOnly { validator_id }
-            | Self::SubscriptionUpgrade { validator_id, .. } => validator_id,
+            | Self::SubscriptionUpdate { validator_id, .. } => validator_id,
         }
     }
 
-    /// NEAR attached on the entry receipt for payable flows (`lock_*`, `upgrade_subscription`).
+    /// NEAR attached on the entry receipt for payable flows (`lock_*`, `update_subscription`).
     /// Used to refund when the async pre-user pipeline aborts before mint / upgrade commits.
     pub fn payable_refund(&self) -> Option<(AccountId, NearToken)> {
         match self {
             Self::CommitLock { buyer, locked, .. } => Some((buyer.clone(), *locked)),
-            Self::SubscriptionUpgrade { buyer, deposit, .. } => Some((buyer.clone(), *deposit)),
+            Self::SubscriptionUpdate { buyer, deposit, .. } => Some((buyer.clone(), *deposit)),
             _ => None,
         }
     }

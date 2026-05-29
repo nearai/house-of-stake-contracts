@@ -166,6 +166,7 @@ impl Contract {
                     status: SubscriptionStatus::Active,
                     cancel_at_period_end: false,
                     pending_downgrade_price_id: None,
+                    pending_downgrade_target_amount: None,
                 };
                 (sub_new, sid_new, true)
             } else {
@@ -194,20 +195,42 @@ impl Contract {
                 status: SubscriptionStatus::Active,
                 cancel_at_period_end: false,
                 pending_downgrade_price_id: None,
+                pending_downgrade_target_amount: None,
             };
             (sub, sid, true)
         };
 
+        self.validate_subscription_target_amount(&price, U128(locked.as_yoctonear()));
+
         if !is_new_index {
             match &subscription.pending_downgrade_price_id {
-                Some(pending_low) => require!(
-                    price_id == *pending_low,
-                    "price_id must match the scheduled downgrade tier for this renewal"
-                ),
-                None => require!(
-                    price_id == subscription.price_id,
-                    "price_id must match current subscription tier"
-                ),
+                Some(pending_low) => {
+                    require!(
+                        price_id == *pending_low,
+                        "price_id must match the scheduled downgrade tier for this renewal"
+                    );
+                    let pending_amount = subscription
+                        .pending_downgrade_target_amount
+                        .unwrap_or_else(|| {
+                            env::panic_str("Pending downgrade target amount missing")
+                        });
+                    require!(
+                        locked.as_yoctonear() == pending_amount.as_yoctonear(),
+                        "Locked NEAR must match scheduled downgrade target amount"
+                    );
+                }
+                None => {
+                    require!(
+                        price_id == subscription.price_id,
+                        "price_id must match current subscription tier"
+                    );
+                    if let Some(prev) = self.internal_get_lock(&subscription.last_lock_id) {
+                        require!(
+                            locked.as_yoctonear() == prev.amount_near.as_yoctonear(),
+                            "Locked NEAR must match current subscription stake amount"
+                        );
+                    }
+                }
             }
         }
 

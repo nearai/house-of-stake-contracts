@@ -15,6 +15,10 @@ use mock_pool::{
 };
 use serde_json::json;
 
+fn near_yocto(near: u128) -> u128 {
+    near_sdk::NearToken::from_near(near).as_yoctonear()
+}
+
 #[tokio::test]
 async fn sandbox_upgrade_subscription_raises_tier_and_lock_amount()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -36,9 +40,28 @@ async fn sandbox_upgrade_subscription_raises_tier_and_lock_amount()
         .await?
         .json()?;
     let amount_before = json_near_token_yocto(&lock_before["amount_near"]).unwrap_or(0);
+    let sub_before: serde_json::Value = worker
+        .view(staking.id(), "get_subscription_for_product")
+        .args_json(json!({
+            "account_id": buyer.id(),
+            "product_id": product_id,
+        }))
+        .await?
+        .json()?;
+    let subscription_id = sub_before["subscription_id"]
+        .as_str()
+        .expect("subscription_id");
 
     top_up_buyer_near(&worker, &buyer, 50).await?;
-    let _same_lock = buyer_upgrade_subscription(&buyer, staking.id(), &price_high, 40).await?;
+    let _same_lock = buyer_upgrade_subscription(
+        &buyer,
+        staking.id(),
+        subscription_id,
+        &price_high,
+        near_yocto(90),
+        40,
+    )
+    .await?;
 
     let sub: serde_json::Value = worker
         .view(staking.id(), "get_subscription_for_product")
@@ -78,8 +101,26 @@ async fn sandbox_schedule_downgrade_applies_on_renewal() -> Result<(), Box<dyn s
     let buyer = worker.dev_create_account().await?;
     buyer_storage_deposit(&buyer, staking.id()).await?;
     let _lock_high = buyer_lock_for_subscription(&buyer, staking.id(), &price_high, 50).await?;
+    let sub_before: serde_json::Value = worker
+        .view(staking.id(), "get_subscription_for_product")
+        .args_json(json!({
+            "account_id": buyer.id(),
+            "product_id": product_id,
+        }))
+        .await?
+        .json()?;
+    let subscription_id = sub_before["subscription_id"]
+        .as_str()
+        .expect("subscription_id");
 
-    buyer_schedule_downgrade_subscription(&buyer, staking.id(), &price_low).await?;
+    buyer_schedule_downgrade_subscription(
+        &buyer,
+        staking.id(),
+        subscription_id,
+        &price_low,
+        near_yocto(25),
+    )
+    .await?;
 
     let sub: serde_json::Value = worker
         .view(staking.id(), "get_subscription_for_product")
@@ -98,7 +139,7 @@ async fn sandbox_schedule_downgrade_applies_on_renewal() -> Result<(), Box<dyn s
     set_mock_timestamp(&buyer, staking.id(), end_ns.saturating_add(1)).await?;
 
     top_up_buyer_near(&worker, &buyer, 50).await?;
-    let _renew = buyer_lock_for_subscription(&buyer, staking.id(), &price_low, 50).await?;
+    let _renew = buyer_lock_for_subscription(&buyer, staking.id(), &price_low, 25).await?;
 
     let sub_after: serde_json::Value = worker
         .view(staking.id(), "get_subscription_for_product")

@@ -27,6 +27,6 @@ cargo test -p staking-contract --test sandbox_subscription_e2e
 
 **Golden path** (`sandbox_golden_path`): one documented flow — `lock_for_product` → `epoch_settle` → `unlock` → two settlement epochs → `withdraw(validator_id)` with NEAR received by the buyer.
 
-**Subscriptions** (`sandbox_subscription_e2e`): `upgrade_subscription` and `schedule_downgrade_subscription` + renewal under sandbox (complements host [`subscription_lifecycle.rs`](subscription_lifecycle.rs)).
+**Subscriptions** (`sandbox_subscription_e2e`): `update_subscription` increase/decrease + renewal under sandbox (complements host [`subscription_lifecycle.rs`](subscription_lifecycle.rs)).
 
 (`near-workspaces` installs a local NEAR sandbox binary; supported hosts are **linux-x86** and **darwin-arm**.)

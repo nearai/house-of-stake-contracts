@@ -279,6 +279,7 @@ mod tests {
             price_type: PriceType::Recurring,
             billing_period: Some(BillingPeriod::Monthly),
             lock_factor_near_months: U128(LOCK_FACTOR_DENOM),
+            metadata: None,
             status: CatalogStatus::Active,
             usage_count: 0,
         };

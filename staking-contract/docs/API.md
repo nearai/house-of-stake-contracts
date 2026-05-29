@@ -100,8 +100,7 @@ Lifecycle RPCs (locking / renewal stays in **`lock_for_subscription`** above).
 |--------|--------|---------|---------|-------------|
 | `cancel_subscription` | Subscriber | **1 yocto** | — | **`product_id`** — set **`cancel_at_period_end`**; lock remains until **`lock.end_ns`**, then **`unlock`**. After **`end_ns`**, next **`lock_for_subscription`** starts a new period. |
 | `resume_subscription` | Subscriber | **1 yocto** | — | **`product_id`** — clear **`cancel_at_period_end`** while **`Active`**, only before stored **`end_ns`** (current billing period). Fails after period end; use **`lock_for_subscription`** for a new period. Requires **`cancel_at_period_end == true`**. |
-| `upgrade_subscription` | Subscriber | **Attach NEAR** (≥ `min_lock_amount`; tier differential) | **`PromiseOrValue<LockId>`** | **`new_price_id`** — higher tier on same product mid-period; adds shares / **`pending_to_stake`** on existing **`last_lock_id`**. **WASM:** same pre-user pipeline as **`lock_for_subscription`**, then **`commit_subscription_upgrade`** (**5d**); may post **`try_epoch_stake_or_unstake`** if epoch slot still free. **Host tests:** synchronous upgrade. |
-| `schedule_downgrade_subscription` | Subscriber | **1 yocto** | — | **`target_price_id`** — lower tier applied at next **`lock_for_subscription`** renewal (Phase A; no refund). |
+| `update_subscription` | Subscriber | **Attach delta NEAR for increases; 1 yocto otherwise** | **`PromiseOrValue<SubscriptionPlanChangeOutcome>`** | **`subscription_id`, `target_price_id`, `target_amount`** — unified plan update. Stake increases apply immediately after the same pre-user pipeline as **`lock_for_subscription`**; stake decreases are scheduled for the next **`lock_for_subscription`** renewal; price-only changes with unchanged stake apply immediately. |
 
 ---
 
@@ -129,7 +128,7 @@ Public **`epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator
 | Entry | `UserAction` tail | User tail |
 |--------|-------------------|-----------|
 | `lock_for_product` / `lock_for_subscription` | `CommitLock` | Mint lock (**5a**); optional post-settle |
-| `upgrade_subscription` | `SubscriptionUpgrade` | Upgrade lock (**5d**); optional post-settle |
+| `update_subscription` | `SubscriptionUpdate` | Update subscription lock or schedule decrease (**5d**); optional post-settle |
 | `unlock` | `UnlockQueueUnstake` | Share exit only (**5b**) |
 | `withdraw` (WASM) | `WithdrawUserTransfer` | Payout (**5c**) |
 | `epoch_settle` | `SettleOnly` | No-op then **6** |

@@ -31,6 +31,7 @@ pub trait ExtSelfPrices {
         price_type: PriceType,
         billing_period: Option<BillingPeriod>,
         lock_factor_near_months: U128,
+        metadata: Option<PriceMetadata>,
         expected_caller: AccountId,
     ) -> PriceId;
     fn edit_price_after_get_owner(
@@ -78,6 +79,7 @@ impl Contract {
         price_type: PriceType,
         billing_period: Option<BillingPeriod>,
         lock_factor_near_months: U128,
+        metadata: Option<PriceMetadata>,
     ) -> Promise {
         self.promise_catalog_admin_on_product(product_id, |expected_caller, product_id| {
             ext_self_prices::ext(env::current_account_id())
@@ -90,6 +92,7 @@ impl Contract {
                     price_type,
                     billing_period,
                     lock_factor_near_months,
+                    metadata,
                     expected_caller,
                 )
         })
@@ -148,6 +151,7 @@ impl Contract {
         price_type: PriceType,
         billing_period: Option<BillingPeriod>,
         lock_factor_near_months: U128,
+        metadata: Option<PriceMetadata>,
         expected_caller: AccountId,
     ) -> PriceId {
         self.assert_validator_owner(pool_owner, &expected_caller);
@@ -167,6 +171,7 @@ impl Contract {
             price_type,
             billing_period,
             lock_factor_near_months,
+            metadata,
             status: CatalogStatus::Active,
             usage_count: 0,
         };

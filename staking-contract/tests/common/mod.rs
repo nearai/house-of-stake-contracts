@@ -152,6 +152,7 @@ pub fn setup_catalog_near_oneoff(contract: &mut Contract) -> (String, String) {
         PriceType::OneOff,
         None,
         U128(LOCK_FACTOR_DENOM),
+        None,
         acct(VALIDATOR_OWNER_ACCOUNT),
     );
     (product_id, price_id)
@@ -175,6 +176,7 @@ pub fn add_subscription_price(
         PriceType::Recurring,
         Some(BillingPeriod::Monthly),
         U128(LOCK_FACTOR_DENOM),
+        None,
         acct(VALIDATOR_OWNER_ACCOUNT),
     )
 }
@@ -209,6 +211,7 @@ pub fn add_subscription_product(
         PriceType::Recurring,
         Some(BillingPeriod::Monthly),
         U128(LOCK_FACTOR_DENOM),
+        None,
         acct(VALIDATOR_OWNER_ACCOUNT),
     );
     (product_id, price_id)
