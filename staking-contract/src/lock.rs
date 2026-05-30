@@ -143,8 +143,8 @@ impl Contract {
             .get(&sub_key)
             .cloned()
             .or_else(|| {
-                self.find_subscription_owned_by_projected_product(&buyer, &product_id)
-                    .map(|(sid, _)| sid)
+                self.find_subscription_by_projected_product(&buyer, &product_id)
+                    .map(|found| found.subscription_id)
             });
 
         let (subscription, sub_id, is_new_index) = if let Some(sid) = existing_subscription_id {
@@ -169,24 +169,8 @@ impl Contract {
                 self.subscription_by_account_product.remove(&old_sub_key);
                 self.remove_subscription_from_account_index(&buyer, &sid);
                 self.subscriptions.remove(sid.as_str());
-                let anchor = anchor_day_from_timestamp(now);
-                let end = crate::subscriptions::add_months_stripe_style(anchor, 1, now);
-                let sid_new = crate::ids::next_subscription_id(&mut self.id_nonce);
-                let sub_new = Subscription {
-                    subscription_id: sid_new.clone(),
-                    account_id: buyer.clone(),
-                    product_id: product.product_id.clone(),
-                    price_id: price_id.clone(),
-                    start_ns: U64(now),
-                    end_ns: U64(end),
-                    anchor_day: anchor,
-                    last_lock_id: String::new(),
-                    status: SubscriptionStatus::Active,
-                    cancel_at_period_end: false,
-                    pending_downgrade_price_id: None,
-                    pending_downgrade_target_amount: None,
-                    pending_downgrade_apply_ns: None,
-                };
+                let (sid_new, sub_new) =
+                    self.new_subscription_for_lock(&buyer, &product, &price_id, now);
                 (sub_new, sid_new, true)
             } else {
                 // Renewal window: extend billing period for the current effective tier.
@@ -198,24 +182,7 @@ impl Contract {
                 (sub, sid, false)
             }
         } else {
-            let anchor = anchor_day_from_timestamp(now);
-            let end = crate::subscriptions::add_months_stripe_style(anchor, 1, now);
-            let sid = crate::ids::next_subscription_id(&mut self.id_nonce);
-            let sub = Subscription {
-                subscription_id: sid.clone(),
-                account_id: buyer.clone(),
-                product_id: product.product_id.clone(),
-                price_id: price_id.clone(),
-                start_ns: U64(now),
-                end_ns: U64(end),
-                anchor_day: anchor,
-                last_lock_id: String::new(),
-                status: SubscriptionStatus::Active,
-                cancel_at_period_end: false,
-                pending_downgrade_price_id: None,
-                pending_downgrade_target_amount: None,
-                pending_downgrade_apply_ns: None,
-            };
+            let (sid, sub) = self.new_subscription_for_lock(&buyer, &product, &price_id, now);
             (sub, sid, true)
         };
 
@@ -339,6 +306,34 @@ impl Contract {
             // Neither identifier given.
             (None, None) => env::panic_str("Provide price_id or product_id"),
         }
+    }
+
+    fn new_subscription_for_lock(
+        &mut self,
+        buyer: &AccountId,
+        product: &Product,
+        price_id: &PriceId,
+        start_ns: u64,
+    ) -> (SubscriptionId, Subscription) {
+        let anchor = anchor_day_from_timestamp(start_ns);
+        let end_ns = crate::subscriptions::add_months_stripe_style(anchor, 1, start_ns);
+        let subscription_id = crate::ids::next_subscription_id(&mut self.id_nonce);
+        let subscription = Subscription {
+            subscription_id: subscription_id.clone(),
+            account_id: buyer.clone(),
+            product_id: product.product_id.clone(),
+            price_id: price_id.clone(),
+            start_ns: U64(start_ns),
+            end_ns: U64(end_ns),
+            anchor_day: anchor,
+            last_lock_id: String::new(),
+            status: SubscriptionStatus::Active,
+            cancel_at_period_end: false,
+            pending_downgrade_price_id: None,
+            pending_downgrade_target_amount: None,
+            pending_downgrade_apply_ns: None,
+        };
+        (subscription_id, subscription)
     }
 
     /// Commits catalog-lock **state**: mints pool shares for `locked` NEAR, stores the lock,

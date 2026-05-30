@@ -24,6 +24,12 @@ struct SubscriptionUpdateInputs {
     lock: Lock,
 }
 
+pub(crate) struct ProjectedSubscriptionLookup {
+    pub(crate) subscription_id: SubscriptionId,
+    pub(crate) stored: Subscription,
+    projected: Subscription,
+}
+
 #[near]
 impl Contract {
     /// Stop renewing after the current billing period. The active lock remains until `lock.end_ns`; use
@@ -33,9 +39,7 @@ impl Contract {
         assert_one_yocto();
         self.assert_not_paused();
         let buyer = env::predecessor_account_id();
-        let (sid, _) = self.require_subscription_owned_by(&buyer, &product_id);
-        self.apply_due_subscription_downgrade(&sid);
-        let sub = self.require_subscription_owned_by_id(&buyer, &sid);
+        let (sid, sub) = self.require_current_subscription_owned_by(&buyer, &product_id);
         // Normalize stale active windows before marking cancel-at-end so stored `end_ns`
         // represents the current virtual billing period boundary.
         let mut sub = self.project_subscription_view_now(sub);
@@ -52,9 +56,7 @@ impl Contract {
         assert_one_yocto();
         self.assert_not_paused();
         let buyer = env::predecessor_account_id();
-        let (sid, _) = self.require_subscription_owned_by(&buyer, &product_id);
-        self.apply_due_subscription_downgrade(&sid);
-        let mut sub = self.require_subscription_owned_by_id(&buyer, &sid);
+        let (sid, mut sub) = self.require_current_subscription_owned_by(&buyer, &product_id);
         Self::assert_subscription_active(&sub);
         require!(
             sub.cancel_at_period_end,
@@ -72,7 +74,8 @@ impl Contract {
     /// Update a subscription to a target recurring tier and explicit target stake amount.
     ///
     /// Stake increases apply immediately after the shared validator settlement pipeline. Stake decreases
-    /// are scheduled for the next billing period and applied by `lock` at renewal.
+    /// are scheduled for the next billing period, projected in views after the apply timestamp, and
+    /// lazily committed on the next related mutation.
     #[payable]
     pub fn update_subscription(
         &mut self,
@@ -98,9 +101,7 @@ impl Contract {
         if target_amount.0 == current_amount && target_price_id == inputs.sub.price_id {
             assert_one_yocto();
             let mut sub = inputs.sub;
-            sub.pending_downgrade_price_id = None;
-            sub.pending_downgrade_target_amount = None;
-            sub.pending_downgrade_apply_ns = None;
+            Self::clear_pending_downgrade(&mut sub);
             self.internal_set_subscription(subscription_id.clone(), sub);
             return PromiseOrValue::Value(SubscriptionPlanChangeOutcome {
                 kind: "no_op".to_string(),
@@ -201,24 +202,8 @@ impl Contract {
         account_id: AccountId,
         product_id: ProductId,
     ) -> Option<Subscription> {
-        if let Some(sid) = self
-            .subscription_by_account_product
-            .get(&(account_id.clone(), product_id.clone()))
-            .cloned()
-        {
-            let projected = self
-                .internal_get_subscription(&sid)
-                .map(|sub| self.project_subscription_view_now(sub))?;
-            return (projected.product_id == product_id).then_some(projected);
-        }
-
-        self.subscription_ids_for_account_view(&account_id)
-            .into_iter()
-            .filter_map(|sid| {
-                self.internal_get_subscription(&sid)
-                    .map(|sub| self.project_subscription_view_now(sub))
-            })
-            .find(|sub| sub.product_id == product_id)
+        self.find_subscription_by_projected_product(&account_id, &product_id)
+            .map(|found| found.projected)
     }
 
     pub fn get_subscription_for_price(
@@ -337,52 +322,61 @@ impl Contract {
         buyer: &AccountId,
         product_id: &ProductId,
     ) -> (SubscriptionId, Subscription) {
+        let found = self
+            .find_subscription_by_projected_product(buyer, product_id)
+            .unwrap_or_else(|| env::panic_str("No subscription for this product; subscribe first"));
+        (found.subscription_id, found.stored)
+    }
+
+    fn require_current_subscription_owned_by(
+        &mut self,
+        buyer: &AccountId,
+        product_id: &ProductId,
+    ) -> (SubscriptionId, Subscription) {
+        let (sid, _) = self.require_subscription_owned_by(buyer, product_id);
+        self.apply_due_subscription_downgrade(&sid);
+        let sub = self.require_subscription_owned_by_id(buyer, &sid);
+        (sid, sub)
+    }
+
+    pub(crate) fn find_subscription_by_projected_product(
+        &self,
+        buyer: &AccountId,
+        product_id: &ProductId,
+    ) -> Option<ProjectedSubscriptionLookup> {
         if let Some(sid) = self
             .subscription_by_account_product
             .get(&(buyer.clone(), product_id.clone()))
             .cloned()
         {
-            let sub = self.require_subscription_by_id(&sid);
+            let stored = self.require_subscription_by_id(&sid);
             require!(
-                sub.account_id == *buyer,
+                stored.account_id == *buyer,
                 "Only the subscription owner can perform this action"
             );
-            let projected = self.project_subscription_view_now(sub.clone());
-            require!(
-                projected.product_id == *product_id,
-                "No subscription for this product; subscribe first"
-            );
-            return (sid, sub);
-        }
-
-        for sid in self.subscription_ids_for_account_view(buyer) {
-            let sub = self.require_subscription_by_id(&sid);
-            if sub.account_id != *buyer {
-                continue;
-            }
-            let projected = self.project_subscription_view_now(sub.clone());
+            let projected = self.project_subscription_view_now(stored.clone());
             if projected.product_id == *product_id {
-                return (sid, sub);
+                return Some(ProjectedSubscriptionLookup {
+                    subscription_id: sid,
+                    stored,
+                    projected,
+                });
             }
         }
 
-        env::panic_str("No subscription for this product; subscribe first")
-    }
-
-    pub(crate) fn find_subscription_owned_by_projected_product(
-        &self,
-        buyer: &AccountId,
-        product_id: &ProductId,
-    ) -> Option<(SubscriptionId, Subscription)> {
         self.subscription_ids_for_account_view(buyer)
             .into_iter()
             .find_map(|sid| {
-                let sub = self.require_subscription_by_id(&sid);
-                if sub.account_id != *buyer || sub.status != SubscriptionStatus::Active {
+                let stored = self.require_subscription_by_id(&sid);
+                if stored.account_id != *buyer || stored.status != SubscriptionStatus::Active {
                     return None;
                 }
-                let projected = self.project_subscription_view_now(sub.clone());
-                (projected.product_id == *product_id).then_some((sid, sub))
+                let projected = self.project_subscription_view_now(stored.clone());
+                (projected.product_id == *product_id).then_some(ProjectedSubscriptionLookup {
+                    subscription_id: sid,
+                    stored,
+                    projected,
+                })
             })
     }
 
@@ -817,29 +811,29 @@ impl Contract {
         if sub.status != SubscriptionStatus::Active || sub.cancel_at_period_end {
             return sub;
         }
-        let now = block_timestamp();
+
+        let mut projection_start_ns = sub.start_ns.0;
         if let Some(apply_ns) = sub.pending_downgrade_apply_ns {
-            if now >= apply_ns.0 {
-                if let Some(target_price_id) = sub.pending_downgrade_price_id.clone() {
-                    let target_price = self.require_price(&target_price_id);
-                    sub.product_id = target_price.product_id;
-                    sub.price_id = target_price_id;
-                }
-                let (start_ns, end_ns) =
-                    self.projected_subscription_window_from(sub.anchor_day, apply_ns.0);
-                sub.start_ns = start_ns;
-                sub.end_ns = end_ns;
-                Self::clear_pending_downgrade(&mut sub);
-                return sub;
+            if block_timestamp() >= apply_ns.0 {
+                projection_start_ns = apply_ns.0;
+                self.project_due_downgrade_fields(&mut sub);
             }
         }
-        while now >= sub.end_ns.0 {
-            let next_start = sub.end_ns.0;
-            let next_end = add_months_stripe_style(sub.anchor_day, 1, next_start);
-            sub.start_ns = U64(next_start);
-            sub.end_ns = U64(next_end);
-        }
+
+        let (start_ns, end_ns) =
+            self.projected_subscription_window_from(sub.anchor_day, projection_start_ns);
+        sub.start_ns = start_ns;
+        sub.end_ns = end_ns;
         sub
+    }
+
+    fn project_due_downgrade_fields(&self, sub: &mut Subscription) {
+        if let Some(target_price_id) = sub.pending_downgrade_price_id.clone() {
+            let target_price = self.require_price(&target_price_id);
+            sub.product_id = target_price.product_id;
+            sub.price_id = target_price_id;
+        }
+        Self::clear_pending_downgrade(sub);
     }
 }
 
