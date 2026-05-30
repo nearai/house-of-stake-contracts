@@ -138,15 +138,17 @@ impl Contract {
         let sub_key = (buyer.clone(), product_id.clone());
         let now = block_timestamp();
 
-        let existing_subscription_id = self.subscription_by_account_product.get(&sub_key).cloned();
-        let existing_subscription_id = if existing_subscription_id.is_some() {
-            existing_subscription_id
-        } else {
-            self.find_subscription_owned_by_pending_downgrade(&buyer, &price_id)
-                .map(|(sid, _)| sid)
-        };
+        let existing_subscription_id = self
+            .subscription_by_account_product
+            .get(&sub_key)
+            .cloned()
+            .or_else(|| {
+                self.find_subscription_owned_by_projected_product(&buyer, &product_id)
+                    .map(|(sid, _)| sid)
+            });
 
         let (subscription, sub_id, is_new_index) = if let Some(sid) = existing_subscription_id {
+            self.apply_due_subscription_downgrade(&sid);
             let mut sub = self.require_subscription_by_id(&sid);
             require!(
                 sub.account_id == buyer,
@@ -183,11 +185,11 @@ impl Contract {
                     cancel_at_period_end: false,
                     pending_downgrade_price_id: None,
                     pending_downgrade_target_amount: None,
+                    pending_downgrade_apply_ns: None,
                 };
                 (sub_new, sid_new, true)
             } else {
-                // Renewal window: extend billing period; downgrade prorate runs in
-                // [`commit_catalog_lock`] after settlement succeeds (see `apply_pending_downgrade_before_renewal_lock`).
+                // Renewal window: extend billing period for the current effective tier.
                 let start = sub.end_ns.0.max(now);
                 let end = crate::subscriptions::add_months_stripe_style(sub.anchor_day, 1, start);
                 sub.start_ns = U64(start);
@@ -212,6 +214,7 @@ impl Contract {
                 cancel_at_period_end: false,
                 pending_downgrade_price_id: None,
                 pending_downgrade_target_amount: None,
+                pending_downgrade_apply_ns: None,
             };
             (sub, sid, true)
         };
@@ -219,34 +222,15 @@ impl Contract {
         self.validate_subscription_target_amount(&price, U128(locked.as_yoctonear()));
 
         if !is_new_index {
-            match &subscription.pending_downgrade_price_id {
-                Some(pending_low) => {
-                    require!(
-                        price_id == *pending_low,
-                        "price_id must match the scheduled downgrade tier for this renewal"
-                    );
-                    let pending_amount = subscription
-                        .pending_downgrade_target_amount
-                        .unwrap_or_else(|| {
-                            env::panic_str("Pending downgrade target amount missing")
-                        });
-                    require!(
-                        locked.as_yoctonear() == pending_amount.as_yoctonear(),
-                        "Locked NEAR must match scheduled downgrade target amount"
-                    );
-                }
-                None => {
-                    require!(
-                        price_id == subscription.price_id,
-                        "price_id must match current subscription tier"
-                    );
-                    if let Some(prev) = self.internal_get_lock(&subscription.last_lock_id) {
-                        require!(
-                            locked.as_yoctonear() == prev.amount_near.as_yoctonear(),
-                            "Locked NEAR must match current subscription stake amount"
-                        );
-                    }
-                }
+            require!(
+                price_id == subscription.price_id,
+                "price_id must match current subscription tier"
+            );
+            if let Some(prev) = self.internal_get_lock(&subscription.last_lock_id) {
+                require!(
+                    locked.as_yoctonear() == prev.amount_near.as_yoctonear(),
+                    "Locked NEAR must match current subscription stake amount"
+                );
             }
         }
 
@@ -374,12 +358,8 @@ impl Contract {
         duration_ns: u128,
         order: OrderRef,
         validator_id: ValidatorId,
-        mut subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
+        subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
     ) -> LockId {
-        if let Some((subscription, sub_id, _)) = subscription_followup.as_mut() {
-            self.apply_pending_downgrade_before_renewal_lock(&buyer, sub_id, subscription);
-        }
-
         // Catalog line item for this lock (one-off or subscription).
         let price_id = match &order {
             OrderRef::ProductPurchase { price_id, .. }

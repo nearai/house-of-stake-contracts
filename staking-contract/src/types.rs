@@ -270,6 +270,8 @@ pub struct Subscription {
     pub pending_downgrade_price_id: Option<PriceId>,
     /// Target stake amount to apply with `pending_downgrade_price_id` at the next renewal.
     pub pending_downgrade_target_amount: Option<NearToken>,
+    /// Timestamp when the pending downgrade becomes effective.
+    pub pending_downgrade_apply_ns: Option<U64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
