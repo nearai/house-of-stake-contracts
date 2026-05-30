@@ -600,7 +600,9 @@ impl Contract {
             ),
             ReleaseKind::WithSubscriptionUpdateOutcome => tail.then(
                 ext_self_epoch::ext(env::current_account_id())
-                    .with_static_gas(callbacks::ON_EPOCH_PIPELINE_RELEASE_WITH_LOCK_ID)
+                    .with_static_gas(
+                        callbacks::ON_EPOCH_PIPELINE_RELEASE_WITH_SUBSCRIPTION_UPDATE_OUTCOME,
+                    )
                     .on_epoch_pipeline_release_with_subscription_update_outcome(
                         pipeline_validator_id,
                         cont_for_release,
