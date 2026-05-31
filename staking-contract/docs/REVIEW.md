@@ -36,7 +36,7 @@ Review energy should go to **new staking code and tests**, not re-litigating vot
 
 ### 3. Gas
 
-- Long promise chains on `lock_for_*`, `unlock`, `withdraw`. Confirm `require_enough_gas_for_epoch_settlement` and documented minimum prepaid gas on hot paths.
+- Long promise chains on `lock`, `unlock`, `withdraw`. Confirm `require_enough_gas_for_epoch_settlement` and documented minimum prepaid gas on hot paths.
 
 ### 4. Build and CI
 

@@ -2,7 +2,7 @@
 
 ## Summary
 
-Replace `lock` and `lock` with one public payable method:
+Replace the old split entrypoints, `lock_for_product` and `lock_for_subscription`, with one public payable method:
 
 ```rust
 pub fn lock(
@@ -17,7 +17,7 @@ The method resolves `price_id` vs `product_id` using the existing XOR/default-pr
 
 ## Key Changes
 
-- Remove the old public methods `lock` and `lock`.
+- Remove the old public methods `lock_for_product` and `lock_for_subscription`.
 - Keep one internal implementation path that performs the shared preamble, gas check, active price/product lookup, validator checks, settlement pipeline, and `commit_catalog_lock`.
 - For `PriceType::OneOff`:
   - Require `duration_ns: Some`.
@@ -31,13 +31,13 @@ The method resolves `price_id` vs `product_id` using the existing XOR/default-pr
   - Preserve existing subscription creation, renewal, cancellation-at-period-end reset, pending downgrade, target amount, and current amount validations.
   - Derive duration from `subscription.end_ns - now`.
   - Create `OrderRef::Subscription` and persist subscription follow-up as today.
-- Update error messages to reference `lock`, not `lock` or `lock`.
+- Update error messages to reference `lock`, not `lock_for_product` or `lock_for_subscription`.
 
 ## Public Interfaces And Clients
 
 - Update contract docs/API docs to document only `lock`.
 - Update sandbox helpers to expose one `buyer_lock(...)` helper, with thin test-only helpers only if they simplify test readability.
-- Update chat-api HoS intent docs/comments to call `lock` instead of `lock`.
+- Update chat-api HoS intent docs/comments to call `lock` instead of `lock_for_subscription`.
 - Request payload from chat-api/client for subscription purchase should pass:
   - `price_id: Some(...)`
   - `product_id: None`

@@ -640,6 +640,15 @@ impl Contract {
 
         let sub = self.require_subscription_owned_by_id(buyer, subscription_id);
         Self::assert_subscription_active(&sub);
+        if target_product.product_id != sub.product_id {
+            let target_key = (buyer.clone(), target_product.product_id.clone());
+            if let Some(existing) = self.subscription_by_account_product.get(&target_key) {
+                require!(
+                    existing == subscription_id,
+                    "Subscription already exists for target product"
+                );
+            }
+        }
         // Same virtual billing window as [`Contract::get_subscription`] / `get_subscription_for_product`.
         let sub = self.project_subscription_view_now(sub);
 

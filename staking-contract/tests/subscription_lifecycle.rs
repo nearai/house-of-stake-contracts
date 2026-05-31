@@ -425,6 +425,35 @@ fn cross_product_downgrade_projects_at_apply_time_without_manual_renewal_lock() 
 }
 
 #[test]
+#[should_panic(expected = "Subscription already exists for target product")]
+fn cross_product_update_rejects_existing_target_product_subscription() {
+    let mut c = deploy();
+    let (_product_low, price_low) = setup_catalog_near_subscription(&mut c);
+    let (product_high, price_high) = add_subscription_product(&mut c, "High product", 10);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_low.clone()), None, None));
+
+    testing_env!(ctx_ts(
+        acct(BUYER),
+        NearToken::from_near(50),
+        BASE_TS.saturating_add(1),
+    ));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_high), None, None));
+    let sub_high = c
+        .get_subscription_for_product(acct(BUYER), product_high)
+        .expect("subscription");
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    c.update_subscription(
+        sub_high.subscription_id,
+        price_low,
+        U128(NearToken::from_near(25).as_yoctonear()),
+    );
+}
+
+#[test]
 fn pending_downgrade_projects_after_apply_time_without_manual_lock() {
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
