@@ -44,6 +44,7 @@ impl Contract {
         // represents the current virtual billing period boundary.
         let mut sub = self.project_subscription_view_now(sub);
         Self::assert_subscription_active(&sub);
+        self.sync_subscription_lock_window(&sub);
         sub.cancel_at_period_end = true;
         self.internal_set_subscription(sid.clone(), sub.clone());
         crate::events::log_subscription_cancel(&buyer, &product_id);
@@ -501,26 +502,13 @@ impl Contract {
         let (period_start_ns, period_end_ns) =
             self.projected_subscription_window_from(stored.anchor_day, apply_ns.0);
 
-        if let Some(mut lock) = self.internal_get_lock(&stored.last_lock_id) {
-            if lock.account_id == buyer && lock.status == LockStatus::Active {
-                lock.start_ns = period_start_ns;
-                lock.end_ns = period_end_ns;
-                lock.order = OrderRef::Subscription {
-                    subscription_id: stored.subscription_id.clone(),
-                    price_id: target_price_id.clone(),
-                    period_start_ns,
-                    period_end_ns,
-                };
-                self.internal_set_lock(lock.lock_id.clone(), lock);
-            }
-        }
-
         let mut updated = stored;
         updated.product_id = new_product_id.clone();
         updated.price_id = target_price_id.clone();
         updated.start_ns = period_start_ns;
         updated.end_ns = period_end_ns;
         Self::clear_pending_downgrade(&mut updated);
+        self.sync_subscription_lock_window(&updated);
         self.move_subscription_product_index(
             &buyer,
             subscription_id,
@@ -538,6 +526,32 @@ impl Contract {
             target_amount.as_yoctonear(),
         );
         true
+    }
+
+    fn sync_subscription_lock_window(&mut self, sub: &Subscription) {
+        let Some(mut lock) = self.internal_get_lock(&sub.last_lock_id) else {
+            return;
+        };
+        if lock.account_id != sub.account_id || lock.status != LockStatus::Active {
+            return;
+        }
+
+        lock.start_ns = sub.start_ns;
+        lock.end_ns = sub.end_ns;
+        if let OrderRef::Subscription {
+            subscription_id,
+            price_id,
+            period_start_ns,
+            period_end_ns,
+        } = &mut lock.order
+        {
+            if *subscription_id == sub.subscription_id {
+                *price_id = sub.price_id.clone();
+                *period_start_ns = sub.start_ns;
+                *period_end_ns = sub.end_ns;
+            }
+        }
+        self.internal_set_lock(lock.lock_id.clone(), lock);
     }
 
     fn checked_subscription_update_inputs(

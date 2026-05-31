@@ -12,7 +12,7 @@ use near_sdk::PromiseOrValue;
 use near_sdk::json_types::U128;
 use near_sdk::testing_env;
 use staking_contract::types::TransactionStatus;
-use staking_contract::types::{LockStatus, SubscriptionStatus};
+use staking_contract::types::{LockStatus, OrderRef, SubscriptionStatus};
 use staking_contract::utils::AVG_MONTH_NS;
 
 const BASE_TS: u64 = 1_700_000_000_000_000_000;
@@ -657,7 +657,7 @@ fn cancel_subscription_normalizes_stale_window_before_marking_cancel_at_end() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let _ = unwrap_sync_lock_id(c.lock(Some(price_id), None, None));
+    let lock_id = unwrap_sync_lock_id(c.lock(Some(price_id), None, None));
     let initial = c
         .get_subscription_for_product(acct(BUYER), product_id.clone())
         .expect("subscription");
@@ -677,4 +677,19 @@ fn cancel_subscription_normalizes_stale_window_before_marking_cancel_at_end() {
         "cancel-at-period-end should use current virtual cycle, not stale stored end_ns"
     );
     assert!(after.cancel_at_period_end);
+
+    let lock = c.get_lock(lock_id).expect("lock");
+    assert_eq!(lock.start_ns, after.start_ns);
+    assert_eq!(lock.end_ns, after.end_ns);
+    match lock.order {
+        OrderRef::Subscription {
+            period_start_ns,
+            period_end_ns,
+            ..
+        } => {
+            assert_eq!(period_start_ns, after.start_ns);
+            assert_eq!(period_end_ns, after.end_ns);
+        }
+        OrderRef::ProductPurchase { .. } => panic!("expected subscription order"),
+    }
 }
