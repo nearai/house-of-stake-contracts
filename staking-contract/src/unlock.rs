@@ -22,6 +22,7 @@ impl Contract {
             "Only the lock owner can unlock",
         );
         require!(lock.status == LockStatus::Active, "Lock is not active");
+        self.assert_subscription_lock_can_unlock(&lock);
         require!(
             block_timestamp() >= lock.end_ns.0,
             "Lock period has not ended yet"
@@ -115,5 +116,28 @@ impl Contract {
         );
         require!(lock.status == LockStatus::Active, "Lock is not active");
         lock
+    }
+
+    /// Subscription-only unlock guard. Active auto-renewing subscriptions must be cancelled
+    /// (`cancel_at_period_end`) before stake can be unlocked; a past `lock.end_ns` alone is not enough.
+    /// No-op for one-off locks, missing subscription records, or subscriptions already winding down.
+    fn assert_subscription_lock_can_unlock(&self, lock: &Lock) {
+        let OrderRef::Subscription {
+            subscription_id, ..
+        } = &lock.order
+        else {
+            return;
+        };
+        let Some(sub) = self.internal_get_subscription(subscription_id) else {
+            return;
+        };
+        if sub.status != SubscriptionStatus::Active || sub.cancel_at_period_end {
+            return;
+        }
+        let projected = self.project_subscription_view_now(sub);
+        require!(
+            block_timestamp() >= projected.end_ns.0,
+            "Active subscription lock cannot be unlocked; cancel the subscription first"
+        );
     }
 }

@@ -203,6 +203,7 @@ impl Contract {
     ) {
         self.assert_validator_owner(pool_owner, &expected_caller);
         let mut product = self.require_product(&product_id);
+        self.assert_no_pending_update_references_product(&product_id);
         // Archived products cannot serve as default; clear so lock-by-product fails fast.
         product.default_price_id = None;
         product.status = CatalogStatus::Archived;
@@ -222,6 +223,7 @@ impl Contract {
             product.usage_count == 0,
             "Cannot delete this product while it is in use"
         );
+        self.assert_no_pending_update_references_product(&product_id);
         require!(
             product.price_ids.is_empty(),
             "Remove or delete all prices for this product first"

@@ -33,7 +33,8 @@ pub mod callbacks {
     //                   | ON_WITHDRAW_TAIL_AFTER_PRE_USER | ON_SUBSCRIPTION_UPGRADE_AFTER_SETTLE
     //                -> release callback:
     //                   ON_EPOCH_PIPELINE_TERMINAL_RELEASE (1 * BASE)
-    //                   or ON_EPOCH_PIPELINE_RELEASE_WITH_LOCK_ID (1 * BASE)
+    //                   or ON_EPOCH_PIPELINE_RELEASE_WITH_LOCK_ID (2 * BASE)
+    //                   or ON_EPOCH_PIPELINE_RELEASE_WITH_SUBSCRIPTION_UPDATE_OUTCOME (2 * BASE)
     //
     // Fast path:
     // 0) promise_validator_per_epoch_settlement_then
@@ -81,6 +82,9 @@ pub mod callbacks {
     pub const ON_EPOCH_PIPELINE_TERMINAL_RELEASE: Gas = BASE_GAS;
     /// Release pipeline `Busy`, return lock id, or refund payable entry on tail failure (transfer).
     pub const ON_EPOCH_PIPELINE_RELEASE_WITH_LOCK_ID: Gas = Gas::from_gas(BASE_GAS.as_gas() * 2);
+    /// Release pipeline `Busy`, return subscription update outcome, or refund payable entry on tail failure.
+    pub const ON_EPOCH_PIPELINE_RELEASE_WITH_SUBSCRIPTION_UPDATE_OUTCOME: Gas =
+        Gas::from_gas(BASE_GAS.as_gas() * 2);
 }
 
 impl Contract {

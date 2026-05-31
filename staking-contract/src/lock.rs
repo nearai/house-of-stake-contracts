@@ -138,15 +138,17 @@ impl Contract {
         let sub_key = (buyer.clone(), product_id.clone());
         let now = block_timestamp();
 
-        let existing_subscription_id = self.subscription_by_account_product.get(&sub_key).cloned();
-        let existing_subscription_id = if existing_subscription_id.is_some() {
-            existing_subscription_id
-        } else {
-            self.find_subscription_owned_by_pending_downgrade(&buyer, &price_id)
-                .map(|(sid, _)| sid)
-        };
+        let existing_subscription_id = self
+            .subscription_by_account_product
+            .get(&sub_key)
+            .cloned()
+            .or_else(|| {
+                self.find_subscription_by_projected_product(&buyer, &product_id)
+                    .map(|found| found.subscription_id)
+            });
 
         let (subscription, sub_id, is_new_index) = if let Some(sid) = existing_subscription_id {
+            self.apply_due_subscription_update(&sid);
             let mut sub = self.require_subscription_by_id(&sid);
             require!(
                 sub.account_id == buyer,
@@ -166,28 +168,13 @@ impl Contract {
                 let old_sub_key = (buyer.clone(), sub.product_id.clone());
                 self.subscription_by_account_product.remove(&old_sub_key);
                 self.remove_subscription_from_account_index(&buyer, &sid);
+                self.remove_subscription_from_global_index(&sid);
                 self.subscriptions.remove(sid.as_str());
-                let anchor = anchor_day_from_timestamp(now);
-                let end = crate::subscriptions::add_months_stripe_style(anchor, 1, now);
-                let sid_new = crate::ids::next_subscription_id(&mut self.id_nonce);
-                let sub_new = Subscription {
-                    subscription_id: sid_new.clone(),
-                    account_id: buyer.clone(),
-                    product_id: product.product_id.clone(),
-                    price_id: price_id.clone(),
-                    start_ns: U64(now),
-                    end_ns: U64(end),
-                    anchor_day: anchor,
-                    last_lock_id: String::new(),
-                    status: SubscriptionStatus::Active,
-                    cancel_at_period_end: false,
-                    pending_downgrade_price_id: None,
-                    pending_downgrade_target_amount: None,
-                };
+                let (sid_new, sub_new) =
+                    self.new_subscription_for_lock(&buyer, &product, &price_id, now);
                 (sub_new, sid_new, true)
             } else {
-                // Renewal window: extend billing period; downgrade prorate runs in
-                // [`commit_catalog_lock`] after settlement succeeds (see `apply_pending_downgrade_before_renewal_lock`).
+                // Renewal window: extend billing period for the current effective tier.
                 let start = sub.end_ns.0.max(now);
                 let end = crate::subscriptions::add_months_stripe_style(sub.anchor_day, 1, start);
                 sub.start_ns = U64(start);
@@ -196,57 +183,22 @@ impl Contract {
                 (sub, sid, false)
             }
         } else {
-            let anchor = anchor_day_from_timestamp(now);
-            let end = crate::subscriptions::add_months_stripe_style(anchor, 1, now);
-            let sid = crate::ids::next_subscription_id(&mut self.id_nonce);
-            let sub = Subscription {
-                subscription_id: sid.clone(),
-                account_id: buyer.clone(),
-                product_id: product.product_id.clone(),
-                price_id: price_id.clone(),
-                start_ns: U64(now),
-                end_ns: U64(end),
-                anchor_day: anchor,
-                last_lock_id: String::new(),
-                status: SubscriptionStatus::Active,
-                cancel_at_period_end: false,
-                pending_downgrade_price_id: None,
-                pending_downgrade_target_amount: None,
-            };
+            let (sid, sub) = self.new_subscription_for_lock(&buyer, &product, &price_id, now);
             (sub, sid, true)
         };
 
         self.validate_subscription_target_amount(&price, U128(locked.as_yoctonear()));
 
         if !is_new_index {
-            match &subscription.pending_downgrade_price_id {
-                Some(pending_low) => {
-                    require!(
-                        price_id == *pending_low,
-                        "price_id must match the scheduled downgrade tier for this renewal"
-                    );
-                    let pending_amount = subscription
-                        .pending_downgrade_target_amount
-                        .unwrap_or_else(|| {
-                            env::panic_str("Pending downgrade target amount missing")
-                        });
-                    require!(
-                        locked.as_yoctonear() == pending_amount.as_yoctonear(),
-                        "Locked NEAR must match scheduled downgrade target amount"
-                    );
-                }
-                None => {
-                    require!(
-                        price_id == subscription.price_id,
-                        "price_id must match current subscription tier"
-                    );
-                    if let Some(prev) = self.internal_get_lock(&subscription.last_lock_id) {
-                        require!(
-                            locked.as_yoctonear() == prev.amount_near.as_yoctonear(),
-                            "Locked NEAR must match current subscription stake amount"
-                        );
-                    }
-                }
+            require!(
+                price_id == subscription.price_id,
+                "price_id must match current subscription tier"
+            );
+            if let Some(prev) = self.internal_get_lock(&subscription.last_lock_id) {
+                require!(
+                    locked.as_yoctonear() == prev.amount_near.as_yoctonear(),
+                    "Locked NEAR must match current subscription stake amount"
+                );
             }
         }
 
@@ -357,6 +309,32 @@ impl Contract {
         }
     }
 
+    fn new_subscription_for_lock(
+        &mut self,
+        buyer: &AccountId,
+        product: &Product,
+        price_id: &PriceId,
+        start_ns: u64,
+    ) -> (SubscriptionId, Subscription) {
+        let anchor = anchor_day_from_timestamp(start_ns);
+        let end_ns = crate::subscriptions::add_months_stripe_style(anchor, 1, start_ns);
+        let subscription_id = crate::ids::next_subscription_id(&mut self.id_nonce);
+        let subscription = Subscription {
+            subscription_id: subscription_id.clone(),
+            account_id: buyer.clone(),
+            product_id: product.product_id.clone(),
+            price_id: price_id.clone(),
+            start_ns: U64(start_ns),
+            end_ns: U64(end_ns),
+            anchor_day: anchor,
+            last_lock_id: String::new(),
+            status: SubscriptionStatus::Active,
+            cancel_at_period_end: false,
+            pending_update: None,
+        };
+        (subscription_id, subscription)
+    }
+
     /// Commits catalog-lock **state**: mints pool shares for `locked` NEAR, stores the lock,
     /// bumps catalog usage, updates validator pending stake and per-buyer share balance, then
     /// optionally updates subscription storage (subscription + `(account, product)` index when new).
@@ -374,12 +352,8 @@ impl Contract {
         duration_ns: u128,
         order: OrderRef,
         validator_id: ValidatorId,
-        mut subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
+        subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
     ) -> LockId {
-        if let Some((subscription, sub_id, _)) = subscription_followup.as_mut() {
-            self.apply_pending_downgrade_before_renewal_lock(&buyer, sub_id, subscription);
-        }
-
         // Catalog line item for this lock (one-off or subscription).
         let price_id = match &order {
             OrderRef::ProductPurchase { price_id, .. }
@@ -432,6 +406,7 @@ impl Contract {
             self.internal_set_subscription(sub_id.clone(), subscription);
             self.add_subscription_to_account_index(&buyer, &sub_id);
             if is_new_index {
+                self.add_subscription_to_global_index(&sub_id);
                 self.subscription_by_account_product
                     .insert(sub_key, sub_id.clone());
             }
