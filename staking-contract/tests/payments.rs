@@ -3,7 +3,7 @@
 mod common;
 
 use common::{
-    BUYER, POOL, VALIDATOR_OWNER_ACCOUNT, acct, base_config, ctx, deploy, register_buyer,
+    BUYER, OWNER, POOL, VALIDATOR_OWNER_ACCOUNT, acct, base_config, ctx, deploy, register_buyer,
     set_default_price_for_product, setup_catalog_near_oneoff, setup_catalog_near_subscription,
     testing_env_catalog_callback,
 };
@@ -279,6 +279,20 @@ fn pay_rejects_archived_product() {
         product_id,
         acct(VALIDATOR_OWNER_ACCOUNT),
     );
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    c.pay(Some(price_id), None, U64(1));
+}
+
+#[test]
+#[should_panic(expected = "This validator is paused or removed")]
+fn pay_rejects_paused_validator() {
+    let mut c = deploy();
+    let (_product_id, price_id) = setup_catalog_near_oneoff(&mut c);
+    register_buyer(&mut c);
+
+    testing_env!(ctx(acct(OWNER), NearToken::from_yoctonear(1)));
+    c.pause_validator(acct(POOL));
 
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
     c.pay(Some(price_id), None, U64(1));

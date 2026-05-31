@@ -45,6 +45,7 @@ impl Contract {
 
         let resolved_price_id = self.resolve_price_id_for_lock(price_id, product_id);
         let (mut price, mut product) = self.get_active_price_and_product(&resolved_price_id);
+        self.assert_validator_active_for_lock(&product.validator_id);
         require!(
             price.price_type == PriceType::OneOff,
             "This price is not a one-off product price"
