@@ -168,6 +168,7 @@ impl Contract {
                 let old_sub_key = (buyer.clone(), sub.product_id.clone());
                 self.subscription_by_account_product.remove(&old_sub_key);
                 self.remove_subscription_from_account_index(&buyer, &sid);
+                self.remove_subscription_from_global_index(&sid);
                 self.subscriptions.remove(sid.as_str());
                 let (sid_new, sub_new) =
                     self.new_subscription_for_lock(&buyer, &product, &price_id, now);
@@ -407,6 +408,7 @@ impl Contract {
             self.internal_set_subscription(sub_id.clone(), subscription);
             self.add_subscription_to_account_index(&buyer, &sub_id);
             if is_new_index {
+                self.add_subscription_to_global_index(&sub_id);
                 self.subscription_by_account_product
                     .insert(sub_key, sub_id.clone());
             }

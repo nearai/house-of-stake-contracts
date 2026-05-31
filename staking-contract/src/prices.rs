@@ -206,6 +206,7 @@ impl Contract {
     ) {
         self.assert_validator_owner(pool_owner, &expected_caller);
         let mut price = self.require_price(&price_id);
+        self.assert_no_pending_update_references_price(&price_id);
         let product_id = price.product_id.clone();
         price.status = CatalogStatus::Archived;
         self.internal_set_price(price_id.clone(), price);
@@ -226,6 +227,7 @@ impl Contract {
             price.usage_count == 0,
             "Cannot delete this price while it is in use"
         );
+        self.assert_no_pending_update_references_price(&price_id);
         let product_id = price.product_id.clone();
         let mut product = self.require_product(&price.product_id);
         product.price_ids.retain(|x| x != &price_id);

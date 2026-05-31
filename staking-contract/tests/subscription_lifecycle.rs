@@ -571,6 +571,103 @@ fn immediate_update_clears_pending_downgrade() {
 }
 
 #[test]
+#[should_panic(
+    expected = "Cannot archive or delete this price while it is referenced by a pending subscription update"
+)]
+fn pending_update_target_price_blocks_archive() {
+    let mut c = deploy();
+    let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
+    let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_high), None, None));
+    let sub = c
+        .get_subscription_for_product(acct(BUYER), product_id)
+        .expect("subscription");
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    let _ = c.update_subscription(
+        sub.subscription_id,
+        price_low.clone(),
+        U128(NearToken::from_near(25).as_yoctonear()),
+    );
+    let low = c.get_price(price_low.clone()).expect("low price");
+    assert_eq!(low.usage_count, 0);
+
+    testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
+    c.archive_price_after_get_owner(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        price_low,
+        acct(VALIDATOR_OWNER_ACCOUNT),
+    );
+}
+
+#[test]
+#[should_panic(
+    expected = "Cannot archive or delete this price while it is referenced by a pending subscription update"
+)]
+fn pending_update_target_price_blocks_delete() {
+    let mut c = deploy();
+    let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
+    let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_high), None, None));
+    let sub = c
+        .get_subscription_for_product(acct(BUYER), product_id)
+        .expect("subscription");
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    let _ = c.update_subscription(
+        sub.subscription_id,
+        price_low.clone(),
+        U128(NearToken::from_near(25).as_yoctonear()),
+    );
+    let low = c.get_price(price_low.clone()).expect("low price");
+    assert_eq!(low.usage_count, 0);
+
+    testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
+    c.delete_price_after_get_owner(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        price_low,
+        acct(VALIDATOR_OWNER_ACCOUNT),
+    );
+}
+
+#[test]
+#[should_panic(
+    expected = "Cannot archive or delete this product while it is referenced by a pending subscription update"
+)]
+fn pending_update_target_product_blocks_archive() {
+    let mut c = deploy();
+    let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
+    let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_high), None, None));
+    let sub = c
+        .get_subscription_for_product(acct(BUYER), product_id.clone())
+        .expect("subscription");
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    let _ = c.update_subscription(
+        sub.subscription_id,
+        price_low,
+        U128(NearToken::from_near(25).as_yoctonear()),
+    );
+
+    testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
+    c.archive_product_after_get_owner(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        product_id,
+        acct(VALIDATOR_OWNER_ACCOUNT),
+    );
+}
+
+#[test]
 #[should_panic(expected = "No subscription for this product; subscribe first")]
 fn cancel_subscription_fails_without_subscription() {
     let mut c = deploy();

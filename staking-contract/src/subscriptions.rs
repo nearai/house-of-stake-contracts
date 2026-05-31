@@ -294,6 +294,13 @@ impl Contract {
         }
     }
 
+    pub(crate) fn add_subscription_to_global_index(&mut self, subscription_id: &SubscriptionId) {
+        if self.subscription_ids.iter().any(|id| id == subscription_id) {
+            return;
+        }
+        self.subscription_ids.push(subscription_id.clone());
+    }
+
     pub(crate) fn remove_subscription_from_account_index(
         &mut self,
         account_id: &AccountId,
@@ -308,6 +315,48 @@ impl Contract {
             self.subscriptions_by_account
                 .insert(account_id.clone(), ids);
         }
+    }
+
+    pub(crate) fn remove_subscription_from_global_index(
+        &mut self,
+        subscription_id: &SubscriptionId,
+    ) {
+        let Some(index) = self
+            .subscription_ids
+            .iter()
+            .position(|id| id == subscription_id)
+        else {
+            return;
+        };
+        let Ok(index) = u32::try_from(index) else {
+            return;
+        };
+        self.subscription_ids.swap_remove(index);
+    }
+
+    pub(crate) fn assert_no_pending_update_references_price(&self, price_id: &PriceId) {
+        require!(
+            !self
+                .subscription_ids
+                .iter()
+                .filter_map(|sid| self.internal_get_subscription(&sid))
+                .any(|sub| sub.pending_downgrade_price_id.as_ref() == Some(price_id)),
+            "Cannot archive or delete this price while it is referenced by a pending subscription update"
+        );
+    }
+
+    pub(crate) fn assert_no_pending_update_references_product(&self, product_id: &ProductId) {
+        require!(
+            !self
+                .subscription_ids
+                .iter()
+                .filter_map(|sid| self.internal_get_subscription(&sid))
+                .filter_map(|sub| sub.pending_downgrade_price_id)
+                .filter_map(|pending_price_id| self.prices.get(&pending_price_id).cloned())
+                .map(Price::from)
+                .any(|price| price.product_id == *product_id),
+            "Cannot archive or delete this product while it is referenced by a pending subscription update"
+        );
     }
 
     fn subscription_ids_for_account_view(&self, account_id: &AccountId) -> Vec<SubscriptionId> {
