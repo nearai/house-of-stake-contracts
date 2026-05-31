@@ -454,6 +454,35 @@ fn cross_product_update_rejects_existing_target_product_subscription() {
 }
 
 #[test]
+#[should_panic(expected = "Subscription already has a pending update for target product")]
+fn lock_rejects_product_reserved_by_pending_cross_product_update() {
+    let mut c = deploy();
+    let (_product_low, price_low) = setup_catalog_near_subscription(&mut c);
+    let (product_high, price_high) = add_subscription_product(&mut c, "High product", 10);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_high.clone()), None, None));
+    let sub_high = c
+        .get_subscription_for_product(acct(BUYER), product_high)
+        .expect("subscription");
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    c.update_subscription(
+        sub_high.subscription_id,
+        price_low.clone(),
+        U128(NearToken::from_near(25).as_yoctonear()),
+    );
+
+    testing_env!(ctx_ts(
+        acct(BUYER),
+        NearToken::from_near(50),
+        BASE_TS.saturating_add(1),
+    ));
+    c.lock(Some(price_low), None, None);
+}
+
+#[test]
 fn pending_downgrade_projects_after_apply_time_without_manual_lock() {
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
@@ -525,8 +554,8 @@ fn pending_downgrade_projects_after_apply_time_without_manual_lock() {
     assert!(
         c.user_pending_unstake
             .get(&(acct(BUYER), acct(POOL)))
-            .is_some(),
-        "first later mutation should queue surplus unstake"
+            .is_none(),
+        "cancel should not queue surplus unstake"
     );
 }
 
@@ -707,6 +736,27 @@ fn same_plan_stake_increase_applies_amount_only() {
 }
 
 #[test]
+#[should_panic(expected = "Attached NEAR is below the contract minimum lock amount")]
+fn stake_increase_rejects_delta_below_min_lock_amount() {
+    let mut c = deploy();
+    let (_product_id, price_id) = setup_catalog_near_subscription(&mut c);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_id.clone()), None, None));
+    let sub = c
+        .get_subscription_for_price(acct(BUYER), price_id.clone())
+        .expect("subscription");
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    c.update_subscription(
+        sub.subscription_id,
+        price_id,
+        U128(NearToken::from_near(50).as_yoctonear().saturating_add(1)),
+    );
+}
+
+#[test]
 fn plan_upgrade_same_stake_applies_plan_now() {
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
@@ -815,6 +865,55 @@ fn same_plan_stake_decrease_schedules_amount_only() {
     assert_eq!(
         outcome.pending_stake_decrease,
         Some(U128(NearToken::from_near(25).as_yoctonear()))
+    );
+}
+
+#[test]
+fn cancel_clears_pending_update_without_applying_stake_decrease() {
+    let mut c = deploy();
+    let (product_id, price_id) = setup_catalog_near_subscription(&mut c);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let lock_id = unwrap_sync_lock_id(c.lock(Some(price_id.clone()), None, None));
+    let sub = c
+        .get_subscription_for_product(acct(BUYER), product_id.clone())
+        .expect("subscription");
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    c.update_subscription(
+        sub.subscription_id,
+        price_id,
+        U128(NearToken::from_near(25).as_yoctonear()),
+    );
+
+    let pending = c
+        .get_subscription_for_product(acct(BUYER), product_id.clone())
+        .expect("subscription")
+        .pending_update
+        .expect("pending update");
+    testing_env!(ctx_ts(
+        acct(BUYER),
+        NearToken::from_yoctonear(1),
+        pending.apply_ns.0.saturating_add(1),
+    ));
+    c.cancel_subscription(product_id.clone());
+
+    let cancelled = c
+        .get_subscription_for_product(acct(BUYER), product_id)
+        .expect("subscription");
+    assert!(cancelled.cancel_at_period_end);
+    assert!(cancelled.pending_update.is_none());
+    assert!(
+        c.user_pending_unstake
+            .get(&(acct(BUYER), acct(POOL)))
+            .is_none(),
+        "cancel should not apply a pending stake decrease"
+    );
+    let lock = c.get_lock(lock_id).expect("lock");
+    assert_eq!(
+        lock.amount_near.as_yoctonear(),
+        NearToken::from_near(50).as_yoctonear()
     );
 }
 

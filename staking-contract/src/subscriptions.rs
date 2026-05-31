@@ -58,12 +58,17 @@ impl Contract {
         assert_one_yocto();
         self.assert_not_paused();
         let buyer = env::predecessor_account_id();
-        let (sid, sub) = self.require_current_subscription_owned_by(&buyer, &product_id);
+        let (sid, sub) = self.require_subscription_owned_by(&buyer, &product_id);
+        let old_product_id = sub.product_id.clone();
         // Normalize stale active windows before marking cancel-at-end so stored `end_ns`
         // represents the current virtual billing period boundary.
         let mut sub = self.project_subscription_view_now(sub);
         Self::assert_subscription_active(&sub);
+        Self::clear_pending_update(&mut sub);
         self.sync_subscription_lock_window(&sub);
+        if old_product_id != sub.product_id {
+            self.move_subscription_product_index(&buyer, &sid, &old_product_id, &sub.product_id);
+        }
         sub.cancel_at_period_end = true;
         self.internal_set_subscription(sid.clone(), sub.clone());
         crate::events::log_subscription_cancel(&buyer, &product_id);
@@ -76,7 +81,7 @@ impl Contract {
         assert_one_yocto();
         self.assert_not_paused();
         let buyer = env::predecessor_account_id();
-        let (sid, mut sub) = self.require_current_subscription_owned_by(&buyer, &product_id);
+        let (sid, mut sub) = self.require_subscription_owned_by(&buyer, &product_id);
         Self::assert_subscription_active(&sub);
         require!(
             sub.cancel_at_period_end,
@@ -157,6 +162,10 @@ impl Contract {
         require!(
             deposit.as_yoctonear() == delta,
             "Attached NEAR must equal the target stake increase"
+        );
+        require!(
+            deposit.as_yoctonear() >= self.internal_get_config().min_lock_amount.as_yoctonear(),
+            "Attached NEAR is below the contract minimum lock amount (min_lock_amount)"
         );
 
         self.require_enough_gas_for_epoch_settlement();
@@ -390,17 +399,6 @@ impl Contract {
         (found.subscription_id, found.stored)
     }
 
-    fn require_current_subscription_owned_by(
-        &mut self,
-        buyer: &AccountId,
-        product_id: &ProductId,
-    ) -> (SubscriptionId, Subscription) {
-        let (sid, _) = self.require_subscription_owned_by(buyer, product_id);
-        self.apply_due_subscription_update(&sid);
-        let sub = self.require_subscription_owned_by_id(buyer, &sid);
-        (sid, sub)
-    }
-
     pub(crate) fn find_subscription_by_projected_product(
         &self,
         buyer: &AccountId,
@@ -513,6 +511,35 @@ impl Contract {
         }
     }
 
+    pub(crate) fn assert_product_not_reserved_by_pending_update(
+        &self,
+        buyer: &AccountId,
+        product_id: &ProductId,
+        allowed_subscription_id: Option<&SubscriptionId>,
+    ) {
+        let reserved = self
+            .subscription_ids_for_account_view(buyer)
+            .into_iter()
+            .filter(|sid| {
+                allowed_subscription_id
+                    .map(|allowed| sid != allowed)
+                    .unwrap_or(true)
+            })
+            .filter_map(|sid| self.internal_get_subscription(&sid))
+            .filter(|sub| sub.status == SubscriptionStatus::Active)
+            .filter_map(|sub| {
+                sub.pending_update
+                    .and_then(|pending| pending.target_price_id)
+            })
+            .filter_map(|target_price_id| self.internal_get_price(&target_price_id))
+            .any(|price| price.product_id == *product_id);
+
+        require!(
+            !reserved,
+            "Subscription already has a pending update for target product"
+        );
+    }
+
     fn clear_pending_update(sub: &mut Subscription) {
         sub.pending_update = None;
     }
@@ -560,6 +587,9 @@ impl Contract {
         let buyer = stored.account_id.clone();
 
         if let Some(target_amount) = pending.target_amount {
+            if let Some(lock) = self.internal_get_lock(&stored.last_lock_id) {
+                let _validator = self.require_validator_idle(&lock.validator_id);
+            }
             self.apply_scheduled_stake_decrease_at_renewal(&buyer, &stored, target_amount);
         }
 
@@ -648,6 +678,11 @@ impl Contract {
                     "Subscription already exists for target product"
                 );
             }
+            self.assert_product_not_reserved_by_pending_update(
+                buyer,
+                &target_product.product_id,
+                Some(subscription_id),
+            );
         }
         // Same virtual billing window as [`Contract::get_subscription`] / `get_subscription_for_product`.
         let sub = self.project_subscription_view_now(sub);
@@ -918,6 +953,10 @@ impl Contract {
         } = inputs;
 
         let add_shares = self.internal_stake(&buyer, &expected_validator_id, deposit);
+        require!(
+            add_shares > 0,
+            "Stake increase must mint at least one share"
+        );
         let old_product_id = sub.product_id.clone();
         let new_product_id = target_price.product_id.clone();
         let current_amount = lock.amount_near.as_yoctonear();

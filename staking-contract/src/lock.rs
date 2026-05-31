@@ -146,6 +146,9 @@ impl Contract {
                 self.find_subscription_by_projected_product(&buyer, &product_id)
                     .map(|found| found.subscription_id)
             });
+        if existing_subscription_id.is_none() {
+            self.assert_product_not_reserved_by_pending_update(&buyer, &product_id, None);
+        }
 
         let (subscription, sub_id, is_new_index) = if let Some(sid) = existing_subscription_id {
             self.apply_due_subscription_update(&sid);
