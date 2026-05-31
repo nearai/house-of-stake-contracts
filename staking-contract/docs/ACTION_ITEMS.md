@@ -49,7 +49,7 @@ Backlog for taking **`stake.dao`** (`staking-contract`) from **implemented v1** 
 
 ### Integrator-facing
 
-- [ ] **Minimum prepaid gas** — Publish recommended TGas for `lock`, `lock`, `unlock`, `withdraw`, `upgrade_subscription` (see [`gas.rs`](../src/gas.rs) `EPOCH_SETTLEMENT_MIN_GAS` and callback budgets). Verify `require_enough_gas_for_epoch_settlement` thresholds against worst-case chains on testnet.
+- [ ] **Minimum prepaid gas** — Publish recommended TGas for `lock`, `update_subscription`, `unlock`, `withdraw` (see [`gas.rs`](../src/gas.rs) `EPOCH_SETTLEMENT_MIN_GAS` and callback budgets). Verify `require_enough_gas_for_epoch_settlement` thresholds against worst-case chains on testnet.
 - [ ] **Wallet / SDK copy** — Clear errors for: insufficient storage deposit, below `min_lock_amount`, lock not ended, withdraw before tranche `available_epoch_height`, validator paused/removed.
 
 ---
@@ -59,7 +59,7 @@ Backlog for taking **`stake.dao`** (`staking-contract`) from **implemented v1** 
 ### Testing
 
 - [ ] **Accounting invariants** — Property or scripted tests: Σ user shares vs `Validator.total_shares`; `pending_user_unstake_total` vs tranches; after net-zero, `pending_to_unstake` re-rooted correctly.
-- [x] **Subscription lifecycle (sandbox)** — [`sandbox_subscription_e2e.rs`](../tests/sandbox_subscription_e2e.rs): `upgrade_subscription` and `schedule_downgrade_subscription` + renewal. Host coverage: [`subscription_lifecycle.rs`](../tests/subscription_lifecycle.rs) (incl. Phase B prorate on `user_pending_unstake`).
+- [x] **Subscription lifecycle (sandbox)** — [`sandbox_subscription_e2e.rs`](../tests/sandbox_subscription_e2e.rs): `update_subscription` immediate and scheduled updates + renewal. Host coverage: [`subscription_lifecycle.rs`](../tests/subscription_lifecycle.rs) (incl. Phase B prorate on `user_pending_unstake`).
 
 ### Product / economics
 
@@ -89,7 +89,7 @@ Backlog for taking **`stake.dao`** (`staking-contract`) from **implemented v1** 
 | Lazy pool pipeline | `lock` / `unlock` / `withdraw` / `epoch_settle`; no public batch `epoch_*` ([`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md)) |
 | Unlock → withdraw | Pro-rata tranches, pool withdraw chain, NEAR transfer to user |
 | NEAR-only catalog | No oracle / USD path |
-| Subscriptions | `lock`, cancel / resume / upgrade / schedule downgrade, Phase B prorate at renewal |
+| Subscriptions | `lock`, cancel / resume / update subscription, Phase B prorate at renewal |
 | Storage | NEP-145 `storage_deposit` / `storage_withdraw`, per-lock storage stake |
 | Governance | Owner, guardians, pause, upgrade, validator allowlist, catalog via pool `get_owner_id` |
 | Events | `EVENT_JSON` for indexing |

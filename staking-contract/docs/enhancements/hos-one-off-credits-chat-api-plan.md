@@ -10,7 +10,7 @@ The existing subscription flow already uses `house_of_stake` intents for recurri
 - House of Stake returns an on-chain one-off lock intent when the credits provider is `house-of-stake`.
 - chat-api credits the user's purchased balance only after it verifies the resulting on-chain lock.
 
-The contract already has the required primitive for one-off purchases: `lock(price_id, duration_ns, product_id)`.
+The contract already has the required primitive for one-off purchases: `lock(price_id, product_id, duration_ns)`.
 
 ## Current State
 
@@ -31,7 +31,7 @@ The contract already has the required primitive for one-off purchases: `lock(pri
 
 ### staking-contract
 
-- `lock(price_id, duration_ns, product_id)` supports one-off product purchases.
+- `lock(price_id, product_id, duration_ns)` supports one-off product purchases.
 - It resolves `price_id` or `product_id`, requires `PriceType::OneOff`, validates lock duration bounds, and validates the attached deposit using `check_near_price_lock`.
 - `get_lock(lock_id)` exposes the lock record needed for backend verification.
 

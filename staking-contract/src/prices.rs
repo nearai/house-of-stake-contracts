@@ -160,6 +160,12 @@ impl Contract {
             product.status == CatalogStatus::Active,
             "This product is archived or inactive"
         );
+        if let Some(max_amount) = metadata.as_ref().and_then(|m| m.max_amount) {
+            require!(
+                max_amount.0 >= amount.0,
+                "Price max_amount must be greater than or equal to amount"
+            );
+        }
 
         let price_id = next_unique_price_id(self);
         let price = Price {

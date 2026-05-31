@@ -24,7 +24,7 @@ todos:
     content: "Implement accounts.rs: Account struct, NEP-145 storage_deposit/withdraw, per-validator share holdings"
     status: pending
   - id: lock_module
-    content: "Implement lock.rs: lock, lock, NEAR price check, share minting, pending_to_stake accounting"
+    content: "Implement lock.rs: lock, NEAR price check, share minting, pending_to_stake accounting"
     status: pending
   - id: unlock_module
     content: "Implement unlock.rs: user-driven unlock; shared per-epoch settlement then queue unstake (see LAZY_EPOCH_PIPELINE.md)"
@@ -117,7 +117,7 @@ Add a new crate inside the workspace mirroring sibling crates. Suggested files (
 - `utils.rs` — share pool math, `check_near_price_lock` (NEAR-only duration-weighted sufficiency vs catalog line item).
 - `accounts.rs` — `Account` (prepaid storage only), NEP-145-style `storage_deposit` / `storage_withdraw`.
 - `ids.rs` — Stripe-style identifier wrappers (`ProductId`, `PriceId`, `SubscriptionId`, `LockId`) plus deterministic on-chain ID generator.
-- `lock.rs` — `lock`, `lock`, `check_near_price_lock`, finalize lock and `pending_to_stake` accounting.
+- `lock.rs` — `lock`, `check_near_price_lock`, finalize lock and `pending_to_stake` accounting.
 - `unlock.rs` — `unlock(lock_id)`, user-initiated only.
 - `withdraw.rs` — user **`withdraw(validator_id)`** (tranche claims + transfer; may chain pool withdraw per lazy pipeline).
 - `epoch.rs` — `try_epoch_stake_or_unstake`, `try_epoch_withdraw`, promise chains and self-callbacks for pool operations; public **`epoch_settle(validator_id)`** for manual retry. No separate `pool_callbacks.rs` module in-tree.

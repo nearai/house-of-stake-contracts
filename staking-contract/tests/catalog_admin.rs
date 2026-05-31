@@ -6,7 +6,10 @@ use common::{
     VALIDATOR_OWNER_ACCOUNT, acct, add_validator_allowlisted, ctx, deploy,
     setup_catalog_near_oneoff, testing_env_catalog_callback,
 };
+use near_sdk::json_types::U128;
 use near_sdk::{NearToken, testing_env};
+use staking_contract::types::{PriceMetadata, PriceType};
+use staking_contract::utils::LOCK_FACTOR_DENOM;
 
 #[test]
 #[should_panic]
@@ -63,6 +66,38 @@ fn delete_price_fails_when_in_use() {
     c.delete_price_after_get_owner(
         acct(VALIDATOR_OWNER_ACCOUNT),
         price_id,
+        acct(VALIDATOR_OWNER_ACCOUNT),
+    );
+}
+
+#[test]
+#[should_panic(expected = "Price max_amount must be greater than or equal to amount")]
+fn create_price_rejects_max_amount_below_amount() {
+    let mut c = deploy();
+    add_validator_allowlisted(&mut c);
+
+    testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
+    let product_id = c.create_product_after_get_owner(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        acct(common::POOL),
+        "X".into(),
+        "Y".into(),
+        acct(VALIDATOR_OWNER_ACCOUNT),
+    );
+
+    testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
+    c.create_price_after_get_owner(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        product_id,
+        "Bad max".into(),
+        "".into(),
+        U128(10),
+        PriceType::OneOff,
+        None,
+        U128(LOCK_FACTOR_DENOM),
+        Some(PriceMetadata {
+            max_amount: Some(U128(9)),
+        }),
         acct(VALIDATOR_OWNER_ACCOUNT),
     );
 }
