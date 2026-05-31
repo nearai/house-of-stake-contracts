@@ -680,6 +680,11 @@ impl Contract {
             return;
         }
 
+        Self::sync_lock_window_fields(&mut lock, sub);
+        self.internal_set_lock(lock.lock_id.clone(), lock);
+    }
+
+    fn sync_lock_window_fields(lock: &mut Lock, sub: &Subscription) {
         lock.start_ns = sub.start_ns;
         lock.end_ns = sub.end_ns;
         if let OrderRef::Subscription {
@@ -695,7 +700,6 @@ impl Contract {
                 *period_end_ns = sub.end_ns;
             }
         }
-        self.internal_set_lock(lock.lock_id.clone(), lock);
     }
 
     fn checked_subscription_update_inputs(
@@ -940,6 +944,7 @@ impl Contract {
             });
         }
 
+        Self::sync_lock_window_fields(&mut lock, &sub);
         self.internal_set_lock(lock.lock_id.clone(), lock);
         if decision.immediate_plan_change {
             self.move_subscription_product_index(
@@ -1043,6 +1048,7 @@ impl Contract {
             });
         }
 
+        Self::sync_lock_window_fields(&mut lock, &sub);
         let lock_id_out = lock.lock_id.clone();
         self.internal_set_lock(lock_id_out.clone(), lock);
         if decision.immediate_plan_change {

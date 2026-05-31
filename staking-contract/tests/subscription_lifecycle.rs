@@ -218,7 +218,7 @@ fn update_subscription_uses_projected_billing_window_after_stale_end_ns() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let _ = unwrap_sync_lock_id(c.lock(Some(price_low), None, None));
+    let lock_id = unwrap_sync_lock_id(c.lock(Some(price_low), None, None));
 
     let stored_end = c
         .get_subscription_for_product(acct(BUYER), product_id.clone())
@@ -253,6 +253,20 @@ fn update_subscription_uses_projected_billing_window_after_stale_end_ns() {
         .expect("subscription");
     assert_eq!(sub.price_id, price_high);
     assert_eq!(sub.end_ns.0, projected_end);
+    let lock = c.get_lock(lock_id).expect("lock");
+    assert_eq!(lock.start_ns, sub.start_ns);
+    assert_eq!(lock.end_ns, sub.end_ns);
+    match lock.order {
+        OrderRef::Subscription {
+            period_start_ns,
+            period_end_ns,
+            ..
+        } => {
+            assert_eq!(period_start_ns, sub.start_ns);
+            assert_eq!(period_end_ns, sub.end_ns);
+        }
+        OrderRef::ProductPurchase { .. } => panic!("expected subscription order"),
+    }
 }
 
 #[test]
@@ -866,6 +880,55 @@ fn same_plan_stake_decrease_schedules_amount_only() {
         outcome.pending_stake_decrease,
         Some(U128(NearToken::from_near(25).as_yoctonear()))
     );
+}
+
+#[test]
+fn pending_only_update_syncs_lock_window_after_stale_end_ns() {
+    let mut c = deploy();
+    let (product_id, price_id) = setup_catalog_near_subscription(&mut c);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let lock_id = unwrap_sync_lock_id(c.lock(Some(price_id.clone()), None, None));
+    let stored_end = c
+        .get_subscription_for_product(acct(BUYER), product_id.clone())
+        .expect("subscription")
+        .end_ns
+        .0;
+    let past_period_ts = stored_end.saturating_add(1);
+
+    testing_env!(ctx_ts(
+        acct(BUYER),
+        NearToken::from_yoctonear(1),
+        past_period_ts,
+    ));
+    let projected = c
+        .get_subscription_for_product(acct(BUYER), product_id.clone())
+        .expect("subscription");
+    assert!(projected.end_ns.0 > past_period_ts);
+    let _ = c.update_subscription(
+        projected.subscription_id,
+        price_id,
+        U128(NearToken::from_near(25).as_yoctonear()),
+    );
+
+    let sub = c
+        .get_subscription_for_product(acct(BUYER), product_id)
+        .expect("subscription");
+    let lock = c.get_lock(lock_id).expect("lock");
+    assert_eq!(lock.start_ns, sub.start_ns);
+    assert_eq!(lock.end_ns, sub.end_ns);
+    match lock.order {
+        OrderRef::Subscription {
+            period_start_ns,
+            period_end_ns,
+            ..
+        } => {
+            assert_eq!(period_start_ns, sub.start_ns);
+            assert_eq!(period_end_ns, sub.end_ns);
+        }
+        OrderRef::ProductPurchase { .. } => panic!("expected subscription order"),
+    }
 }
 
 #[test]
