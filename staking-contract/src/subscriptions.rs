@@ -5,7 +5,9 @@
 use crate::utils::{AVG_MONTH_NS, block_timestamp, check_near_price_lock, near_from_shares};
 use crate::*;
 use common::U256;
+use near_sdk::borsh::BorshSerialize;
 use near_sdk::json_types::{U64, U128};
+use near_sdk::store::LookupMap;
 use near_sdk::{AccountId, NearToken, PromiseOrValue, assert_one_yocto, env, near, require};
 
 /// Extend `from_ns` by `months` × average Gregorian months (linear approximation).
@@ -307,7 +309,73 @@ impl Contract {
         id: SubscriptionId,
         subscription: Subscription,
     ) {
+        let old = self.internal_get_subscription(&id);
+        if let Some(old) = old.as_ref() {
+            self.remove_pending_update_target_refs(old);
+        }
+        self.add_pending_update_target_refs(&subscription);
         self.subscriptions.insert(id, subscription.into());
+    }
+
+    pub(crate) fn internal_remove_subscription(&mut self, id: &SubscriptionId) {
+        if let Some(old) = self.internal_get_subscription(id) {
+            self.remove_pending_update_target_refs(&old);
+        }
+        self.subscriptions.remove(id.as_str());
+    }
+
+    fn add_pending_update_target_refs(&mut self, sub: &Subscription) {
+        let Some(price_id) = Self::pending_update_target_price_id(sub) else {
+            return;
+        };
+        Self::increment_count(&mut self.pending_update_target_price_counts, &price_id);
+        if let Some(price) = self.internal_get_price(&price_id) {
+            Self::increment_count(
+                &mut self.pending_update_target_product_counts,
+                &price.product_id,
+            );
+        }
+    }
+
+    fn remove_pending_update_target_refs(&mut self, sub: &Subscription) {
+        let Some(price_id) = Self::pending_update_target_price_id(sub) else {
+            return;
+        };
+        Self::decrement_count(&mut self.pending_update_target_price_counts, &price_id);
+        if let Some(price) = self.internal_get_price(&price_id) {
+            Self::decrement_count(
+                &mut self.pending_update_target_product_counts,
+                &price.product_id,
+            );
+        }
+    }
+
+    fn pending_update_target_price_id(sub: &Subscription) -> Option<PriceId> {
+        sub.pending_update
+            .as_ref()
+            .and_then(|pending| pending.target_price_id.clone())
+    }
+
+    fn increment_count<K>(counts: &mut LookupMap<K, u32>, key: &K)
+    where
+        K: Clone + Ord + BorshSerialize,
+    {
+        let next = counts.get(key).copied().unwrap_or(0).saturating_add(1);
+        counts.insert(key.clone(), next);
+    }
+
+    fn decrement_count<K>(counts: &mut LookupMap<K, u32>, key: &K)
+    where
+        K: Clone + Ord + BorshSerialize,
+    {
+        let Some(current) = counts.get(key).copied() else {
+            return;
+        };
+        if current <= 1 {
+            counts.remove(key);
+        } else {
+            counts.insert(key.clone(), current - 1);
+        }
     }
 
     pub(crate) fn add_subscription_to_account_index(
@@ -369,32 +437,22 @@ impl Contract {
 
     pub(crate) fn assert_no_pending_update_references_price(&self, price_id: &PriceId) {
         require!(
-            !self
-                .subscription_ids
-                .iter()
-                .filter_map(|sid| self.internal_get_subscription(&sid))
-                .any(|sub| {
-                    sub.pending_update
-                        .as_ref()
-                        .and_then(|pending| pending.target_price_id.as_ref())
-                        == Some(price_id)
-                }),
+            self.pending_update_target_price_counts
+                .get(price_id)
+                .copied()
+                .unwrap_or(0)
+                == 0,
             "Cannot archive or delete this price while it is referenced by a pending subscription update"
         );
     }
 
     pub(crate) fn assert_no_pending_update_references_product(&self, product_id: &ProductId) {
         require!(
-            !self
-                .subscription_ids
-                .iter()
-                .filter_map(|sid| self.internal_get_subscription(&sid))
-                .filter_map(|sub| sub
-                    .pending_update
-                    .and_then(|pending| pending.target_price_id))
-                .filter_map(|pending_price_id| self.prices.get(&pending_price_id).cloned())
-                .map(Price::from)
-                .any(|price| price.product_id == *product_id),
+            self.pending_update_target_product_counts
+                .get(product_id)
+                .copied()
+                .unwrap_or(0)
+                == 0,
             "Cannot archive or delete this product while it is referenced by a pending subscription update"
         );
     }

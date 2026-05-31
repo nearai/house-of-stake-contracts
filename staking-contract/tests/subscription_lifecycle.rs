@@ -3,14 +3,16 @@
 mod common;
 
 use common::{
-    BUYER, POOL, VALIDATOR_OWNER_ACCOUNT, acct, add_subscription_price, add_subscription_product,
-    ctx, ctx_ts, deploy, register_buyer, setup_catalog_near_subscription,
-    testing_env_catalog_callback, unwrap_sync_lock_id,
+    BUYER, POOL, VALIDATOR_OWNER_ACCOUNT, acct, add_subscription_price,
+    add_subscription_price_with_metadata, add_subscription_product, ctx, ctx_ts, deploy,
+    register_buyer, setup_catalog_near_subscription, testing_env_catalog_callback,
+    unwrap_sync_lock_id,
 };
 use near_sdk::NearToken;
 use near_sdk::PromiseOrValue;
 use near_sdk::json_types::U128;
 use near_sdk::testing_env;
+use staking_contract::types::PriceMetadata;
 use staking_contract::types::TransactionStatus;
 use staking_contract::types::{LockStatus, OrderRef, SubscriptionStatus};
 use staking_contract::utils::AVG_MONTH_NS;
@@ -207,6 +209,56 @@ fn get_subscriptions_for_account_lists_all_owned_subscriptions() {
     assert!(
         subs.iter()
             .any(|sub| { sub.product_id == product_two && sub.price_id == price_two })
+    );
+}
+
+#[test]
+#[should_panic(expected = "Target stake amount is above the price maximum")]
+fn recurring_lock_rejects_amount_above_price_max_amount() {
+    let mut c = deploy();
+    let (product_id, _price_id) = setup_catalog_near_subscription(&mut c);
+    let capped_price = add_subscription_price_with_metadata(
+        &mut c,
+        product_id,
+        "Capped",
+        1,
+        Some(PriceMetadata {
+            max_amount: Some(U128(NearToken::from_near(60).as_yoctonear())),
+        }),
+    );
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(61), BASE_TS));
+    c.lock(Some(capped_price), None, None);
+}
+
+#[test]
+#[should_panic(expected = "Target stake amount is above the price maximum")]
+fn update_subscription_rejects_target_amount_above_price_max_amount() {
+    let mut c = deploy();
+    let (product_id, price_id) = setup_catalog_near_subscription(&mut c);
+    let capped_price = add_subscription_price_with_metadata(
+        &mut c,
+        product_id.clone(),
+        "Capped",
+        1,
+        Some(PriceMetadata {
+            max_amount: Some(U128(NearToken::from_near(60).as_yoctonear())),
+        }),
+    );
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_id), None, None));
+    let sub = c
+        .get_subscription_for_product(acct(BUYER), product_id)
+        .expect("subscription");
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_near(11)));
+    c.update_subscription(
+        sub.subscription_id,
+        capped_price,
+        U128(NearToken::from_near(61).as_yoctonear()),
     );
 }
 

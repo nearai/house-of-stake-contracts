@@ -8,7 +8,7 @@ use near_sdk::{
     AccountId, NearToken, PromiseOrValue, PromiseResult, RuntimeFeesConfig, VMContext, serde_json,
     test_vm_config, testing_env,
 };
-use staking_contract::types::{BillingPeriod, PriceId, PriceType, ProductId};
+use staking_contract::types::{BillingPeriod, PriceId, PriceMetadata, PriceType, ProductId};
 use staking_contract::utils::LOCK_FACTOR_DENOM;
 use staking_contract::{Config, Contract, LockId};
 use std::collections::HashMap;
@@ -166,6 +166,16 @@ pub fn add_subscription_price(
     name: &str,
     amount_yocto: u128,
 ) -> String {
+    add_subscription_price_with_metadata(contract, product_id, name, amount_yocto, None)
+}
+
+pub fn add_subscription_price_with_metadata(
+    contract: &mut Contract,
+    product_id: String,
+    name: &str,
+    amount_yocto: u128,
+    metadata: Option<PriceMetadata>,
+) -> String {
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
     contract.create_price_after_get_owner(
         acct(VALIDATOR_OWNER_ACCOUNT),
@@ -176,7 +186,7 @@ pub fn add_subscription_price(
         PriceType::Recurring,
         Some(BillingPeriod::Monthly),
         U128(LOCK_FACTOR_DENOM),
-        None,
+        metadata,
         acct(VALIDATOR_OWNER_ACCOUNT),
     )
 }

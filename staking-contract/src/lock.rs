@@ -203,7 +203,7 @@ impl Contract {
                 self.subscription_by_account_product.remove(&old_sub_key);
                 self.remove_subscription_from_account_index(&buyer, &sid);
                 self.remove_subscription_from_global_index(&sid);
-                self.subscriptions.remove(sid.as_str());
+                self.internal_remove_subscription(&sid);
                 let (sid_new, sub_new) =
                     self.new_subscription_for_lock(&buyer, &product, &price_id, now);
                 (sub_new, sid_new, true)

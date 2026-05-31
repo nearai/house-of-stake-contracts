@@ -99,7 +99,7 @@ Lifecycle RPCs (locking / renewal stays in **`lock`** above).
 |--------|--------|---------|---------|-------------|
 | `cancel_subscription` | Subscriber | **1 yocto** | — | **`product_id`** — set **`cancel_at_period_end`**; lock remains until **`lock.end_ns`**, then **`unlock`**. After **`end_ns`**, next **`lock`** starts a new period. |
 | `resume_subscription` | Subscriber | **1 yocto** | — | **`product_id`** — clear **`cancel_at_period_end`** while **`Active`**, only before stored **`end_ns`** (current billing period). Fails after period end; use **`lock`** for a new period. Requires **`cancel_at_period_end == true`**. |
-| `update_subscription` | Subscriber | **Attach delta NEAR for increases; 1 yocto otherwise** | **`PromiseOrValue<SubscriptionPlanChangeOutcome>`** | **`subscription_id`, `target_price_id`, `target_amount`** — unified plan update. Stake increases apply immediately after the same pre-user pipeline as **`lock`**; stake decreases are scheduled for the next **`lock`** renewal; price-only changes with unchanged stake apply immediately. |
+| `update_subscription` | Subscriber | **Attach delta NEAR for increases; 1 yocto otherwise** | **`PromiseOrValue<SubscriptionPlanChangeOutcome>`** | **`subscription_id`, `target_price_id`, `target_amount`** — unified plan update. Stake increases apply immediately after the same pre-user pipeline as **`lock`**; stake decreases are scheduled for the billing boundary, projected in views after `apply_ns`, and lazily committed by later mutations after validator settlement; price-only changes with unchanged stake apply immediately. |
 
 ---
 
