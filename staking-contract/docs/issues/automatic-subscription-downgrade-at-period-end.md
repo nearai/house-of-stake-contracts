@@ -33,9 +33,10 @@ without requiring the user to call `lock` with the target tier.
 3. Deferred stake decreases and deferred plan changes are stored in
    `Subscription.pending_update`.
 4. After `apply_ns`, subscription views project the target plan.
-5. A later mutation lazily commits the pending update, clears `pending_update`,
-   advances the billing window, and queues any stake decrease through the normal
-   pending-unstake accounting.
+5. A later mutation lazily commits the pending update and clears
+   `pending_update`. If the pending update includes a stake decrease, the
+   mutation first runs the validator settlement preamble, then queues the
+   surplus through the normal pending-unstake accounting.
 
 There is still no autonomous on-chain cron. A transaction must touch the
 subscription before storage changes are committed, but callers no longer need to

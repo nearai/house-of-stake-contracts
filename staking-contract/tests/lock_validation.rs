@@ -1,4 +1,4 @@
-//! `lock` / `lock` guards.
+//! `lock` guards.
 
 mod common;
 

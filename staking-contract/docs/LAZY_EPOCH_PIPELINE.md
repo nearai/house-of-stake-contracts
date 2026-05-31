@@ -15,7 +15,7 @@ Implementation: [`src/epoch.rs`](../src/epoch.rs). Entrypoints: [`lock.rs`](../s
 | Balance before mint / unlock | **`get_account`** when **`last_settlement_epoch` < `epoch_height`** (then withdraw-if-ready and **`try_epoch_stake_or_unstake`** on existing pending). When **`last_settlement_epoch` ≥ `epoch_height`**, **skip** that pre-user pipeline and mint / unlock using cached **`total_staked_balance`**. |
 | Withdraw before new unstake | If settle allows and the pool has withdrawable unstaked NEAR, **pull from pool first**, then `unstake`. |
 | First delegation to an empty validator | Same **`min_lock_amount`** gate as any lock (never below 1 NEAR — [`PROTOCOL_MIN_LOCK_AMOUNT_YOCTO`](../src/config.rs)). |
-| Subscription downgrade prorate | **Does not** schedule pool unstake; user **`unlock`** drives unstake. |
+| Deferred subscription stake decrease | Queues surplus unstake only after the validator settlement preamble has run. Due updates that include a stake decrease are routed through the same settlement pipeline before calling the internal unstake path. |
 | `withdraw` | May chain pool withdraw when the on-contract bucket is empty but settlement allows. |
 | Pool mutating actions per NEAR epoch | Per allowlisted pool (`validator_id` = pool account), at most **one** successful **`deposit_and_stake`** **or** **`unstake`** per `epoch_height` (**`Validator.last_settlement_epoch`**). **`try_epoch_stake_or_unstake`** nets **`pending_to_stake`** vs **`pending_to_unstake`**: stake excess, unstake excess, or clear both without a pool call when equal (still bumps **`last_settlement_epoch`**). Withdraw-from-pool does **not** consume that slot. |
 
@@ -74,7 +74,7 @@ One cross-contract view replaces separate total/unstaked queries.
 
 | Entry | When | `UserAction` tail |
 |--------|------|-------------------------|
-| `lock` | User attaches NEAR | `CommitLock` |
+| `lock` | User attaches NEAR | `CommitLock` or `CommitRecurringSubscriptionLock` when a due subscription stake decrease must settle first |
 | `unlock` | Lock owner, after `end_ns` | `UnlockQueueUnstake` |
 | `withdraw` | User claims tranches (WASM) | `WithdrawUserTransfer` |
 | `epoch_settle(validator_id)` | Anyone; manual retry | `SettleOnly` |

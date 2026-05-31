@@ -111,6 +111,25 @@ impl Contract {
         self.assert_not_paused();
         let buyer = env::predecessor_account_id();
         let deposit = env::attached_deposit();
+        let _sub = self.require_subscription_owned_by_id(&buyer, &subscription_id);
+        #[cfg(target_arch = "wasm32")]
+        if let Some(validator_id) = self.due_pending_stake_decrease_validator(&_sub) {
+            self.require_enough_gas_for_epoch_settlement();
+            let _validator = self.require_validator_idle(&validator_id);
+            return self
+                .promise_validator_per_epoch_settlement_then(
+                    validator_id.clone(),
+                    UserAction::SubscriptionUpdate {
+                        validator_id,
+                        buyer,
+                        deposit,
+                        target_price_id,
+                        target_amount,
+                        subscription_id,
+                    },
+                )
+                .into();
+        }
 
         self.apply_due_subscription_update(&subscription_id);
         let inputs = self.checked_subscription_update_inputs(
@@ -260,7 +279,7 @@ impl Contract {
         subscription_id: SubscriptionId,
         validator_id: ValidatorId,
     ) -> PromiseOrValue<SubscriptionPlanChangeOutcome> {
-        let outcome = self.commit_subscription_stake_increase(
+        let outcome = self.commit_subscription_update_after_settle(
             buyer,
             deposit,
             target_price_id,
@@ -540,6 +559,22 @@ impl Contract {
         );
     }
 
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub(crate) fn due_pending_stake_decrease_validator(
+        &self,
+        sub: &Subscription,
+    ) -> Option<ValidatorId> {
+        if sub.status != SubscriptionStatus::Active || sub.cancel_at_period_end {
+            return None;
+        }
+        let pending = sub.pending_update.as_ref()?;
+        if pending.target_amount.is_none() || block_timestamp() < pending.apply_ns.0 {
+            return None;
+        }
+        self.internal_get_lock(&sub.last_lock_id)
+            .map(|lock| lock.validator_id)
+    }
+
     fn clear_pending_update(sub: &mut Subscription) {
         sub.pending_update = None;
     }
@@ -587,8 +622,15 @@ impl Contract {
         let buyer = stored.account_id.clone();
 
         if let Some(target_amount) = pending.target_amount {
-            if let Some(lock) = self.internal_get_lock(&stored.last_lock_id) {
-                let _validator = self.require_validator_idle(&lock.validator_id);
+            #[cfg(target_arch = "wasm32")]
+            {
+                if let Some(lock) = self.internal_get_lock(&stored.last_lock_id) {
+                    let validator = self.require_validator(&lock.validator_id);
+                    require!(
+                        validator.last_settlement_epoch >= near_sdk::env::epoch_height(),
+                        "Pending stake decrease requires validator settlement before apply"
+                    );
+                }
             }
             self.apply_scheduled_stake_decrease_at_renewal(&buyer, &stored, target_amount);
         }
@@ -944,6 +986,17 @@ impl Contract {
         );
         let decision =
             self.build_subscription_update_decision(&inputs, &target_price_id, target_amount);
+        let expected_delta = decision
+            .immediate_stake_increase
+            .expect("stake increase decision");
+        require!(
+            deposit.as_yoctonear() == expected_delta.as_yoctonear(),
+            "Attached NEAR must equal the target stake increase"
+        );
+        require!(
+            deposit.as_yoctonear() >= self.internal_get_config().min_lock_amount.as_yoctonear(),
+            "Attached NEAR is below the contract minimum lock amount (min_lock_amount)"
+        );
         let SubscriptionUpdateInputs {
             mut sub,
             mut target_price,
@@ -1018,6 +1071,53 @@ impl Contract {
             Some(lock_id_out),
             &decision,
             current_amount,
+        )
+    }
+
+    fn commit_subscription_update_after_settle(
+        &mut self,
+        buyer: AccountId,
+        deposit: NearToken,
+        target_price_id: PriceId,
+        target_amount: U128,
+        subscription_id: SubscriptionId,
+        expected_validator_id: ValidatorId,
+    ) -> SubscriptionPlanChangeOutcome {
+        self.apply_due_subscription_update(&subscription_id);
+        let inputs = self.checked_subscription_update_inputs(
+            &buyer,
+            &target_price_id,
+            target_amount,
+            &subscription_id,
+            Some(&expected_validator_id),
+        );
+        let decision =
+            self.build_subscription_update_decision(&inputs, &target_price_id, target_amount);
+        if decision.immediate_stake_increase.is_some() {
+            return self.commit_subscription_stake_increase(
+                buyer,
+                deposit,
+                target_price_id,
+                target_amount,
+                subscription_id,
+                expected_validator_id,
+            );
+        }
+
+        require!(
+            deposit.as_yoctonear() == 1,
+            "Requires attached deposit of exactly 1 yoctoNEAR"
+        );
+        self.commit_subscription_update_without_stake_increase(
+            buyer,
+            subscription_id,
+            target_price_id,
+            target_amount,
+            decision,
+            inputs.sub,
+            inputs.target_price,
+            inputs.target_product,
+            inputs.lock,
         )
     }
 

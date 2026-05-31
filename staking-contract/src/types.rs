@@ -326,6 +326,14 @@ pub enum UserAction {
         order: OrderRef,
         subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
     },
+    /// Recurring subscription lock when a due pending stake decrease must be applied
+    /// after the validator settlement preamble, before renewal logic continues.
+    CommitRecurringSubscriptionLock {
+        validator_id: ValidatorId,
+        buyer: AccountId,
+        locked: NearToken,
+        price_id: PriceId,
+    },
     UnlockQueueUnstake {
         validator_id: ValidatorId,
         lock_id: LockId,
@@ -354,6 +362,7 @@ impl UserAction {
     pub fn validator_id(&self) -> &ValidatorId {
         match self {
             Self::CommitLock { validator_id, .. }
+            | Self::CommitRecurringSubscriptionLock { validator_id, .. }
             | Self::UnlockQueueUnstake { validator_id, .. }
             | Self::WithdrawUserTransfer { validator_id, .. }
             | Self::SettleOnly { validator_id }
@@ -366,6 +375,9 @@ impl UserAction {
     pub fn payable_refund(&self) -> Option<(AccountId, NearToken)> {
         match self {
             Self::CommitLock { buyer, locked, .. } => Some((buyer.clone(), *locked)),
+            Self::CommitRecurringSubscriptionLock { buyer, locked, .. } => {
+                Some((buyer.clone(), *locked))
+            }
             Self::SubscriptionUpdate { buyer, deposit, .. } => Some((buyer.clone(), *deposit)),
             _ => None,
         }

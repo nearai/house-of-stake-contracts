@@ -57,6 +57,15 @@ pub trait ExtSelfEpoch {
         validator_id: ValidatorId,
         subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
     ) -> PromiseOrValue<LockId>;
+    /// **[Pipeline 5a]** Recurring subscription lock after settlement when due pending
+    /// stake decreases must be applied before renewal logic.
+    fn resolve_recurring_subscription_lock_after_settle(
+        &mut self,
+        buyer: AccountId,
+        locked: NearToken,
+        price_id: PriceId,
+        validator_id: ValidatorId,
+    ) -> PromiseOrValue<LockId>;
     /// **[Pipeline 5d]** Subscription update after pre-user settlement (`subscriptions.rs`).
     fn on_subscription_update_after_settle(
         &mut self,
@@ -532,6 +541,22 @@ impl Contract {
                         order,
                         validator_id,
                         subscription_followup,
+                    ),
+                ReleaseKind::WithLockId,
+            ),
+            UserAction::CommitRecurringSubscriptionLock {
+                validator_id,
+                buyer,
+                locked,
+                price_id,
+            } => (
+                ext_self_epoch::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_LOCK_FINALLY_MINT)
+                    .resolve_recurring_subscription_lock_after_settle(
+                        buyer,
+                        locked,
+                        price_id,
+                        validator_id,
                     ),
                 ReleaseKind::WithLockId,
             ),

@@ -451,7 +451,7 @@ Extend [common/src/events.rs](house-of-stake-contracts/common/src/events.rs) (ne
 ## 12. Testing strategy
 
 - Unit tests inside each module using `near_sdk::testing_env!` for share math, `check_near_price_lock`, lock duration bounds, paused/owner asserts.
-- Integration-style tests in [staking-contract/tests/](../tests/) (deploy catalog via pool-owner callbacks, `lock` / `lock`, storage). Full epoch/pool pipelines may use workspace integration tests or sandbox later.
+- Integration-style tests in [staking-contract/tests/](../tests/) (deploy catalog via pool-owner callbacks, `lock`, storage). Full epoch/pool pipelines may use workspace integration tests or sandbox later.
 - Scenarios worth covering:
   - Owner setup → add validator → create product+price → user lock → (sandbox: advance epochs / drive `unlock` / `withdraw` / `epoch_settle` as needed) → claim path.
   - Insufficient NEAR or duration for catalog line → lock panics.

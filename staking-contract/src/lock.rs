@@ -128,6 +128,17 @@ impl Contract {
         price: Price,
         product: Product,
     ) -> PromiseOrValue<LockId> {
+        self.lock_recurring_subscription_with_catalog_impl(buyer, locked, price, product, false)
+    }
+
+    fn lock_recurring_subscription_with_catalog_impl(
+        &mut self,
+        buyer: AccountId,
+        locked: NearToken,
+        price: Price,
+        product: Product,
+        _settlement_already_ran: bool,
+    ) -> PromiseOrValue<LockId> {
         self.require_recurring_monthly_price(&price);
 
         let validator_id = product.validator_id.clone();
@@ -148,6 +159,26 @@ impl Contract {
             });
         if existing_subscription_id.is_none() {
             self.assert_product_not_reserved_by_pending_update(&buyer, &product_id, None);
+        }
+        #[cfg(target_arch = "wasm32")]
+        if !_settlement_already_ran {
+            if let Some(sid) = existing_subscription_id.as_ref() {
+                let sub = self.require_subscription_by_id(sid);
+                if self.due_pending_stake_decrease_validator(&sub).is_some() {
+                    let _validator = self.require_validator_idle(&validator_id);
+                    return self
+                        .promise_validator_per_epoch_settlement_then(
+                            validator_id.clone(),
+                            UserAction::CommitRecurringSubscriptionLock {
+                                validator_id,
+                                buyer,
+                                locked,
+                                price_id,
+                            },
+                        )
+                        .into();
+                }
+            }
         }
 
         let (subscription, sub_id, is_new_index) = if let Some(sid) = existing_subscription_id {
@@ -222,10 +253,10 @@ impl Contract {
             period_end_ns: subscription.end_ns,
         };
 
-        let _validator = self.require_validator_idle(&validator_id);
         // Same host synchronous path as the one-off branch (see comment there).
         #[cfg(not(target_arch = "wasm32"))]
         {
+            let _validator = self.require_validator_idle(&validator_id);
             return PromiseOrValue::Value(self.commit_catalog_lock(
                 buyer.clone(),
                 locked,
@@ -237,6 +268,22 @@ impl Contract {
         }
         #[cfg(target_arch = "wasm32")]
         {
+            if _settlement_already_ran {
+                let lock_id = self.commit_catalog_lock(
+                    buyer.clone(),
+                    locked,
+                    duration_ns,
+                    order,
+                    validator_id.clone(),
+                    Some((subscription, sub_id.clone(), is_new_index)),
+                );
+                let _validator = self.require_validator_busy(
+                    &validator_id,
+                    "Validator pool must be busy after per-epoch settlement",
+                );
+                return PromiseOrValue::Value(lock_id);
+            }
+            let _validator = self.require_validator_idle(&validator_id);
             return self
                 .promise_validator_per_epoch_settlement_then(
                     validator_id.clone(),
@@ -472,5 +519,23 @@ impl Contract {
             "Validator pool must be busy after per-epoch settlement",
         );
         PromiseOrValue::Value(lock_id)
+    }
+
+    /// **[Pipeline 5a]** Recurring subscription lock after **4** when a due
+    /// pending stake decrease must be applied only after validator settlement.
+    #[private]
+    pub fn resolve_recurring_subscription_lock_after_settle(
+        &mut self,
+        buyer: AccountId,
+        locked: NearToken,
+        price_id: PriceId,
+        validator_id: ValidatorId,
+    ) -> PromiseOrValue<LockId> {
+        let (price, product) = self.get_active_price_and_product(&price_id);
+        require!(
+            product.validator_id == validator_id,
+            "Catalog validator for this price does not match the pool used for this lock"
+        );
+        self.lock_recurring_subscription_with_catalog_impl(buyer, locked, price, product, true)
     }
 }
