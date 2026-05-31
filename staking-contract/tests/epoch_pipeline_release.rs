@@ -26,7 +26,6 @@ fn lock_pipeline_tail_failure_releases_busy_and_schedules_refund() {
             product_id,
             price_id,
         },
-        subscription_followup: None,
     };
 
     testing_env!(ctx(acct(STAKING), NearToken::from_near(0)));
@@ -66,7 +65,6 @@ fn lock_pipeline_tail_success_releases_busy_and_returns_lock_id() {
             product_id,
             price_id,
         },
-        subscription_followup: None,
     };
 
     testing_env!(ctx(acct(STAKING), NearToken::from_near(0)));
