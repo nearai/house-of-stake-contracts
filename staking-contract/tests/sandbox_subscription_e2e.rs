@@ -132,7 +132,7 @@ async fn sandbox_schedule_downgrade_projects_without_manual_lock()
         .await?
         .json()?;
     assert_eq!(
-        sub["pending_downgrade_price_id"].as_str(),
+        sub["pending_update"]["target_price_id"].as_str(),
         Some(price_low.as_str())
     );
 
@@ -152,7 +152,7 @@ async fn sandbox_schedule_downgrade_projects_without_manual_lock()
         json_u64_field(&sub_after["start_ns"]).expect("start_ns"),
         end_ns
     );
-    assert!(sub_after["pending_downgrade_price_id"].is_null());
+    assert!(sub_after["pending_update"].is_null());
     assert_eq!(sub_after["status"], json!("Active"));
 
     Ok(())

@@ -266,12 +266,19 @@ pub struct Subscription {
     pub status: SubscriptionStatus,
     /// When true, no renewal after the current billing period (`end_ns`); lock still runs until unlock.
     pub cancel_at_period_end: bool,
-    /// Lower tier to apply at the start of the **next** billing period (Phase A: no mid-cycle refund).
-    pub pending_downgrade_price_id: Option<PriceId>,
-    /// Target stake amount to apply with `pending_downgrade_price_id` at the next renewal.
-    pub pending_downgrade_target_amount: Option<NearToken>,
-    /// Timestamp when the pending downgrade becomes effective.
-    pub pending_downgrade_apply_ns: Option<U64>,
+    /// Deferred plan and/or stake decrease to apply at a future billing boundary.
+    pub pending_update: Option<PendingSubscriptionUpdate>,
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh, json])]
+pub struct PendingSubscriptionUpdate {
+    /// Target plan to apply at `apply_ns`. Absent when only stake amount decreases.
+    pub target_price_id: Option<PriceId>,
+    /// Target stake amount to apply at `apply_ns`. Absent when only plan changes.
+    pub target_amount: Option<NearToken>,
+    /// Timestamp when the pending update becomes effective.
+    pub apply_ns: U64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -282,6 +289,11 @@ pub struct SubscriptionPlanChangeOutcome {
     pub target_price_id: PriceId,
     pub target_amount: U128,
     pub lock_id: Option<LockId>,
+    pub immediate_plan_change: bool,
+    pub immediate_stake_increase: Option<U128>,
+    pub pending_plan_change: bool,
+    pub pending_stake_decrease: Option<U128>,
+    pub pending_apply_ns: Option<U64>,
 }
 
 #[derive(Clone)]

@@ -148,7 +148,7 @@ impl Contract {
             });
 
         let (subscription, sub_id, is_new_index) = if let Some(sid) = existing_subscription_id {
-            self.apply_due_subscription_downgrade(&sid);
+            self.apply_due_subscription_update(&sid);
             let mut sub = self.require_subscription_by_id(&sid);
             require!(
                 sub.account_id == buyer,
@@ -330,9 +330,7 @@ impl Contract {
             last_lock_id: String::new(),
             status: SubscriptionStatus::Active,
             cancel_at_period_end: false,
-            pending_downgrade_price_id: None,
-            pending_downgrade_target_amount: None,
-            pending_downgrade_apply_ns: None,
+            pending_update: None,
         };
         (subscription_id, subscription)
     }
