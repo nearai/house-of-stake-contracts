@@ -118,6 +118,9 @@ impl Contract {
         lock
     }
 
+    /// Subscription-only unlock guard. Active auto-renewing subscriptions must be cancelled
+    /// (`cancel_at_period_end`) before stake can be unlocked; a past `lock.end_ns` alone is not enough.
+    /// No-op for one-off locks, missing subscription records, or subscriptions already winding down.
     fn assert_subscription_lock_can_unlock(&self, lock: &Lock) {
         let OrderRef::Subscription {
             subscription_id, ..
