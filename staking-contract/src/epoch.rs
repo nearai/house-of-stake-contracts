@@ -544,7 +544,7 @@ impl Contract {
                 subscription_id,
             } => (
                 ext_self_epoch::ext(env::current_account_id())
-                    .with_static_gas(callbacks::ON_SUBSCRIPTION_UPGRADE_AFTER_SETTLE)
+                    .with_static_gas(callbacks::ON_SUBSCRIPTION_UPDATE_AFTER_SETTLE)
                     .on_subscription_update_after_settle(
                         buyer,
                         deposit,
@@ -616,7 +616,7 @@ impl Contract {
 
     // --- [Pipeline 6] ---
 
-    /// Refund NEAR from a payable pipeline entry (`lock_*`, `update_subscription`) after pre-user
+    /// Refund NEAR from a payable pipeline entry (`lock`, `update_subscription`) after pre-user
     /// settlement aborts (e.g. `get_account` failure). Clears **`Busy`** and returns the refund transfer.
     pub(crate) fn refund_payable_pipeline(
         &mut self,
