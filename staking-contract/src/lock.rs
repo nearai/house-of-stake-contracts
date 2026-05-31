@@ -114,7 +114,6 @@ impl Contract {
                         locked,
                         duration_ns: dur_u128,
                         order,
-                        subscription_followup: None,
                     },
                 )
                 .into();
@@ -128,23 +127,56 @@ impl Contract {
         price: Price,
         product: Product,
     ) -> PromiseOrValue<LockId> {
-        self.lock_recurring_subscription_with_catalog_impl(buyer, locked, price, product, false)
-    }
-
-    fn lock_recurring_subscription_with_catalog_impl(
-        &mut self,
-        buyer: AccountId,
-        locked: NearToken,
-        price: Price,
-        product: Product,
-        _settlement_already_ran: bool,
-    ) -> PromiseOrValue<LockId> {
         self.require_recurring_monthly_price(&price);
 
         let validator_id = product.validator_id.clone();
         self.assert_validator_active_for_lock(&validator_id);
-
         let price_id = price.price_id.clone();
+
+        self.validate_subscription_target_amount(&price, U128(locked.as_yoctonear()));
+
+        // Same host synchronous path as the one-off branch (see comment there).
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _validator = self.require_validator_idle(&validator_id);
+            return PromiseOrValue::Value(self.commit_recurring_subscription_lock_after_settle(
+                buyer,
+                locked,
+                price_id,
+                validator_id,
+            ));
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            return self
+                .promise_validator_per_epoch_settlement_then(
+                    validator_id.clone(),
+                    UserAction::CommitRecurringSubscriptionLock {
+                        validator_id,
+                        buyer,
+                        locked,
+                        price_id,
+                    },
+                )
+                .into();
+        }
+    }
+
+    fn commit_recurring_subscription_lock_after_settle(
+        &mut self,
+        buyer: AccountId,
+        locked: NearToken,
+        price_id: PriceId,
+        validator_id: ValidatorId,
+    ) -> LockId {
+        let (price, product) = self.get_active_price_and_product(&price_id);
+        self.require_recurring_monthly_price(&price);
+        require!(
+            product.validator_id == validator_id,
+            "Catalog validator for this price does not match the pool used for this lock"
+        );
+        self.assert_validator_active_for_lock(&validator_id);
+
         let product_id = product.product_id.clone();
         let sub_key = (buyer.clone(), product_id.clone());
         let now = block_timestamp();
@@ -159,26 +191,6 @@ impl Contract {
             });
         if existing_subscription_id.is_none() {
             self.assert_product_not_reserved_by_pending_update(&buyer, &product_id, None);
-        }
-        #[cfg(target_arch = "wasm32")]
-        if !_settlement_already_ran {
-            if let Some(sid) = existing_subscription_id.as_ref() {
-                let sub = self.require_subscription_by_id(sid);
-                if self.due_pending_stake_decrease_validator(&sub).is_some() {
-                    let _validator = self.require_validator_idle(&validator_id);
-                    return self
-                        .promise_validator_per_epoch_settlement_then(
-                            validator_id.clone(),
-                            UserAction::CommitRecurringSubscriptionLock {
-                                validator_id,
-                                buyer,
-                                locked,
-                                price_id,
-                            },
-                        )
-                        .into();
-                }
-            }
         }
 
         let (subscription, sub_id, is_new_index) = if let Some(sid) = existing_subscription_id {
@@ -253,51 +265,14 @@ impl Contract {
             period_end_ns: subscription.end_ns,
         };
 
-        // Same host synchronous path as the one-off branch (see comment there).
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let _validator = self.require_validator_idle(&validator_id);
-            return PromiseOrValue::Value(self.commit_catalog_lock(
-                buyer.clone(),
-                locked,
-                duration_ns,
-                order,
-                validator_id,
-                Some((subscription, sub_id.clone(), is_new_index)),
-            ));
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            if _settlement_already_ran {
-                let lock_id = self.commit_catalog_lock(
-                    buyer.clone(),
-                    locked,
-                    duration_ns,
-                    order,
-                    validator_id.clone(),
-                    Some((subscription, sub_id.clone(), is_new_index)),
-                );
-                let _validator = self.require_validator_busy(
-                    &validator_id,
-                    "Validator pool must be busy after per-epoch settlement",
-                );
-                return PromiseOrValue::Value(lock_id);
-            }
-            let _validator = self.require_validator_idle(&validator_id);
-            return self
-                .promise_validator_per_epoch_settlement_then(
-                    validator_id.clone(),
-                    UserAction::CommitLock {
-                        validator_id,
-                        buyer,
-                        locked,
-                        duration_ns,
-                        order,
-                        subscription_followup: Some((subscription, sub_id, is_new_index)),
-                    },
-                )
-                .into();
-        }
+        self.commit_catalog_lock(
+            buyer,
+            locked,
+            duration_ns,
+            order,
+            validator_id,
+            Some((subscription, sub_id, is_new_index)),
+        )
     }
 
     pub fn get_lock(&self, lock_id: LockId) -> Option<Lock> {
@@ -504,7 +479,6 @@ impl Contract {
         duration_ns: u128,
         order: OrderRef,
         validator_id: ValidatorId,
-        subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
     ) -> PromiseOrValue<LockId> {
         let lock_id = self.commit_catalog_lock(
             buyer,
@@ -512,7 +486,7 @@ impl Contract {
             duration_ns,
             order,
             validator_id.clone(),
-            subscription_followup,
+            None,
         );
         let _validator = self.require_validator_busy(
             &validator_id,
@@ -521,8 +495,8 @@ impl Contract {
         PromiseOrValue::Value(lock_id)
     }
 
-    /// **[Pipeline 5a]** Recurring subscription lock after **4** when a due
-    /// pending stake decrease must be applied only after validator settlement.
+    /// **[Pipeline 5a]** Recurring subscription lock after **4**. Subscription
+    /// renewal/new-period state is resolved only after validator settlement.
     #[private]
     pub fn resolve_recurring_subscription_lock_after_settle(
         &mut self,
@@ -531,11 +505,15 @@ impl Contract {
         price_id: PriceId,
         validator_id: ValidatorId,
     ) -> PromiseOrValue<LockId> {
-        let (price, product) = self.get_active_price_and_product(&price_id);
-        require!(
-            product.validator_id == validator_id,
-            "Catalog validator for this price does not match the pool used for this lock"
+        let _validator = self.require_validator_busy(
+            &validator_id,
+            "Validator pool must be busy after per-epoch settlement",
         );
-        self.lock_recurring_subscription_with_catalog_impl(buyer, locked, price, product, true)
+        PromiseOrValue::Value(self.commit_recurring_subscription_lock_after_settle(
+            buyer,
+            locked,
+            price_id,
+            validator_id,
+        ))
     }
 }

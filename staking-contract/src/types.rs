@@ -324,10 +324,9 @@ pub enum UserAction {
         locked: NearToken,
         duration_ns: u128,
         order: OrderRef,
-        subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
     },
-    /// Recurring subscription lock when a due pending stake decrease must be applied
-    /// after the validator settlement preamble, before renewal logic continues.
+    /// Recurring subscription lock resolved after the validator settlement preamble,
+    /// before subscription renewal or new-period state is committed.
     CommitRecurringSubscriptionLock {
         validator_id: ValidatorId,
         buyer: AccountId,
