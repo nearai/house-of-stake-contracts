@@ -685,7 +685,7 @@ impl Contract {
                 if let Some(lock) = self.internal_get_lock(&stored.last_lock_id) {
                     let validator = self.require_validator(&lock.validator_id);
                     require!(
-                        validator.last_settlement_epoch >= near_sdk::env::epoch_height(),
+                        validator.last_settlement_epoch >= env::epoch_height(),
                         "Pending stake decrease requires validator settlement before apply"
                     );
                 }
