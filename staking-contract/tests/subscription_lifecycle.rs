@@ -1,4 +1,4 @@
-//! Cancel-at-period-end, upgrade (immediate), downgrade (next period).
+//! Cancel-at-period-end and unified subscription updates.
 
 mod common;
 
@@ -111,7 +111,7 @@ fn resume_subscription_fails_after_period_end() {
 }
 
 #[test]
-fn upgrade_subscription_updates_tier_and_lock_amount() {
+fn update_subscription_updates_tier_and_lock_amount() {
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
     let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);
@@ -149,7 +149,7 @@ fn upgrade_subscription_updates_tier_and_lock_amount() {
 }
 
 #[test]
-fn upgrade_subscription_allows_different_product_on_same_validator() {
+fn update_subscription_allows_different_product_on_same_validator() {
     let mut c = deploy();
     let (product_low, price_low) = setup_catalog_near_subscription(&mut c);
     let (product_high, price_high) = add_subscription_product(&mut c, "High product", 10);
@@ -171,7 +171,7 @@ fn upgrade_subscription_allows_different_product_on_same_validator() {
     assert!(
         c.get_subscription_for_product(acct(BUYER), product_low)
             .is_none(),
-        "old product index should be removed after cross-product upgrade"
+        "old product index should be removed after cross-product update"
     );
     let sub_after = c
         .get_subscription_for_product(acct(BUYER), product_high.clone())
@@ -211,7 +211,7 @@ fn get_subscriptions_for_account_lists_all_owned_subscriptions() {
 }
 
 #[test]
-fn upgrade_subscription_uses_projected_billing_window_after_stale_end_ns() {
+fn update_subscription_uses_projected_billing_window_after_stale_end_ns() {
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
     let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);
@@ -257,7 +257,7 @@ fn upgrade_subscription_uses_projected_billing_window_after_stale_end_ns() {
 
 #[test]
 #[should_panic(expected = "Cannot delete this price while it is in use")]
-fn upgraded_subscription_price_is_marked_in_use() {
+fn updated_subscription_price_is_marked_in_use() {
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
     let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);
@@ -289,7 +289,7 @@ fn upgraded_subscription_price_is_marked_in_use() {
 
 #[test]
 #[should_panic(expected = "This price is not active")]
-fn upgrade_callback_rejects_price_archived_after_entry_checks() {
+fn update_callback_rejects_price_archived_after_entry_checks() {
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
     let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);
@@ -483,7 +483,7 @@ fn lock_rejects_product_reserved_by_pending_cross_product_update() {
 }
 
 #[test]
-fn pending_downgrade_projects_after_apply_time_without_manual_lock() {
+fn pending_update_projects_after_apply_time_without_manual_lock() {
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
     let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);
@@ -560,7 +560,7 @@ fn pending_downgrade_projects_after_apply_time_without_manual_lock() {
 }
 
 #[test]
-fn cross_product_pending_downgrade_projects_under_target_product() {
+fn cross_product_pending_update_projects_under_target_product() {
     let mut c = deploy();
     let (product_low, price_low) = setup_catalog_near_subscription(&mut c);
     let (product_high, price_high) = add_subscription_product(&mut c, "High product", 10);
@@ -609,7 +609,7 @@ fn cross_product_pending_downgrade_projects_under_target_product() {
 }
 
 #[test]
-fn immediate_update_clears_pending_downgrade() {
+fn immediate_update_clears_pending_update() {
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
     let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);

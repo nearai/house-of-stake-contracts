@@ -52,16 +52,6 @@ pub fn log_subscription_resume(account: &AccountId, product_id: &str) {
     );
 }
 
-pub fn log_subscription_upgrade(account: &AccountId, new_price_id: &str) {
-    emit(
-        "subscription_upgrade",
-        serde_json::json!({
-            "account_id": account.to_string(),
-            "new_price_id": new_price_id,
-        }),
-    );
-}
-
 pub fn log_subscription_update(account: &AccountId, target_price_id: &str, target_amount: u128) {
     emit(
         "subscription_update",
@@ -69,16 +59,6 @@ pub fn log_subscription_update(account: &AccountId, target_price_id: &str, targe
             "account_id": account.to_string(),
             "target_price_id": target_price_id,
             "target_amount": target_amount.to_string(),
-        }),
-    );
-}
-
-pub fn log_subscription_downgrade_scheduled(account: &AccountId, target_price_id: &str) {
-    emit(
-        "subscription_downgrade_scheduled",
-        serde_json::json!({
-            "account_id": account.to_string(),
-            "target_price_id": target_price_id,
         }),
     );
 }

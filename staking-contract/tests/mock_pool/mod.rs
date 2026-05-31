@@ -786,7 +786,7 @@ pub async fn create_recurring_price_on_product(
     Ok(cpr.into_result()?.json()?)
 }
 
-pub async fn buyer_upgrade_subscription(
+pub async fn buyer_update_subscription_with_stake_increase(
     buyer: &near_workspaces::Account,
     staking_id: &near_workspaces::AccountId,
     subscription_id: &str,
@@ -813,7 +813,7 @@ pub async fn buyer_upgrade_subscription(
         .to_string())
 }
 
-pub async fn buyer_schedule_downgrade_subscription(
+pub async fn buyer_update_subscription_scheduled(
     buyer: &near_workspaces::Account,
     staking_id: &near_workspaces::AccountId,
     subscription_id: &str,
