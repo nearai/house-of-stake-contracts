@@ -27,6 +27,8 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 | `get_version` | — | `string` | Crate package version string. |
 | `is_paused` | — | `bool` | Global pause flag. |
 | `get_account` | `account_id: AccountId` | `Account \| null` | NEP-style prepaid **`storage_deposit`** only. |
+| `storage_balance_bounds` | — | `StorageBalanceBounds` | NEP-145 minimum registration balance; `max` is `null` because storage top-ups are unbounded. |
+| `storage_balance_of` | `account_id: AccountId` | `StorageBalance \| null` | NEP-145 storage balance; returns `null` for unregistered accounts. |
 | `get_validator` | `validator_id: AccountId` | `Validator \| null` | Validator row for one staking pool contract account. |
 | `get_validators` | `from_index: u64`, `limit: u64` | `Validator[]` | Paginated allowlist (stable ordering); each row’s **`validator_id`** is that pool’s account id. |
 | `get_product` | `product_id: string` | `Product \| null` | Catalog product (`prod_*`). |
@@ -44,8 +46,9 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 
 | Method | Access | Deposit | Description |
 |--------|--------|---------|-------------|
-| `storage_deposit` | Any | **Attach NEAR** | Register/update prepaid storage: must satisfy `min_storage_deposit` + `per_lock_storage_stake × user_lock_count`. |
-| `storage_withdraw` | Account owner | **1 yocto** + logical `amount: NearToken` | Withdraw prepaid storage down to the required minimum for current lock count. Returns transfer promise. |
+| `storage_deposit` | Any | **Attach NEAR** | NEP-145 register/top-up: `account_id?: AccountId`, `registration_only?: bool`. With `registration_only=true`, only the amount needed to reach `min_storage_deposit` is retained and excess is refunded. |
+| `storage_withdraw` | Account owner | **1 yocto** + optional `amount: NearToken` | NEP-145 withdraw from `available`; omitting `amount` withdraws all available storage. |
+| `storage_unregister` | Account owner | **1 yocto** + optional `force: bool` | NEP-145 unregister/refund when the account has no retained per-lock, per-purchase, or subscription storage. Returns `false` instead of deleting accounts that still own retained records. |
 
 ---
 
@@ -225,7 +228,7 @@ Pipeline steps and callbacks: [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md).
 
 - **`Config`** — [`../src/config.rs`](../src/config.rs): `owner_account_id`, `guardians`, lock/storage economics, `epoch_unstake_settle_epochs`, … **`min_lock_amount`** is the minimum attach for locks (including first delegation to an empty pool); governance may raise it but not below **`PROTOCOL_MIN_LOCK_AMOUNT_YOCTO`** (1 NEAR), enforced in `new` and `set_min_lock_amount`.
 - **`Validator`** — [`../src/validators.rs`](../src/validators.rs): **`validator_id`** (pool contract account), accounting fields, pending buckets, **`tx_status`** (`Idle` \| `Busy`).
-- **`Product`**, **`Price`**, **`Subscription`**, **`Lock`**, **`Account`** — [`../src/types.rs`](../src/types.rs), [`../src/accounts.rs`](../src/accounts.rs). **`Account`** is prepaid **`storage_deposit`** only (unlocked stake exits transfer directly to the user via **`withdraw`**).
+- **`Product`**, **`Price`**, **`Subscription`**, **`Lock`**, **`Account`**, **`StorageBalance`**, **`StorageBalanceBounds`** — [`../src/types.rs`](../src/types.rs), [`../src/accounts.rs`](../src/accounts.rs). **`Account`** is prepaid **`storage_deposit`** only (unlocked stake exits transfer directly to the user via **`withdraw`**).
 
 For EVENT_JSON shapes and naming, see [`../src/events.rs`](../src/events.rs).
 

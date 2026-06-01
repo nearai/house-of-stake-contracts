@@ -245,5 +245,5 @@ pub fn set_default_price_for_product(
 
 pub fn register_buyer(contract: &mut Contract) {
     testing_env!(ctx(acct(BUYER), NearToken::from_millinear(500)));
-    contract.storage_deposit();
+    contract.storage_deposit(None, None);
 }
