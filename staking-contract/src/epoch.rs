@@ -10,7 +10,7 @@ use crate::gas::{callbacks, staking_pool};
 use crate::utils::{block_timestamp, epoch_height};
 use crate::*;
 use near_sdk::ext_contract;
-use near_sdk::json_types::U64;
+use near_sdk::json_types::{U64, U128};
 use near_sdk::{
     AccountId, NearToken, Promise, PromiseError, PromiseOrValue, env, is_promise_success, near,
     require,
@@ -55,17 +55,25 @@ pub trait ExtSelfEpoch {
         duration_ns: u128,
         order: OrderRef,
         validator_id: ValidatorId,
-        subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
     ) -> PromiseOrValue<LockId>;
-    /// **[Pipeline 5d]** Subscription upgrade after pre-user settlement (`subscriptions.rs`).
-    fn on_subscription_upgrade_after_settle(
+    /// **[Pipeline 5a]** Recurring subscription lock resolved after settlement.
+    fn resolve_recurring_subscription_lock_after_settle(
+        &mut self,
+        buyer: AccountId,
+        locked: NearToken,
+        price_id: PriceId,
+        validator_id: ValidatorId,
+    ) -> PromiseOrValue<LockId>;
+    /// **[Pipeline 5d]** Subscription update after pre-user settlement (`subscriptions.rs`).
+    fn on_subscription_update_after_settle(
         &mut self,
         buyer: AccountId,
         deposit: NearToken,
-        new_price_id: PriceId,
+        target_price_id: PriceId,
+        target_amount: U128,
         subscription_id: SubscriptionId,
         validator_id: ValidatorId,
-    ) -> PromiseOrValue<LockId>;
+    ) -> PromiseOrValue<SubscriptionPlanChangeOutcome>;
     /// **[Pipeline 5b]** Share exit after pre-user settlement (`unlock.rs`).
     fn resolve_unlock(
         &mut self,
@@ -82,13 +90,20 @@ pub trait ExtSelfEpoch {
     ) -> Promise;
     /// **[Pipeline 6]** After **4** tail promise completes: sets pipeline **`Idle`**.
     fn on_epoch_pipeline_terminal_release(&mut self, validator_id: ValidatorId);
-    /// **[Pipeline 6]** Release **`Busy`** and return lock id from mint/upgrade tail; refund on tail failure.
+    /// **[Pipeline 6]** Release **`Busy`** and return lock id from mint tail; refund on tail failure.
     fn on_epoch_pipeline_release_with_lock_id(
         &mut self,
         #[callback_result] lock_id_result: Result<LockId, PromiseError>,
         validator_id: ValidatorId,
         cont: UserAction,
     ) -> PromiseOrValue<LockId>;
+    /// **[Pipeline 6]** Release **`Busy`** and return subscription update outcome; refund on tail failure.
+    fn on_epoch_pipeline_release_with_subscription_update_outcome(
+        &mut self,
+        #[callback_result] outcome_result: Result<SubscriptionPlanChangeOutcome, PromiseError>,
+        validator_id: ValidatorId,
+        cont: UserAction,
+    ) -> PromiseOrValue<SubscriptionPlanChangeOutcome>;
 }
 
 #[ext_contract(ext_staking_pool)]
@@ -500,6 +515,7 @@ impl Contract {
         enum ReleaseKind {
             Terminal,
             WithLockId,
+            WithSubscriptionUpdateOutcome,
         }
 
         let pipeline_validator_id = cont.validator_id().clone();
@@ -512,37 +528,47 @@ impl Contract {
                 locked,
                 duration_ns,
                 order,
-                subscription_followup,
             } => (
                 ext_self_epoch::ext(env::current_account_id())
                     .with_static_gas(callbacks::ON_LOCK_FINALLY_MINT)
-                    .resolve_lock(
+                    .resolve_lock(buyer, locked, duration_ns, order, validator_id),
+                ReleaseKind::WithLockId,
+            ),
+            UserAction::CommitRecurringSubscriptionLock {
+                validator_id,
+                buyer,
+                locked,
+                price_id,
+            } => (
+                ext_self_epoch::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_LOCK_FINALLY_MINT)
+                    .resolve_recurring_subscription_lock_after_settle(
                         buyer,
                         locked,
-                        duration_ns,
-                        order,
+                        price_id,
                         validator_id,
-                        subscription_followup,
                     ),
                 ReleaseKind::WithLockId,
             ),
-            UserAction::SubscriptionUpgrade {
+            UserAction::SubscriptionUpdate {
                 validator_id,
                 buyer,
                 deposit,
-                new_price_id,
+                target_price_id,
+                target_amount,
                 subscription_id,
             } => (
                 ext_self_epoch::ext(env::current_account_id())
-                    .with_static_gas(callbacks::ON_SUBSCRIPTION_UPGRADE_AFTER_SETTLE)
-                    .on_subscription_upgrade_after_settle(
+                    .with_static_gas(callbacks::ON_SUBSCRIPTION_UPDATE_AFTER_SETTLE)
+                    .on_subscription_update_after_settle(
                         buyer,
                         deposit,
-                        new_price_id,
+                        target_price_id,
+                        target_amount,
                         subscription_id,
                         validator_id,
                     ),
-                ReleaseKind::WithLockId,
+                ReleaseKind::WithSubscriptionUpdateOutcome,
             ),
             // Share exit: burn shares and queue `pending_to_unstake` (pool `unstake` on a later settlement).
             UserAction::UnlockQueueUnstake {
@@ -587,6 +613,16 @@ impl Contract {
                         cont_for_release,
                     ),
             ),
+            ReleaseKind::WithSubscriptionUpdateOutcome => tail.then(
+                ext_self_epoch::ext(env::current_account_id())
+                    .with_static_gas(
+                        callbacks::ON_EPOCH_PIPELINE_RELEASE_WITH_SUBSCRIPTION_UPDATE_OUTCOME,
+                    )
+                    .on_epoch_pipeline_release_with_subscription_update_outcome(
+                        pipeline_validator_id,
+                        cont_for_release,
+                    ),
+            ),
         }
     }
 
@@ -595,7 +631,7 @@ impl Contract {
 
     // --- [Pipeline 6] ---
 
-    /// Refund NEAR from a payable pipeline entry (`lock_*`, `upgrade_subscription`) after pre-user
+    /// Refund NEAR from a payable pipeline entry (`lock`, `update_subscription`) after pre-user
     /// settlement aborts (e.g. `get_account` failure). Clears **`Busy`** and returns the refund transfer.
     pub(crate) fn refund_payable_pipeline(
         &mut self,
@@ -621,7 +657,7 @@ impl Contract {
         self.release_validator_pool_pipeline(&validator_id);
     }
 
-    /// **[Pipeline 6]** Release pipeline and return lock id from mint/upgrade tails; refund payable entry on tail failure.
+    /// **[Pipeline 6]** Release pipeline and return lock id from mint tail; refund payable entry on tail failure.
     #[private]
     pub fn on_epoch_pipeline_release_with_lock_id(
         &mut self,
@@ -639,6 +675,33 @@ impl Contract {
                 let (buyer, amount) = cont
                     .payable_refund()
                     .expect("WithLockId continuation must be payable");
+                self.refund_payable_pipeline(&validator_id, buyer, amount)
+                    .into()
+            }
+        }
+    }
+
+    /// **[Pipeline 6]** Release pipeline and return subscription update outcome; refund payable entry on tail failure.
+    #[private]
+    pub fn on_epoch_pipeline_release_with_subscription_update_outcome(
+        &mut self,
+        #[callback_result] outcome_result: Result<SubscriptionPlanChangeOutcome, PromiseError>,
+        validator_id: ValidatorId,
+        cont: UserAction,
+    ) -> PromiseOrValue<SubscriptionPlanChangeOutcome> {
+        match outcome_result {
+            Ok(outcome) => {
+                self.release_validator_pool_pipeline(&validator_id);
+                PromiseOrValue::Value(outcome)
+            }
+            Err(_) => {
+                events::log_epoch_operation(
+                    "epoch_subscription_update_pipeline_tail_failed",
+                    &validator_id,
+                );
+                let (buyer, amount) = cont
+                    .payable_refund()
+                    .expect("subscription update continuation must be payable");
                 self.refund_payable_pipeline(&validator_id, buyer, amount)
                     .into()
             }

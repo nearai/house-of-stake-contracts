@@ -40,6 +40,10 @@ enum StorageKeys {
     UserPendingUnstake,
     UserLockCount,
     SubscriptionByAccountProduct,
+    SubscriptionsByAccount,
+    SubscriptionIds,
+    PendingUpdateTargetPriceCounts,
+    PendingUpdateTargetProductCounts,
 }
 
 #[derive(PanicOnDefault)]
@@ -76,6 +80,15 @@ pub struct Contract {
     pub user_lock_count: LookupMap<AccountId, u32>,
     /// Secondary index: `(subscriber, product_id)` → `subscription_id` for at-most-one subscription per product per account.
     pub subscription_by_account_product: LookupMap<(AccountId, ProductId), SubscriptionId>,
+    /// Secondary index: `subscriber` → owned subscription ids. Used for account-level listing and
+    /// subscription-specific plan changes without scanning the full catalog.
+    pub subscriptions_by_account: LookupMap<AccountId, Vec<SubscriptionId>>,
+    /// Creation order of subscription ids. Used by catalog admin guards to detect pending references.
+    pub subscription_ids: Vector<SubscriptionId>,
+    /// Pending subscription-update target price reference counts, used by bounded catalog guards.
+    pub pending_update_target_price_counts: LookupMap<PriceId, u32>,
+    /// Pending subscription-update target product reference counts, used by bounded catalog guards.
+    pub pending_update_target_product_counts: LookupMap<ProductId, u32>,
     /// Counter mixed into deterministic ids ([`crate::ids`]) for products, prices, subscriptions, locks.
     pub id_nonce: u64,
 }
@@ -101,6 +114,14 @@ impl Contract {
             user_lock_count: LookupMap::new(StorageKeys::UserLockCount),
             subscription_by_account_product: LookupMap::new(
                 StorageKeys::SubscriptionByAccountProduct,
+            ),
+            subscriptions_by_account: LookupMap::new(StorageKeys::SubscriptionsByAccount),
+            subscription_ids: Vector::new(StorageKeys::SubscriptionIds),
+            pending_update_target_price_counts: LookupMap::new(
+                StorageKeys::PendingUpdateTargetPriceCounts,
+            ),
+            pending_update_target_product_counts: LookupMap::new(
+                StorageKeys::PendingUpdateTargetProductCounts,
             ),
             id_nonce: 0,
         }

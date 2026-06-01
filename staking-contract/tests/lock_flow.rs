@@ -1,4 +1,4 @@
-//! Lock paths: pause gate, storage registration, product vs subscription.
+//! Unified lock paths: pause gate, storage registration, one-off vs subscription.
 
 mod common;
 
@@ -11,14 +11,14 @@ use near_sdk::{NearToken, testing_env};
 use staking_contract::types::{CatalogStatus, LockStatus, OrderRef};
 
 #[test]
-fn lock_for_product_happy_path_records_lock_and_usage() {
+fn lock_one_off_happy_path_records_lock_and_usage() {
     let mut c = deploy();
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
     register_buyer(&mut c);
 
     let dur = c.get_config().min_lock_duration_ns.0.saturating_add(10_000);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    let lock_id = unwrap_sync_lock_id(c.lock_for_product(Some(price_id.clone()), U64(dur), None));
+    let lock_id = unwrap_sync_lock_id(c.lock(Some(price_id.clone()), None, Some(U64(dur))));
 
     let lock = c.get_lock(lock_id.clone()).expect("lock");
     assert_eq!(lock.account_id, acct(BUYER));
@@ -35,18 +35,18 @@ fn lock_for_product_happy_path_records_lock_and_usage() {
 
 #[test]
 #[should_panic]
-fn lock_for_product_fails_without_storage_deposit() {
+fn lock_one_off_fails_without_storage_deposit() {
     let mut c = deploy();
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
 
     let dur = c.get_config().min_lock_duration_ns.0.saturating_add(1);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    c.lock_for_product(Some(price_id), U64(dur), None);
+    c.lock(Some(price_id), None, Some(U64(dur)));
 }
 
 #[test]
 #[should_panic]
-fn lock_for_product_fails_when_paused() {
+fn lock_one_off_fails_when_paused() {
     let mut c = deploy();
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
     register_buyer(&mut c);
@@ -56,17 +56,17 @@ fn lock_for_product_fails_when_paused() {
 
     let dur = c.get_config().min_lock_duration_ns.0.saturating_add(1);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    c.lock_for_product(Some(price_id), U64(dur), None);
+    c.lock(Some(price_id), None, Some(U64(dur)));
 }
 
 #[test]
-fn lock_for_subscription_creates_subscription_row() {
+fn lock_recurring_creates_subscription_row() {
     let mut c = deploy();
     let (_pid, price_id) = setup_catalog_near_subscription(&mut c);
     register_buyer(&mut c);
 
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    let lock_id = unwrap_sync_lock_id(c.lock_for_subscription(Some(price_id.clone()), None));
+    let lock_id = unwrap_sync_lock_id(c.lock(Some(price_id.clone()), None, None));
 
     let sub = c
         .get_subscription_for_price(acct(BUYER), price_id)
@@ -79,14 +79,26 @@ fn lock_for_subscription_creates_subscription_row() {
 }
 
 #[test]
-#[should_panic]
-fn lock_for_subscription_rejects_one_off_price() {
+#[should_panic(expected = "duration_ns is required for one-off prices")]
+fn lock_one_off_rejects_missing_duration() {
     let mut c = deploy();
     let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
     register_buyer(&mut c);
 
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    c.lock_for_subscription(Some(price_id), None);
+    c.lock(Some(price_id), None, None);
+}
+
+#[test]
+#[should_panic(expected = "duration_ns must be omitted for recurring subscription prices")]
+fn lock_recurring_rejects_duration() {
+    let mut c = deploy();
+    let (_pid, price_id) = setup_catalog_near_subscription(&mut c);
+    register_buyer(&mut c);
+
+    let dur = c.get_config().min_lock_duration_ns.0.saturating_add(10_000);
+    testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
+    c.lock(Some(price_id), None, Some(U64(dur)));
 }
 
 #[test]
@@ -113,7 +125,7 @@ fn unpause_allows_lock_again() {
 
     let dur = c.get_config().min_lock_duration_ns.0.saturating_add(1);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    let _ = unwrap_sync_lock_id(c.lock_for_product(Some(price_id), U64(dur), None));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_id), None, Some(U64(dur))));
 }
 
 #[test]
@@ -124,7 +136,7 @@ fn user_lock_count_increments_on_lock() {
 
     let dur = c.get_config().min_lock_duration_ns.0.saturating_add(1);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    let _ = unwrap_sync_lock_id(c.lock_for_product(Some(price_id), U64(dur), None));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_id), None, Some(U64(dur))));
 
     let n = c.user_lock_count.get(&acct(BUYER)).copied().expect("count");
     assert_eq!(n, 1);

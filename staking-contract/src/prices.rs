@@ -31,6 +31,7 @@ pub trait ExtSelfPrices {
         price_type: PriceType,
         billing_period: Option<BillingPeriod>,
         lock_factor_near_months: U128,
+        metadata: Option<PriceMetadata>,
         expected_caller: AccountId,
     ) -> PriceId;
     fn edit_price_after_get_owner(
@@ -78,6 +79,7 @@ impl Contract {
         price_type: PriceType,
         billing_period: Option<BillingPeriod>,
         lock_factor_near_months: U128,
+        metadata: Option<PriceMetadata>,
     ) -> Promise {
         self.promise_catalog_admin_on_product(product_id, |expected_caller, product_id| {
             ext_self_prices::ext(env::current_account_id())
@@ -90,6 +92,7 @@ impl Contract {
                     price_type,
                     billing_period,
                     lock_factor_near_months,
+                    metadata,
                     expected_caller,
                 )
         })
@@ -148,6 +151,7 @@ impl Contract {
         price_type: PriceType,
         billing_period: Option<BillingPeriod>,
         lock_factor_near_months: U128,
+        metadata: Option<PriceMetadata>,
         expected_caller: AccountId,
     ) -> PriceId {
         self.assert_validator_owner(pool_owner, &expected_caller);
@@ -156,6 +160,12 @@ impl Contract {
             product.status == CatalogStatus::Active,
             "This product is archived or inactive"
         );
+        if let Some(max_amount) = metadata.as_ref().and_then(|m| m.max_amount) {
+            require!(
+                max_amount.0 >= amount.0,
+                "Price max_amount must be greater than or equal to amount"
+            );
+        }
 
         let price_id = next_unique_price_id(self);
         let price = Price {
@@ -167,6 +177,7 @@ impl Contract {
             price_type,
             billing_period,
             lock_factor_near_months,
+            metadata,
             status: CatalogStatus::Active,
             usage_count: 0,
         };
@@ -201,6 +212,7 @@ impl Contract {
     ) {
         self.assert_validator_owner(pool_owner, &expected_caller);
         let mut price = self.require_price(&price_id);
+        self.assert_no_pending_update_references_price(&price_id);
         let product_id = price.product_id.clone();
         price.status = CatalogStatus::Archived;
         self.internal_set_price(price_id.clone(), price);
@@ -221,6 +233,7 @@ impl Contract {
             price.usage_count == 0,
             "Cannot delete this price while it is in use"
         );
+        self.assert_no_pending_update_references_price(&price_id);
         let product_id = price.product_id.clone();
         let mut product = self.require_product(&price.product_id);
         product.price_ids.retain(|x| x != &price_id);
@@ -296,12 +309,6 @@ impl Contract {
             price.billing_period == Some(BillingPeriod::Monthly),
             "Only monthly billing is supported"
         );
-    }
-
-    pub(crate) fn require_active_recurring_monthly_price(&self, price_id: &PriceId) -> Price {
-        let (price, _) = self.get_active_price_and_product(price_id);
-        self.require_recurring_monthly_price(&price);
-        price
     }
 
     /// Resolve price → product → pool, run catalog admin preamble, then `get_owner_id` → `build_tail(caller, price_id)`.

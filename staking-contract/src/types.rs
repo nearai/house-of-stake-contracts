@@ -219,10 +219,17 @@ pub struct Product {
     pub status: CatalogStatus,
     pub created_ns: U64,
     pub price_ids: Vec<PriceId>,
-    /// Default catalog price (`price_*`) for **`lock_for_product`** / **`lock_for_subscription`** when called with **`product_id`** and **`price_id: null`** (see **`set_product_default_price`**).
+    /// Default catalog price (`price_*`) for **`lock`** when called with **`product_id`** and **`price_id: null`** (see **`set_product_default_price`**).
     /// Only an **active** (unarchived) price id may be stored; archiving the product/price clears this when it matches.
     pub default_price_id: Option<PriceId>,
     pub usage_count: u64,
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh, json])]
+pub struct PriceMetadata {
+    /// Optional inclusive upper bound for variable subscription stake amounts.
+    pub max_amount: Option<U128>,
 }
 
 #[derive(Clone)]
@@ -238,6 +245,9 @@ pub struct Price {
     pub billing_period: Option<BillingPeriod>,
     /// Fixed-point lock-weight; see [`crate::utils::LOCK_FACTOR_DENOM`] and [`crate::utils::check_near_price_lock`].
     pub lock_factor_near_months: U128,
+    /// Optional metadata for price-specific constraints. For recurring subscription prices,
+    /// `max_amount` is the inclusive upper bound for the selected stake amount.
+    pub metadata: Option<PriceMetadata>,
     pub status: CatalogStatus,
     pub usage_count: u64,
 }
@@ -256,8 +266,34 @@ pub struct Subscription {
     pub status: SubscriptionStatus,
     /// When true, no renewal after the current billing period (`end_ns`); lock still runs until unlock.
     pub cancel_at_period_end: bool,
-    /// Lower tier to apply at the start of the **next** billing period (Phase A: no mid-cycle refund).
-    pub pending_downgrade_price_id: Option<PriceId>,
+    /// Deferred plan and/or stake decrease to apply at a future billing boundary.
+    pub pending_update: Option<PendingSubscriptionUpdate>,
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh, json])]
+pub struct PendingSubscriptionUpdate {
+    /// Target plan to apply at `apply_ns`. Absent when only stake amount decreases.
+    pub target_price_id: Option<PriceId>,
+    /// Target stake amount to apply at `apply_ns`. Absent when only plan changes.
+    pub target_amount: Option<NearToken>,
+    /// Timestamp when the pending update becomes effective.
+    pub apply_ns: U64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [json])]
+pub struct SubscriptionPlanChangeOutcome {
+    pub kind: String,
+    pub subscription_id: SubscriptionId,
+    pub target_price_id: PriceId,
+    pub target_amount: U128,
+    pub lock_id: Option<LockId>,
+    pub immediate_plan_change: bool,
+    pub immediate_stake_increase: Option<U128>,
+    pub pending_plan_change: bool,
+    pub pending_stake_decrease: Option<U128>,
+    pub pending_apply_ns: Option<U64>,
 }
 
 #[derive(Clone)]
@@ -281,14 +317,21 @@ pub struct Lock {
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
 pub enum UserAction {
-    /// Mint a catalog lock after settlement (`lock_for_product` / `lock_for_subscription`).
+    /// Mint a catalog lock after settlement (`lock`).
     CommitLock {
         validator_id: ValidatorId,
         buyer: AccountId,
         locked: NearToken,
         duration_ns: u128,
         order: OrderRef,
-        subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
+    },
+    /// Recurring subscription lock resolved after the validator settlement preamble,
+    /// before subscription renewal or new-period state is committed.
+    CommitRecurringSubscriptionLock {
+        validator_id: ValidatorId,
+        buyer: AccountId,
+        locked: NearToken,
+        price_id: PriceId,
     },
     UnlockQueueUnstake {
         validator_id: ValidatorId,
@@ -303,12 +346,13 @@ pub enum UserAction {
     },
     /// Public [`crate::epoch::Contract::epoch_settle`]: no user tail after the shared pipeline.
     SettleOnly { validator_id: ValidatorId },
-    /// Mid-period subscription tier upgrade after pre-user settlement (`subscriptions.rs`).
-    SubscriptionUpgrade {
+    /// Mid-period subscription update after pre-user settlement (`subscriptions.rs`).
+    SubscriptionUpdate {
         validator_id: ValidatorId,
         buyer: AccountId,
         deposit: NearToken,
-        new_price_id: PriceId,
+        target_price_id: PriceId,
+        target_amount: U128,
         subscription_id: SubscriptionId,
     },
 }
@@ -317,19 +361,23 @@ impl UserAction {
     pub fn validator_id(&self) -> &ValidatorId {
         match self {
             Self::CommitLock { validator_id, .. }
+            | Self::CommitRecurringSubscriptionLock { validator_id, .. }
             | Self::UnlockQueueUnstake { validator_id, .. }
             | Self::WithdrawUserTransfer { validator_id, .. }
             | Self::SettleOnly { validator_id }
-            | Self::SubscriptionUpgrade { validator_id, .. } => validator_id,
+            | Self::SubscriptionUpdate { validator_id, .. } => validator_id,
         }
     }
 
-    /// NEAR attached on the entry receipt for payable flows (`lock_*`, `upgrade_subscription`).
-    /// Used to refund when the async pre-user pipeline aborts before mint / upgrade commits.
+    /// NEAR attached on the entry receipt for payable flows (`lock`, `update_subscription`).
+    /// Used to refund when the async pre-user pipeline aborts before the user-flow tail commits.
     pub fn payable_refund(&self) -> Option<(AccountId, NearToken)> {
         match self {
             Self::CommitLock { buyer, locked, .. } => Some((buyer.clone(), *locked)),
-            Self::SubscriptionUpgrade { buyer, deposit, .. } => Some((buyer.clone(), *deposit)),
+            Self::CommitRecurringSubscriptionLock { buyer, locked, .. } => {
+                Some((buyer.clone(), *locked))
+            }
+            Self::SubscriptionUpdate { buyer, deposit, .. } => Some((buyer.clone(), *deposit)),
             _ => None,
         }
     }

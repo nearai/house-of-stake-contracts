@@ -87,21 +87,19 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 
 | Method | Access | Deposit | Returns | Description |
 |--------|--------|---------|---------|-------------|
-| `lock_for_product` | Buyer | **Attach NEAR** | **`PromiseOrValue<LockId>`** | One-off: **`price_id`**, **`lock_duration_ns`** (`U64`), **`product_id`** — provide **exactly one** of **`price_id`** or **`product_id`** (other **`null`**). Default price from **`Product.default_price_id`** when only **`product_id`** is set (must be **one-off**). **WASM:** shared per-epoch pipeline (**0–3**) then mint (**5a**); see [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md). **Host tests:** synchronous mint (no promise chain). |
-| `lock_for_subscription` | Subscriber | **Attach NEAR** | **`PromiseOrValue<LockId>`** | Recurring (monthly): same XOR rule; default price must be **recurring** monthly. Same settlement + mint pipeline as **`lock_for_product`**. |
+| `lock` | Buyer / subscriber | **Attach NEAR** | **`PromiseOrValue<LockId>`** | **`price_id`**, **`product_id`**, **`duration_ns`** — provide exactly one of **`price_id`** or **`product_id`**. One-off prices require **`duration_ns`** (`U64`). Recurring monthly subscription prices require **`duration_ns: null`** and derive the duration from the billing period. Default price from **`Product.default_price_id`** when only **`product_id`** is set. **WASM:** shared per-epoch pipeline (**0–3**) then mint (**5a**); see [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md). **Host tests:** synchronous mint (no promise chain). |
 
 ---
 
 ## Subscriptions (`subscriptions.rs`)
 
-Lifecycle RPCs (locking / renewal stays in **`lock_for_subscription`** above).
+Lifecycle RPCs (locking / renewal stays in **`lock`** above).
 
 | Method | Access | Deposit | Returns | Description |
 |--------|--------|---------|---------|-------------|
-| `cancel_subscription` | Subscriber | **1 yocto** | — | **`product_id`** — set **`cancel_at_period_end`**; lock remains until **`lock.end_ns`**, then **`unlock`**. After **`end_ns`**, next **`lock_for_subscription`** starts a new period. |
-| `resume_subscription` | Subscriber | **1 yocto** | — | **`product_id`** — clear **`cancel_at_period_end`** while **`Active`**, only before stored **`end_ns`** (current billing period). Fails after period end; use **`lock_for_subscription`** for a new period. Requires **`cancel_at_period_end == true`**. |
-| `upgrade_subscription` | Subscriber | **Attach NEAR** (≥ `min_lock_amount`; tier differential) | **`PromiseOrValue<LockId>`** | **`new_price_id`** — higher tier on same product mid-period; adds shares / **`pending_to_stake`** on existing **`last_lock_id`**. **WASM:** same pre-user pipeline as **`lock_for_subscription`**, then **`commit_subscription_upgrade`** (**5d**); may post **`try_epoch_stake_or_unstake`** if epoch slot still free. **Host tests:** synchronous upgrade. |
-| `schedule_downgrade_subscription` | Subscriber | **1 yocto** | — | **`target_price_id`** — lower tier applied at next **`lock_for_subscription`** renewal (Phase A; no refund). |
+| `cancel_subscription` | Subscriber | **1 yocto** | — | **`product_id`** — set **`cancel_at_period_end`**; lock remains until **`lock.end_ns`**, then **`unlock`**. After **`end_ns`**, next **`lock`** starts a new period. |
+| `resume_subscription` | Subscriber | **1 yocto** | — | **`product_id`** — clear **`cancel_at_period_end`** while **`Active`**, only before stored **`end_ns`** (current billing period). Fails after period end; use **`lock`** for a new period. Requires **`cancel_at_period_end == true`**. |
+| `update_subscription` | Subscriber | **Attach delta NEAR for increases; 1 yocto otherwise** | **`PromiseOrValue<SubscriptionPlanChangeOutcome>`** | **`subscription_id`, `target_price_id`, `target_amount`** — unified plan update. Stake increases apply immediately after the same pre-user pipeline as **`lock`**; stake decreases are scheduled for the billing boundary, projected in views after `apply_ns`, and lazily committed by later mutations after validator settlement; price-only changes with unchanged stake apply immediately. |
 
 ---
 
@@ -128,8 +126,8 @@ Public **`epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator
 
 | Entry | `UserAction` tail | User tail |
 |--------|-------------------|-----------|
-| `lock_for_product` / `lock_for_subscription` | `CommitLock` | Mint lock (**5a**); optional post-settle |
-| `upgrade_subscription` | `SubscriptionUpgrade` | Upgrade lock (**5d**); optional post-settle |
+| `lock` | `CommitLock` | Mint lock (**5a**); optional post-settle |
+| `update_subscription` | `SubscriptionUpdate` | Update subscription lock or schedule decrease (**5d**); optional post-settle |
 | `unlock` | `UnlockQueueUnstake` | Share exit only (**5b**) |
 | `withdraw` (WASM) | `WithdrawUserTransfer` | Payout (**5c**) |
 | `epoch_settle` | `SettleOnly` | No-op then **6** |

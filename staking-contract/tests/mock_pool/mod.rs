@@ -11,7 +11,7 @@ use std::path::Path;
 /// `10^24` — matches `staking_contract::utils::LOCK_FACTOR_DENOM`.
 pub const LOCK_FACTOR_DENOM: &str = "1000000000000000000000000";
 
-/// Prepaid gas for `lock_for_product`, `unlock`, `withdraw`, and `epoch_settle`.
+/// Prepaid gas for `lock`, `unlock`, `withdraw`, and `epoch_settle`.
 /// NEAR caps prepaid gas at 300 TGas per transaction; long settlement promise chains
 /// forward unused gas from this budget.
 pub const SETTLEMENT_PIPELINE_GAS_TGAS: u64 = 300;
@@ -368,18 +368,18 @@ pub async fn top_up_buyer_near(
     Ok(())
 }
 
-pub async fn buyer_lock_for_product(
+pub async fn buyer_lock_one_off(
     buyer: &near_workspaces::Account,
     staking_id: &near_workspaces::AccountId,
     price_id: &str,
-    lock_duration_ns: &str,
+    duration_ns: &str,
     deposit_near: u128,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let lock_id: String = buyer
-        .call(staking_id, "lock_for_product")
+        .call(staking_id, "lock")
         .args_json(json!({
             "price_id": price_id,
-            "lock_duration_ns": lock_duration_ns,
+            "duration_ns": duration_ns,
             "product_id": null,
         }))
         .deposit(NearToken::from_near(deposit_near))
@@ -391,17 +391,18 @@ pub async fn buyer_lock_for_product(
     Ok(lock_id)
 }
 
-pub async fn buyer_lock_for_subscription(
+pub async fn buyer_lock_subscription(
     buyer: &near_workspaces::Account,
     staking_id: &near_workspaces::AccountId,
     price_id: &str,
     deposit_near: u128,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let lock_id: String = buyer
-        .call(staking_id, "lock_for_subscription")
+        .call(staking_id, "lock")
         .args_json(json!({
             "price_id": price_id,
             "product_id": null,
+            "duration_ns": null,
         }))
         .deposit(NearToken::from_near(deposit_near))
         .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
@@ -668,7 +669,7 @@ pub async fn add_validator_pair(
             "validator_id": pool.id(),
         }))
         .deposit(NearToken::from_yoctonear(1))
-        .gas(WsGas::from_tgas(50))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
         .await?
         .into_result()?;
@@ -705,6 +706,7 @@ pub async fn create_one_off_product_and_price(
             "price_type": "OneOff",
             "billing_period": null,
             "lock_factor_near_months": LOCK_FACTOR_DENOM,
+            "metadata": null,
         }))
         .deposit(NearToken::from_yoctonear(1))
         .gas(WsGas::from_tgas(200))
@@ -745,6 +747,7 @@ pub async fn create_subscription_product_and_price(
             "price_type": "Recurring",
             "billing_period": "Monthly",
             "lock_factor_near_months": LOCK_FACTOR_DENOM,
+            "metadata": null,
         }))
         .deposit(NearToken::from_yoctonear(1))
         .gas(WsGas::from_tgas(200))
@@ -773,6 +776,7 @@ pub async fn create_recurring_price_on_product(
             "price_type": "Recurring",
             "billing_period": "Monthly",
             "lock_factor_near_months": LOCK_FACTOR_DENOM,
+            "metadata": null,
         }))
         .deposit(NearToken::from_yoctonear(1))
         .gas(WsGas::from_tgas(200))
@@ -782,34 +786,49 @@ pub async fn create_recurring_price_on_product(
     Ok(cpr.into_result()?.json()?)
 }
 
-pub async fn buyer_upgrade_subscription(
+pub async fn buyer_update_subscription_with_stake_increase(
     buyer: &near_workspaces::Account,
     staking_id: &near_workspaces::AccountId,
-    new_price_id: &str,
+    subscription_id: &str,
+    target_price_id: &str,
+    target_amount_yocto: u128,
     deposit_near: u128,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let lock_id: String = buyer
-        .call(staking_id, "upgrade_subscription")
-        .args_json(json!({ "new_price_id": new_price_id }))
+    let outcome: serde_json::Value = buyer
+        .call(staking_id, "update_subscription")
+        .args_json(json!({
+            "subscription_id": subscription_id,
+            "target_price_id": target_price_id,
+            "target_amount": target_amount_yocto.to_string(),
+        }))
         .deposit(NearToken::from_near(deposit_near))
         .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
         .await?
         .into_result()?
         .json()?;
-    Ok(lock_id)
+    Ok(outcome["lock_id"]
+        .as_str()
+        .ok_or("missing lock_id in update_subscription outcome")?
+        .to_string())
 }
 
-pub async fn buyer_schedule_downgrade_subscription(
+pub async fn buyer_update_subscription_scheduled(
     buyer: &near_workspaces::Account,
     staking_id: &near_workspaces::AccountId,
+    subscription_id: &str,
     target_price_id: &str,
+    target_amount_yocto: u128,
 ) -> Result<(), Box<dyn std::error::Error>> {
     buyer
-        .call(staking_id, "schedule_downgrade_subscription")
-        .args_json(json!({ "target_price_id": target_price_id }))
+        .call(staking_id, "update_subscription")
+        .args_json(json!({
+            "subscription_id": subscription_id,
+            "target_price_id": target_price_id,
+            "target_amount": target_amount_yocto.to_string(),
+        }))
         .deposit(NearToken::from_yoctonear(1))
-        .gas(WsGas::from_tgas(50))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
         .await?
         .into_result()?;

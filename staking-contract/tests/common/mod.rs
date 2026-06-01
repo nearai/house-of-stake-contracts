@@ -8,7 +8,7 @@ use near_sdk::{
     AccountId, NearToken, PromiseOrValue, PromiseResult, RuntimeFeesConfig, VMContext, serde_json,
     test_vm_config, testing_env,
 };
-use staking_contract::types::{BillingPeriod, PriceId, PriceType, ProductId};
+use staking_contract::types::{BillingPeriod, PriceId, PriceMetadata, PriceType, ProductId};
 use staking_contract::utils::LOCK_FACTOR_DENOM;
 use staking_contract::{Config, Contract, LockId};
 use std::collections::HashMap;
@@ -34,7 +34,7 @@ pub fn one_yocto() -> NearToken {
     NearToken::from_yoctonear(1)
 }
 
-/// `lock_for_product` / `lock_for_subscription` return [`PromiseOrValue`] on the WASM ABI. On **non-WASM**
+/// `lock` returns [`PromiseOrValue`] on the WASM ABI. On **non-WASM**
 /// targets (host `tests/*.rs`, `cargo check` on the host triple), the contract uses a synchronous mint path
 /// so `testing_env!` does not need to resolve promise chains. Integration tests build the library without
 /// `cfg(test)` but still hit that path via `not(target_arch = "wasm32")` in `lock.rs`.
@@ -152,6 +152,7 @@ pub fn setup_catalog_near_oneoff(contract: &mut Contract) -> (String, String) {
         PriceType::OneOff,
         None,
         U128(LOCK_FACTOR_DENOM),
+        None,
         acct(VALIDATOR_OWNER_ACCOUNT),
     );
     (product_id, price_id)
@@ -165,6 +166,16 @@ pub fn add_subscription_price(
     name: &str,
     amount_yocto: u128,
 ) -> String {
+    add_subscription_price_with_metadata(contract, product_id, name, amount_yocto, None)
+}
+
+pub fn add_subscription_price_with_metadata(
+    contract: &mut Contract,
+    product_id: String,
+    name: &str,
+    amount_yocto: u128,
+    metadata: Option<PriceMetadata>,
+) -> String {
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
     contract.create_price_after_get_owner(
         acct(VALIDATOR_OWNER_ACCOUNT),
@@ -175,6 +186,7 @@ pub fn add_subscription_price(
         PriceType::Recurring,
         Some(BillingPeriod::Monthly),
         U128(LOCK_FACTOR_DENOM),
+        metadata,
         acct(VALIDATOR_OWNER_ACCOUNT),
     )
 }
@@ -182,11 +194,19 @@ pub fn add_subscription_price(
 pub fn setup_catalog_near_subscription(contract: &mut Contract) -> (String, String) {
     add_validator_allowlisted(contract);
 
+    add_subscription_product(contract, "Sub product", 1)
+}
+
+pub fn add_subscription_product(
+    contract: &mut Contract,
+    name: &str,
+    amount_yocto: u128,
+) -> (String, String) {
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
     let product_id = contract.create_product_after_get_owner(
         acct(VALIDATOR_OWNER_ACCOUNT),
         acct(POOL),
-        "Sub product".into(),
+        name.into(),
         "Desc".into(),
         acct(VALIDATOR_OWNER_ACCOUNT),
     );
@@ -197,10 +217,11 @@ pub fn setup_catalog_near_subscription(contract: &mut Contract) -> (String, Stri
         product_id.clone(),
         "Monthly".into(),
         "".into(),
-        U128(1),
+        U128(amount_yocto),
         PriceType::Recurring,
         Some(BillingPeriod::Monthly),
         U128(LOCK_FACTOR_DENOM),
+        None,
         acct(VALIDATOR_OWNER_ACCOUNT),
     );
     (product_id, price_id)

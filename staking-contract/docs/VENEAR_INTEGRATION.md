@@ -17,7 +17,7 @@
 
 ## 1. Summary
 
-This design grants **veNEAR voting power** to users who lock NEAR through `stake.dao` catalog flows (`lock_for_product`, `lock_for_subscription`), using the **same economics** as NEAR locked via a user lockup account: base veNEAR from locked NEAR principal, time-based extra veNEAR accrual, and forfeiture of accumulated extra veNEAR when reported locked NEAR decreases.
+This design grants **veNEAR voting power** to users who lock NEAR through the `stake.dao` catalog `lock` flow, using the **same economics** as NEAR locked via a user lockup account: base veNEAR from locked NEAR principal, time-based extra veNEAR accrual, and forfeiture of accumulated extra veNEAR when reported locked NEAR decreases.
 
 The integration is intentionally **minimal**: reuse `LockupUpdateV1` and mirror the lockup → veNEAR cross-contract call pattern; do not redesign the lazy epoch pipeline, share accounting, or voting contract.
 
@@ -100,7 +100,7 @@ sequenceDiagram
     participant Pool as validatorPool
     participant VeNEAR as venear.dao
 
-    User->>StakeDao: lock_for_product + NEAR
+    User->>StakeDao: lock + NEAR
     StakeDao->>Pool: epoch pipeline deposit_and_stake
     StakeDao->>StakeDao: commit_catalog_lock
     StakeDao->>VeNEAR: on_stake_dao_update
@@ -197,8 +197,7 @@ pub register_with_venear: bool,  // default false on migrate
 
 Expose optional argument on:
 
-- `lock_for_product(..., register_with_venear: Option<bool>)`
-- `lock_for_subscription(..., register_with_venear: Option<bool>)`
+- `lock(..., register_with_venear: Option<bool>)`
 
 Default: `false` (recommended for rollout).
 

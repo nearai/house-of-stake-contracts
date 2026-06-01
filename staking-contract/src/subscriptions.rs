@@ -1,14 +1,13 @@
 //! Subscription billing helpers (Stripe-style linear months) and subscription **lifecycle** RPCs
-//! (`cancel_subscription`, `upgrade_subscription`, …). Subscription **locking** (`lock_for_subscription`)
+//! (`cancel_subscription`, `update_subscription`, …). Subscription **locking** (`lock`)
 //! stays in [`crate::lock`] because it shares the pool refresh / mint pipeline with product locks.
 
-use crate::utils::{
-    AVG_MONTH_NS, block_timestamp, check_near_price_lock, min_locked_yocto_for_duration,
-    near_from_shares,
-};
+use crate::utils::{AVG_MONTH_NS, block_timestamp, check_near_price_lock, near_from_shares};
 use crate::*;
 use common::U256;
+use near_sdk::borsh::BorshSerialize;
 use near_sdk::json_types::{U64, U128};
+use near_sdk::store::LookupMap;
 use near_sdk::{AccountId, NearToken, PromiseOrValue, assert_one_yocto, env, near, require};
 
 /// Extend `from_ns` by `months` × average Gregorian months (linear approximation).
@@ -18,6 +17,38 @@ pub fn add_months_stripe_style(anchor_day: u8, months: u32, from_ns: u64) -> u64
     let add_ns = (months as u128).saturating_mul(AVG_MONTH_NS);
     let add_u64 = u64::try_from(add_ns).unwrap_or(u64::MAX);
     from_ns.saturating_add(add_u64)
+}
+
+struct SubscriptionUpdateInputs {
+    sub: Subscription,
+    current_price: Price,
+    target_price: Price,
+    target_product: Product,
+    lock: Lock,
+}
+
+struct SubscriptionUpdateDecision {
+    immediate_plan_change: bool,
+    immediate_stake_increase: Option<NearToken>,
+    pending_plan_change: bool,
+    pending_stake_decrease_target: Option<NearToken>,
+    pending_apply_ns: Option<U64>,
+}
+
+impl SubscriptionUpdateDecision {
+    fn has_immediate_change(&self) -> bool {
+        self.immediate_plan_change || self.immediate_stake_increase.is_some()
+    }
+
+    fn has_pending_change(&self) -> bool {
+        self.pending_plan_change || self.pending_stake_decrease_target.is_some()
+    }
+}
+
+pub(crate) struct ProjectedSubscriptionLookup {
+    pub(crate) subscription_id: SubscriptionId,
+    pub(crate) stored: Subscription,
+    projected: Subscription,
 }
 
 #[near]
@@ -30,10 +61,16 @@ impl Contract {
         self.assert_not_paused();
         let buyer = env::predecessor_account_id();
         let (sid, sub) = self.require_subscription_owned_by(&buyer, &product_id);
+        let old_product_id = sub.product_id.clone();
         // Normalize stale active windows before marking cancel-at-end so stored `end_ns`
         // represents the current virtual billing period boundary.
         let mut sub = self.project_subscription_view_now(sub);
         Self::assert_subscription_active(&sub);
+        Self::clear_pending_update(&mut sub);
+        self.sync_subscription_lock_window(&sub);
+        if old_product_id != sub.product_id {
+            self.move_subscription_product_index(&buyer, &sid, &old_product_id, &sub.product_id);
+        }
         sub.cancel_at_period_end = true;
         self.internal_set_subscription(sid.clone(), sub.clone());
         crate::events::log_subscription_cancel(&buyer, &product_id);
@@ -54,90 +91,68 @@ impl Contract {
         );
         require!(
             block_timestamp() < sub.end_ns.0,
-            "Current billing period has ended; subscribe again with lock_for_subscription instead"
+            "Current billing period has ended; subscribe again with lock instead"
         );
         sub.cancel_at_period_end = false;
         self.internal_set_subscription(sid.clone(), sub.clone());
         crate::events::log_subscription_resume(&buyer, &product_id);
     }
 
-    /// Upgrade to a higher-priced recurring tier on the same product immediately. Attach extra NEAR so that
-    /// `existing_locked + deposit` satisfies [`check_near_price_lock`] for the new tier over the remainder of
-    /// the current period (`lock.end_ns - now`). Runs the shared per-epoch validator pipeline before minting
-    /// additional shares (same as [`crate::lock::Contract::lock_for_subscription`] on WASM).
+    /// Update a subscription to a target recurring tier and explicit target stake amount.
+    ///
+    /// Stake increases apply immediately after the shared validator settlement pipeline. Stake decreases
+    /// are scheduled for the next billing period, projected in views after the apply timestamp, and
+    /// lazily committed on the next related mutation.
     #[payable]
-    pub fn upgrade_subscription(&mut self, new_price_id: PriceId) -> PromiseOrValue<LockId> {
-        self.require_enough_gas_for_epoch_settlement();
+    pub fn update_subscription(
+        &mut self,
+        subscription_id: SubscriptionId,
+        target_price_id: PriceId,
+        target_amount: U128,
+    ) -> PromiseOrValue<SubscriptionPlanChangeOutcome> {
         self.assert_not_paused();
         let buyer = env::predecessor_account_id();
-
         let deposit = env::attached_deposit();
-        require!(
-            deposit.as_yoctonear() >= self.internal_get_config().min_lock_amount.as_yoctonear(),
-            "Attached NEAR is below the contract minimum lock amount (min_lock_amount)"
+        let inputs = self.checked_subscription_update_inputs(
+            &buyer,
+            &target_price_id,
+            target_amount,
+            &subscription_id,
+            None,
         );
 
-        let (sid, _sub, _new_price, product, _lock) =
-            self.checked_subscription_upgrade_inputs(&buyer, deposit, &new_price_id, None, None);
-        let sid = sid.expect("Subscription id is available when looked up by product");
-
-        let validator_id = product.validator_id.clone();
+        let validator_id = inputs.target_product.validator_id.clone();
         self.assert_validator_active_for_lock(&validator_id);
-
-        let _validator = self.require_validator_idle(&validator_id);
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            return PromiseOrValue::Value(self.commit_subscription_upgrade(
+            return PromiseOrValue::Value(self.commit_subscription_update_after_settle(
                 buyer,
                 deposit,
-                new_price_id,
-                sid,
+                target_price_id,
+                target_amount,
+                subscription_id,
                 validator_id,
             ));
         }
         #[cfg(target_arch = "wasm32")]
         {
+            self.require_enough_gas_for_epoch_settlement();
+            let _validator = self.require_validator_idle(&validator_id);
             return self
                 .promise_validator_per_epoch_settlement_then(
                     validator_id.clone(),
-                    UserAction::SubscriptionUpgrade {
+                    UserAction::SubscriptionUpdate {
                         validator_id,
                         buyer,
                         deposit,
-                        new_price_id,
-                        subscription_id: sid,
+                        target_price_id,
+                        target_amount,
+                        subscription_id,
                     },
                 )
                 .into();
         }
-    }
-
-    /// Schedule a lower tier for the **next** billing period (Phase A: applied at renewal; no automatic refund).
-    #[payable]
-    pub fn schedule_downgrade_subscription(&mut self, target_price_id: PriceId) {
-        assert_one_yocto();
-        self.assert_not_paused();
-        let buyer = env::predecessor_account_id();
-
-        let target = self.require_active_recurring_monthly_price(&target_price_id);
-
-        let (sid, mut sub) = self.require_subscription_owned_by(&buyer, &target.product_id);
-        require!(
-            target.product_id == sub.product_id,
-            "Price must belong to this subscription product"
-        );
-
-        let current = self.require_price(&sub.price_id);
-        require!(
-            target.amount.0 < current.amount.0,
-            "Target tier must have a lower catalog amount than current tier"
-        );
-
-        sub.pending_downgrade_price_id = Some(target_price_id.clone());
-        self.internal_set_subscription(sid, sub.clone());
-
-        crate::events::log_subscription_downgrade_scheduled(&buyer, &target_price_id);
     }
 
     // -------------------------------------------------------------------------
@@ -155,12 +170,8 @@ impl Contract {
         account_id: AccountId,
         product_id: ProductId,
     ) -> Option<Subscription> {
-        let sid = self
-            .subscription_by_account_product
-            .get(&(account_id, product_id.clone()))?
-            .clone();
-        self.internal_get_subscription(&sid)
-            .map(|sub| self.project_subscription_view_now(sub))
+        self.find_subscription_by_projected_product(&account_id, &product_id)
+            .map(|found| found.projected)
     }
 
     pub fn get_subscription_for_price(
@@ -171,26 +182,42 @@ impl Contract {
         let price = self.internal_get_price(&price_id)?;
         self.get_subscription_for_product(account_id, price.product_id.clone())
     }
+
+    pub fn get_subscriptions_for_account(
+        &self,
+        account_id: AccountId,
+        from_index: u64,
+        limit: u64,
+    ) -> Vec<Subscription> {
+        let ids = self.subscription_ids_for_account_view(&account_id);
+        self.collect_paginated(from_index, limit, ids.len() as u64, |index| {
+            ids.get(index as usize)
+                .and_then(|id| self.internal_get_subscription(id))
+                .map(|sub| self.project_subscription_view_now(sub))
+        })
+    }
 }
 
-// Epoch pipeline: subscription upgrade tail callback.
+// Epoch pipeline: subscription update tail callback.
 
 #[near]
 impl Contract {
-    /// **[Pipeline 5d]** Subscription upgrade after pre-user settlement (**4**).
+    /// **[Pipeline 5d]** Subscription update after pre-user settlement (**4**).
     #[private]
-    pub fn on_subscription_upgrade_after_settle(
+    pub fn on_subscription_update_after_settle(
         &mut self,
         buyer: AccountId,
         deposit: NearToken,
-        new_price_id: PriceId,
+        target_price_id: PriceId,
+        target_amount: U128,
         subscription_id: SubscriptionId,
         validator_id: ValidatorId,
-    ) -> PromiseOrValue<LockId> {
-        let lock_id = self.commit_subscription_upgrade(
+    ) -> PromiseOrValue<SubscriptionPlanChangeOutcome> {
+        let outcome = self.commit_subscription_update_after_settle(
             buyer,
             deposit,
-            new_price_id,
+            target_price_id,
+            target_amount,
             subscription_id,
             validator_id.clone(),
         );
@@ -198,9 +225,9 @@ impl Contract {
             &validator_id,
             "Validator pool must be busy after per-epoch settlement",
         );
-        // Pre-user settlement (**0–3**) already ran; new `pending_to_stake` from the upgrade
+        // Pre-user settlement (**0–3**) already ran; new `pending_to_stake` from the update
         // is queued for the next user action or `epoch_settle` (same as **5a** catalog mint).
-        PromiseOrValue::Value(lock_id)
+        PromiseOrValue::Value(outcome)
     }
 }
 
@@ -214,7 +241,159 @@ impl Contract {
         id: SubscriptionId,
         subscription: Subscription,
     ) {
+        let old = self.internal_get_subscription(&id);
+        if let Some(old) = old.as_ref() {
+            self.remove_pending_update_target_refs(old);
+        }
+        self.add_pending_update_target_refs(&subscription);
         self.subscriptions.insert(id, subscription.into());
+    }
+
+    pub(crate) fn internal_remove_subscription(&mut self, id: &SubscriptionId) {
+        if let Some(old) = self.internal_get_subscription(id) {
+            self.remove_pending_update_target_refs(&old);
+        }
+        self.subscriptions.remove(id.as_str());
+    }
+
+    fn add_pending_update_target_refs(&mut self, sub: &Subscription) {
+        let Some(price_id) = Self::pending_update_target_price_id(sub) else {
+            return;
+        };
+        Self::increment_count(&mut self.pending_update_target_price_counts, &price_id);
+        if let Some(price) = self.internal_get_price(&price_id) {
+            Self::increment_count(
+                &mut self.pending_update_target_product_counts,
+                &price.product_id,
+            );
+        }
+    }
+
+    fn remove_pending_update_target_refs(&mut self, sub: &Subscription) {
+        let Some(price_id) = Self::pending_update_target_price_id(sub) else {
+            return;
+        };
+        Self::decrement_count(&mut self.pending_update_target_price_counts, &price_id);
+        if let Some(price) = self.internal_get_price(&price_id) {
+            Self::decrement_count(
+                &mut self.pending_update_target_product_counts,
+                &price.product_id,
+            );
+        }
+    }
+
+    fn pending_update_target_price_id(sub: &Subscription) -> Option<PriceId> {
+        sub.pending_update
+            .as_ref()
+            .and_then(|pending| pending.target_price_id.clone())
+    }
+
+    fn increment_count<K>(counts: &mut LookupMap<K, u32>, key: &K)
+    where
+        K: Clone + Ord + BorshSerialize,
+    {
+        let next = counts.get(key).copied().unwrap_or(0).saturating_add(1);
+        counts.insert(key.clone(), next);
+    }
+
+    fn decrement_count<K>(counts: &mut LookupMap<K, u32>, key: &K)
+    where
+        K: Clone + Ord + BorshSerialize,
+    {
+        let Some(current) = counts.get(key).copied() else {
+            return;
+        };
+        if current <= 1 {
+            counts.remove(key);
+        } else {
+            counts.insert(key.clone(), current - 1);
+        }
+    }
+
+    pub(crate) fn add_subscription_to_account_index(
+        &mut self,
+        account_id: &AccountId,
+        subscription_id: &SubscriptionId,
+    ) {
+        let mut ids = self
+            .subscriptions_by_account
+            .get(account_id)
+            .cloned()
+            .unwrap_or_default();
+        if !ids.iter().any(|id| id == subscription_id) {
+            ids.push(subscription_id.clone());
+            self.subscriptions_by_account
+                .insert(account_id.clone(), ids);
+        }
+    }
+
+    pub(crate) fn add_subscription_to_global_index(&mut self, subscription_id: &SubscriptionId) {
+        if self.subscription_ids.iter().any(|id| id == subscription_id) {
+            return;
+        }
+        self.subscription_ids.push(subscription_id.clone());
+    }
+
+    pub(crate) fn remove_subscription_from_account_index(
+        &mut self,
+        account_id: &AccountId,
+        subscription_id: &SubscriptionId,
+    ) {
+        let Some(mut ids) = self.subscriptions_by_account.get(account_id).cloned() else {
+            return;
+        };
+        let before = ids.len();
+        ids.retain(|id| id != subscription_id);
+        if ids.len() != before {
+            self.subscriptions_by_account
+                .insert(account_id.clone(), ids);
+        }
+    }
+
+    pub(crate) fn remove_subscription_from_global_index(
+        &mut self,
+        subscription_id: &SubscriptionId,
+    ) {
+        let Some(index) = self
+            .subscription_ids
+            .iter()
+            .position(|id| id == subscription_id)
+        else {
+            return;
+        };
+        let Ok(index) = u32::try_from(index) else {
+            return;
+        };
+        self.subscription_ids.swap_remove(index);
+    }
+
+    pub(crate) fn assert_no_pending_update_references_price(&self, price_id: &PriceId) {
+        require!(
+            self.pending_update_target_price_counts
+                .get(price_id)
+                .copied()
+                .unwrap_or(0)
+                == 0,
+            "Cannot archive or delete this price while it is referenced by a pending subscription update"
+        );
+    }
+
+    pub(crate) fn assert_no_pending_update_references_product(&self, product_id: &ProductId) {
+        require!(
+            self.pending_update_target_product_counts
+                .get(product_id)
+                .copied()
+                .unwrap_or(0)
+                == 0,
+            "Cannot archive or delete this product while it is referenced by a pending subscription update"
+        );
+    }
+
+    fn subscription_ids_for_account_view(&self, account_id: &AccountId) -> Vec<SubscriptionId> {
+        self.subscriptions_by_account
+            .get(account_id)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Resolve `(account, product)` index, load subscription, verify caller ownership. Panics with stable user-facing messages.
@@ -223,17 +402,81 @@ impl Contract {
         buyer: &AccountId,
         product_id: &ProductId,
     ) -> (SubscriptionId, Subscription) {
-        let sid = self
+        let found = self
+            .find_subscription_by_projected_product(buyer, product_id)
+            .unwrap_or_else(|| env::panic_str("No subscription for this product; subscribe first"));
+        (found.subscription_id, found.stored)
+    }
+
+    pub(crate) fn find_subscription_by_projected_product(
+        &self,
+        buyer: &AccountId,
+        product_id: &ProductId,
+    ) -> Option<ProjectedSubscriptionLookup> {
+        if let Some(sid) = self
             .subscription_by_account_product
             .get(&(buyer.clone(), product_id.clone()))
             .cloned()
-            .unwrap_or_else(|| env::panic_str("No subscription for this product; subscribe first"));
-        let sub = self.require_subscription_by_id(&sid);
-        require!(
-            sub.account_id == *buyer,
-            "Only the subscription owner can perform this action"
-        );
-        (sid, sub)
+        {
+            let stored = self.require_subscription_by_id(&sid);
+            require!(
+                stored.account_id == *buyer,
+                "Only the subscription owner can perform this action"
+            );
+            let projected = self.project_subscription_view_now(stored.clone());
+            if projected.product_id == *product_id {
+                return Some(ProjectedSubscriptionLookup {
+                    subscription_id: sid,
+                    stored,
+                    projected,
+                });
+            }
+        }
+
+        self.subscription_ids_for_account_view(buyer)
+            .into_iter()
+            .find_map(|sid| {
+                let stored = self.require_subscription_by_id(&sid);
+                if stored.account_id != *buyer || stored.status != SubscriptionStatus::Active {
+                    return None;
+                }
+                let projected = self.project_subscription_view_now(stored.clone());
+                (projected.product_id == *product_id).then_some(ProjectedSubscriptionLookup {
+                    subscription_id: sid,
+                    stored,
+                    projected,
+                })
+            })
+    }
+
+    pub(crate) fn move_subscription_product_index(
+        &mut self,
+        buyer: &AccountId,
+        subscription_id: &SubscriptionId,
+        old_product_id: &ProductId,
+        new_product_id: &ProductId,
+    ) {
+        if old_product_id == new_product_id {
+            return;
+        }
+
+        let new_key = (buyer.clone(), new_product_id.clone());
+        if let Some(existing) = self.subscription_by_account_product.get(&new_key) {
+            require!(
+                existing == subscription_id,
+                "Subscription already exists for target product"
+            );
+        } else {
+            self.subscription_by_account_product
+                .insert(new_key, subscription_id.clone());
+        }
+
+        let old_key = (buyer.clone(), old_product_id.clone());
+        if let Some(existing) = self.subscription_by_account_product.get(&old_key) {
+            if existing == subscription_id {
+                self.subscription_by_account_product.remove(&old_key);
+            }
+        }
     }
 
     pub(crate) fn require_subscription_by_id(
@@ -264,47 +507,221 @@ impl Contract {
         );
     }
 
-    fn checked_subscription_upgrade_inputs(
+    pub(crate) fn validate_subscription_target_amount(&self, price: &Price, target_amount: U128) {
+        require!(
+            target_amount.0 >= price.amount.0,
+            "Target stake amount is below the price minimum"
+        );
+        if let Some(max_amount) = price.metadata.as_ref().and_then(|m| m.max_amount) {
+            require!(
+                target_amount.0 <= max_amount.0,
+                "Target stake amount is above the price maximum"
+            );
+        }
+    }
+
+    pub(crate) fn assert_product_not_reserved_by_pending_update(
         &self,
         buyer: &AccountId,
-        deposit: NearToken,
-        new_price_id: &PriceId,
-        subscription_id: Option<&SubscriptionId>,
-        expected_validator_id: Option<&ValidatorId>,
-    ) -> (Option<SubscriptionId>, Subscription, Price, Product, Lock) {
-        let (new_price, product) = self.get_active_price_and_product(new_price_id);
-        self.require_recurring_monthly_price(&new_price);
+        product_id: &ProductId,
+        allowed_subscription_id: Option<&SubscriptionId>,
+    ) {
+        let reserved = self
+            .subscription_ids_for_account_view(buyer)
+            .into_iter()
+            .filter(|sid| {
+                allowed_subscription_id
+                    .map(|allowed| sid != allowed)
+                    .unwrap_or(true)
+            })
+            .filter_map(|sid| self.internal_get_subscription(&sid))
+            .filter(|sub| sub.status == SubscriptionStatus::Active)
+            .filter_map(|sub| {
+                sub.pending_update
+                    .and_then(|pending| pending.target_price_id)
+            })
+            .filter_map(|target_price_id| self.internal_get_price(&target_price_id))
+            .any(|price| price.product_id == *product_id);
 
-        let (sid, sub) = match subscription_id {
-            Some(sid) => (None, self.require_subscription_owned_by_id(buyer, sid)),
-            None => {
-                let (sid, sub) = self.require_subscription_owned_by(buyer, &new_price.product_id);
-                (Some(sid), sub)
-            }
+        require!(
+            !reserved,
+            "Subscription already has a pending update for target product"
+        );
+    }
+
+    fn clear_pending_update(sub: &mut Subscription) {
+        sub.pending_update = None;
+    }
+
+    fn projected_subscription_window_from(&self, anchor_day: u8, mut start: u64) -> (U64, U64) {
+        let now = block_timestamp();
+        let mut end = add_months_stripe_style(anchor_day, 1, start);
+        while now >= end {
+            start = end;
+            end = add_months_stripe_style(anchor_day, 1, start);
+        }
+        (U64(start), U64(end))
+    }
+
+    pub(crate) fn apply_due_subscription_update(
+        &mut self,
+        subscription_id: &SubscriptionId,
+    ) -> bool {
+        let Some(stored) = self.internal_get_subscription(subscription_id) else {
+            return false;
         };
+        if stored.status != SubscriptionStatus::Active || stored.cancel_at_period_end {
+            return false;
+        }
+        let Some(pending) = stored.pending_update.clone() else {
+            return false;
+        };
+        let apply_ns = pending.apply_ns;
+        if block_timestamp() < apply_ns.0 {
+            return false;
+        }
+
+        let target_price = pending
+            .target_price_id
+            .as_ref()
+            .map(|target_price_id| self.require_price(target_price_id));
+        let target_product = target_price
+            .as_ref()
+            .map(|price| self.require_product(&price.product_id));
+        let old_product_id = stored.product_id.clone();
+        let new_product_id = target_product
+            .as_ref()
+            .map(|product| product.product_id.clone())
+            .unwrap_or_else(|| stored.product_id.clone());
+        let buyer = stored.account_id.clone();
+
+        if let Some(target_amount) = pending.target_amount {
+            #[cfg(target_arch = "wasm32")]
+            {
+                if let Some(lock) = self.internal_get_lock(&stored.last_lock_id) {
+                    let validator = self.require_validator(&lock.validator_id);
+                    require!(
+                        validator.last_settlement_epoch >= env::epoch_height(),
+                        "Pending stake decrease requires validator settlement before apply"
+                    );
+                }
+            }
+            self.apply_scheduled_stake_decrease_at_renewal(&buyer, &stored, target_amount);
+        }
+
+        let (period_start_ns, period_end_ns) =
+            self.projected_subscription_window_from(stored.anchor_day, apply_ns.0);
+
+        let mut updated = stored;
+        if let Some(target_price) = target_price.as_ref() {
+            updated.product_id = new_product_id.clone();
+            updated.price_id = target_price.price_id.clone();
+        }
+        updated.start_ns = period_start_ns;
+        updated.end_ns = period_end_ns;
+        Self::clear_pending_update(&mut updated);
+        self.sync_subscription_lock_window(&updated);
+        if old_product_id != new_product_id {
+            self.move_subscription_product_index(
+                &buyer,
+                subscription_id,
+                &old_product_id,
+                &new_product_id,
+            );
+        }
+        let final_price_id = updated.price_id.clone();
+        let last_lock_id = updated.last_lock_id.clone();
+        self.internal_set_subscription(subscription_id.clone(), updated);
+        if let (Some(mut target_price), Some(mut target_product)) = (target_price, target_product) {
+            target_price.usage_count = target_price.usage_count.saturating_add(1);
+            target_product.usage_count = target_product.usage_count.saturating_add(1);
+            self.internal_set_price(target_price.price_id.clone(), target_price);
+            self.internal_set_product(target_product.product_id.clone(), target_product);
+        }
+        let lock_amount = self
+            .internal_get_lock(&last_lock_id)
+            .map(|lock| lock.amount_near.as_yoctonear())
+            .unwrap_or_default();
+        crate::events::log_subscription_update(&buyer, &final_price_id, lock_amount);
+        true
+    }
+
+    fn sync_subscription_lock_window(&mut self, sub: &Subscription) {
+        let Some(mut lock) = self.internal_get_lock(&sub.last_lock_id) else {
+            return;
+        };
+        if lock.account_id != sub.account_id || lock.status != LockStatus::Active {
+            return;
+        }
+
+        Self::sync_lock_window_fields(&mut lock, sub);
+        self.internal_set_lock(lock.lock_id.clone(), lock);
+    }
+
+    fn sync_lock_window_fields(lock: &mut Lock, sub: &Subscription) {
+        lock.start_ns = sub.start_ns;
+        lock.end_ns = sub.end_ns;
+        if let OrderRef::Subscription {
+            subscription_id,
+            price_id,
+            period_start_ns,
+            period_end_ns,
+        } = &mut lock.order
+        {
+            if *subscription_id == sub.subscription_id {
+                *price_id = sub.price_id.clone();
+                *period_start_ns = sub.start_ns;
+                *period_end_ns = sub.end_ns;
+            }
+        }
+    }
+
+    fn checked_subscription_update_inputs(
+        &self,
+        buyer: &AccountId,
+        target_price_id: &PriceId,
+        target_amount: U128,
+        subscription_id: &SubscriptionId,
+        expected_validator_id: Option<&ValidatorId>,
+    ) -> SubscriptionUpdateInputs {
+        let (target_price, target_product) = self.get_active_price_and_product(target_price_id);
+        self.require_recurring_monthly_price(&target_price);
+        self.validate_subscription_target_amount(&target_price, target_amount);
+
+        let sub = self.require_subscription_owned_by_id(buyer, subscription_id);
         Self::assert_subscription_active(&sub);
+        if target_product.product_id != sub.product_id {
+            let target_key = (buyer.clone(), target_product.product_id.clone());
+            if let Some(existing) = self.subscription_by_account_product.get(&target_key) {
+                require!(
+                    existing == subscription_id,
+                    "Subscription already exists for target product"
+                );
+            }
+            self.assert_product_not_reserved_by_pending_update(
+                buyer,
+                &target_product.product_id,
+                Some(subscription_id),
+            );
+        }
         // Same virtual billing window as [`Contract::get_subscription`] / `get_subscription_for_product`.
         let sub = self.project_subscription_view_now(sub);
 
-        require!(
-            new_price.product_id == sub.product_id,
-            "Price must belong to this subscription product"
-        );
-        let old_price = self.require_price(&sub.price_id);
-        require!(
-            new_price.amount.0 > old_price.amount.0,
-            "New tier must have a higher catalog amount than current tier"
-        );
+        let current_price = self.require_price(&sub.price_id);
 
         let lock = self.require_subscription_lock_owned_by(&sub, buyer);
+        require!(
+            target_product.validator_id == lock.validator_id,
+            "Target product validator must match subscription lock validator"
+        );
         if let Some(expected) = expected_validator_id {
             require!(
-                product.validator_id == *expected,
-                "Catalog validator for this price does not match the pool used for this subscription upgrade"
+                target_product.validator_id == *expected,
+                "Catalog validator for this price does not match the pool used for this subscription update"
             );
             require!(
                 lock.validator_id == *expected,
-                "Subscription lock validator does not match the upgrade validator"
+                "Subscription lock validator does not match the update validator"
             );
         }
 
@@ -313,131 +730,317 @@ impl Contract {
             now < sub.end_ns.0,
             "Current period already ended; renew instead"
         );
-        let rem_ns = u128::from(sub.end_ns.0.saturating_sub(now));
-        let total_locked = lock
-            .amount_near
-            .as_yoctonear()
-            .saturating_add(deposit.as_yoctonear());
-        check_near_price_lock(&new_price, total_locked, rem_ns)
-            .unwrap_or_else(|e| env::panic_str(e));
-
-        (sid, sub, new_price, product, lock)
+        SubscriptionUpdateInputs {
+            sub,
+            current_price,
+            target_price,
+            target_product,
+            lock,
+        }
     }
 
-    pub(crate) fn commit_subscription_upgrade(
+    fn build_subscription_update_decision(
+        &self,
+        inputs: &SubscriptionUpdateInputs,
+        target_price_id: &PriceId,
+        target_amount: U128,
+    ) -> SubscriptionUpdateDecision {
+        let current_amount = inputs.lock.amount_near.as_yoctonear();
+        let target_amount_near = NearToken::from_yoctonear(target_amount.0);
+        let plan_changes = *target_price_id != inputs.sub.price_id;
+        let plan_direction = inputs
+            .target_price
+            .amount
+            .0
+            .cmp(&inputs.current_price.amount.0);
+        let stake_direction = target_amount.0.cmp(&current_amount);
+        let rem_ns = u128::from(inputs.sub.end_ns.0.saturating_sub(block_timestamp()));
+
+        // Plan and stake amount can move independently: e.g. upgrade the plan now
+        // while scheduling a lower stake amount for the next billing period.
+        let immediate_stake_increase = (stake_direction == std::cmp::Ordering::Greater)
+            .then(|| NearToken::from_yoctonear(target_amount.0.saturating_sub(current_amount)));
+        let pending_stake_decrease_target =
+            (stake_direction == std::cmp::Ordering::Less).then_some(target_amount_near);
+
+        let immediate_plan_change = if !plan_changes {
+            false
+        } else {
+            match plan_direction {
+                std::cmp::Ordering::Greater => {
+                    if pending_stake_decrease_target.is_some() {
+                        self.price_supports_amount_for_duration(
+                            &inputs.target_price,
+                            current_amount,
+                            rem_ns,
+                        )
+                    } else {
+                        true
+                    }
+                }
+                std::cmp::Ordering::Equal => {
+                    if pending_stake_decrease_target.is_some() {
+                        self.price_supports_amount_for_duration(
+                            &inputs.target_price,
+                            current_amount,
+                            rem_ns,
+                        )
+                    } else {
+                        true
+                    }
+                }
+                std::cmp::Ordering::Less => false,
+            }
+        };
+        let pending_plan_change = plan_changes && !immediate_plan_change;
+
+        if immediate_plan_change || immediate_stake_increase.is_some() {
+            let immediate_price = if immediate_plan_change {
+                &inputs.target_price
+            } else {
+                &inputs.current_price
+            };
+            let immediate_amount = if immediate_stake_increase.is_some() {
+                target_amount.0
+            } else {
+                current_amount
+            };
+            check_near_price_lock(immediate_price, immediate_amount, rem_ns)
+                .unwrap_or_else(|e| env::panic_str(e));
+        }
+
+        if pending_plan_change || pending_stake_decrease_target.is_some() {
+            check_near_price_lock(&inputs.target_price, target_amount.0, AVG_MONTH_NS)
+                .unwrap_or_else(|e| env::panic_str(e));
+        }
+
+        SubscriptionUpdateDecision {
+            immediate_plan_change,
+            immediate_stake_increase,
+            pending_plan_change,
+            pending_stake_decrease_target,
+            pending_apply_ns: (pending_plan_change || pending_stake_decrease_target.is_some())
+                .then_some(inputs.sub.end_ns),
+        }
+    }
+
+    fn price_supports_amount_for_duration(
+        &self,
+        price: &Price,
+        amount: u128,
+        duration_ns: u128,
+    ) -> bool {
+        if amount < price.amount.0 {
+            return false;
+        }
+        if let Some(max_amount) = price.metadata.as_ref().and_then(|m| m.max_amount) {
+            if amount > max_amount.0 {
+                return false;
+            }
+        }
+        check_near_price_lock(price, amount, duration_ns).is_ok()
+    }
+
+    fn subscription_update_outcome(
+        kind: &str,
+        subscription_id: SubscriptionId,
+        target_price_id: PriceId,
+        target_amount: U128,
+        lock_id: Option<LockId>,
+        decision: &SubscriptionUpdateDecision,
+        current_amount: u128,
+    ) -> SubscriptionPlanChangeOutcome {
+        SubscriptionPlanChangeOutcome {
+            kind: kind.to_string(),
+            subscription_id,
+            target_price_id,
+            target_amount,
+            lock_id,
+            immediate_plan_change: decision.immediate_plan_change,
+            immediate_stake_increase: decision
+                .immediate_stake_increase
+                .map(|amount| U128(amount.as_yoctonear())),
+            pending_plan_change: decision.pending_plan_change,
+            pending_stake_decrease: decision
+                .pending_stake_decrease_target
+                .map(|target| U128(current_amount.saturating_sub(target.as_yoctonear()))),
+            pending_apply_ns: decision.pending_apply_ns,
+        }
+    }
+
+    fn subscription_update_kind(decision: &SubscriptionUpdateDecision) -> &'static str {
+        match (
+            decision.has_immediate_change(),
+            decision.has_pending_change(),
+        ) {
+            (false, false) => "no_op",
+            (true, false) => "changed_immediately",
+            (false, true) => "scheduled_for_period_end",
+            (true, true) => "changed_immediately_and_scheduled_for_period_end",
+        }
+    }
+
+    fn apply_subscription_update_state(
+        target_price_id: &PriceId,
+        decision: &SubscriptionUpdateDecision,
+        sub: &mut Subscription,
+        target_price: &mut Price,
+        target_product: &mut Product,
+        lock: &mut Lock,
+    ) -> (ProductId, ProductId) {
+        let old_product_id = sub.product_id.clone();
+        let new_product_id = target_price.product_id.clone();
+        Self::clear_pending_update(sub);
+
+        if decision.immediate_plan_change {
+            lock.order = OrderRef::Subscription {
+                subscription_id: sub.subscription_id.clone(),
+                price_id: target_price_id.clone(),
+                period_start_ns: sub.start_ns,
+                period_end_ns: sub.end_ns,
+            };
+            sub.product_id = new_product_id.clone();
+            sub.price_id = target_price_id.clone();
+            target_price.usage_count = target_price.usage_count.saturating_add(1);
+            target_product.usage_count = target_product.usage_count.saturating_add(1);
+        }
+
+        if decision.has_pending_change() {
+            // Deferred changes replace any earlier pending update and become effective
+            // at the current billing boundary.
+            sub.pending_update = Some(PendingSubscriptionUpdate {
+                target_price_id: decision
+                    .pending_plan_change
+                    .then_some(target_price_id.clone()),
+                target_amount: decision.pending_stake_decrease_target,
+                apply_ns: decision.pending_apply_ns.expect("pending apply timestamp"),
+            });
+        }
+
+        Self::sync_lock_window_fields(lock, sub);
+        (old_product_id, new_product_id)
+    }
+
+    fn commit_subscription_update_after_settle(
         &mut self,
         buyer: AccountId,
         deposit: NearToken,
-        new_price_id: PriceId,
+        target_price_id: PriceId,
+        target_amount: U128,
         subscription_id: SubscriptionId,
         expected_validator_id: ValidatorId,
-    ) -> LockId {
-        let (_sid, mut sub, mut new_price, mut product, mut lock) = self
-            .checked_subscription_upgrade_inputs(
-                &buyer,
-                deposit,
-                &new_price_id,
-                Some(&subscription_id),
-                Some(&expected_validator_id),
+    ) -> SubscriptionPlanChangeOutcome {
+        self.apply_due_subscription_update(&subscription_id);
+        let inputs = self.checked_subscription_update_inputs(
+            &buyer,
+            &target_price_id,
+            target_amount,
+            &subscription_id,
+            Some(&expected_validator_id),
+        );
+        let decision =
+            self.build_subscription_update_decision(&inputs, &target_price_id, target_amount);
+        let SubscriptionUpdateInputs {
+            mut sub,
+            mut target_price,
+            mut target_product,
+            mut lock,
+            ..
+        } = inputs;
+        let current_amount = lock.amount_near.as_yoctonear();
+
+        // The callback is the single mutation point after validator settlement.
+        // It revalidates current state, applies stake increases if needed, then
+        // commits plan/pending-update changes and storage indexes together.
+        let lock_id_out = if let Some(expected_delta) = decision.immediate_stake_increase {
+            require!(
+                deposit.as_yoctonear() == expected_delta.as_yoctonear(),
+                "Attached NEAR must equal the target stake increase"
+            );
+            require!(
+                deposit.as_yoctonear() >= self.internal_get_config().min_lock_amount.as_yoctonear(),
+                "Attached NEAR is below the contract minimum lock amount (min_lock_amount)"
             );
 
-        let add_shares = self.internal_stake(&buyer, &expected_validator_id, deposit);
-
-        lock.amount_near = lock
-            .amount_near
-            .checked_add(deposit)
-            .expect("lock amount_near overflow");
-        lock.shares = U128(lock.shares.0.saturating_add(add_shares));
-        lock.order = OrderRef::Subscription {
-            subscription_id: sub.subscription_id.clone(),
-            price_id: new_price_id.clone(),
-            period_start_ns: sub.start_ns,
-            period_end_ns: sub.end_ns,
+            let add_shares = self.internal_stake(&buyer, &expected_validator_id, deposit);
+            require!(
+                add_shares > 0,
+                "Stake increase must mint at least one share"
+            );
+            lock.amount_near = lock
+                .amount_near
+                .checked_add(deposit)
+                .expect("lock amount_near overflow");
+            lock.shares = U128(lock.shares.0.saturating_add(add_shares));
+            Some(lock.lock_id.clone())
+        } else {
+            require!(
+                deposit.as_yoctonear() == 1,
+                "Requires attached deposit of exactly 1 yoctoNEAR"
+            );
+            None
         };
 
-        sub.price_id = new_price_id.clone();
-        new_price.usage_count = new_price.usage_count.saturating_add(1);
-        product.usage_count = product.usage_count.saturating_add(1);
-
-        let lock_id_out = lock.lock_id.clone();
-        self.internal_set_lock(lock_id_out.clone(), lock);
-        self.internal_set_subscription(subscription_id, sub);
-        self.internal_set_price(new_price.price_id.clone(), new_price);
-        self.internal_set_product(product.product_id.clone(), product);
-
-        crate::events::log_subscription_upgrade(&buyer, &new_price_id);
-        crate::events::log_lock(lock_id_out.as_str(), &buyer);
-
-        lock_id_out
-    }
-
-    /// At subscription renewal commit: apply scheduled downgrade proration from **stored** subscription
-    /// (completed period + `last_lock_id`), then clear `pending_downgrade_price_id` on `subscription`.
-    ///
-    /// Idempotent: if storage already has no pending downgrade, returns without mutating locks.
-    pub(crate) fn apply_pending_downgrade_before_renewal_lock(
-        &mut self,
-        buyer: &AccountId,
-        subscription_id: &SubscriptionId,
-        subscription: &mut Subscription,
-    ) {
-        // First subscribe persists the subscription only at the end of `commit_catalog_lock`.
-        let Some(stored) = self.internal_get_subscription(subscription_id) else {
-            return;
-        };
-        let Some(low_id) = stored.pending_downgrade_price_id.clone() else {
-            return;
-        };
-        let completed_period_ns = u128::from(stored.end_ns.0.saturating_sub(stored.start_ns.0));
-        let high_price = self.require_price(&stored.price_id);
-        let low_price = self.require_price(&low_id);
-
-        if completed_period_ns > 0 {
-            self.apply_downgrade_prorate_at_renewal(
-                buyer,
-                &stored,
-                &high_price,
-                &low_price,
-                completed_period_ns,
+        let (old_product_id, new_product_id) = Self::apply_subscription_update_state(
+            &target_price_id,
+            &decision,
+            &mut sub,
+            &mut target_price,
+            &mut target_product,
+            &mut lock,
+        );
+        self.internal_set_lock(lock.lock_id.clone(), lock);
+        if decision.immediate_plan_change {
+            self.move_subscription_product_index(
+                &buyer,
+                &subscription_id,
+                &old_product_id,
+                &new_product_id,
             );
         }
+        self.internal_set_subscription(subscription_id.clone(), sub);
+        if decision.immediate_plan_change {
+            self.internal_set_price(target_price.price_id.clone(), target_price);
+            self.internal_set_product(target_product.product_id.clone(), target_product);
+        }
 
-        subscription.price_id = low_id.clone();
-        subscription.pending_downgrade_price_id = None;
+        crate::events::log_subscription_update(&buyer, &target_price_id, target_amount.0);
+        if let Some(lock_id) = lock_id_out.as_ref() {
+            crate::events::log_lock(lock_id.as_str(), &buyer);
+        }
 
-        // Clear pending downgrade in storage before the renewal lock is minted so a failed async
-        // pipeline cannot apply the same proration again on retry.
-        let mut stored_update = stored;
-        stored_update.price_id = low_id;
-        stored_update.pending_downgrade_price_id = None;
-        self.internal_set_subscription(subscription_id.clone(), stored_update);
+        let kind = Self::subscription_update_kind(&decision);
+        Self::subscription_update_outcome(
+            kind,
+            subscription_id,
+            target_price_id,
+            target_amount,
+            lock_id_out,
+            &decision,
+            current_amount,
+        )
     }
 
-    /// Phase B: at scheduled downgrade renewal, release catalog **tier-gap** stake (min high − min low for
-    /// the completed period) as shares → same unstake queue as [`crate::unlock::Contract::unlock`].
-    pub(crate) fn apply_downgrade_prorate_at_renewal(
+    /// At scheduled decrease renewal, release surplus stake from the completed subscription lock
+    /// as shares → same unstake queue as [`crate::unlock::Contract::unlock`].
+    pub(crate) fn apply_scheduled_stake_decrease_at_renewal(
         &mut self,
         buyer: &AccountId,
         sub: &Subscription,
-        high_price: &Price,
-        low_price: &Price,
-        completed_period_ns: u128,
+        target_amount: NearToken,
     ) {
-        if completed_period_ns == 0 {
-            return;
-        }
-        let min_h = min_locked_yocto_for_duration(high_price, completed_period_ns);
-        let min_l = min_locked_yocto_for_duration(low_price, completed_period_ns);
-        let surplus_target = min_h.saturating_sub(min_l);
-        if surplus_target == 0 {
-            return;
-        }
-
         let mut lock = match self.internal_get_lock(&sub.last_lock_id) {
             Some(l) => l,
             None => return,
         };
         if &lock.account_id != buyer || lock.status != LockStatus::Active {
+            return;
+        }
+        let surplus_target = lock
+            .amount_near
+            .as_yoctonear()
+            .saturating_sub(target_amount.as_yoctonear());
+        if surplus_target == 0 {
             return;
         }
 
@@ -471,18 +1074,37 @@ impl Contract {
         crate::events::log_subscription_downgrade_prorate(buyer, &sub.product_id, near_amt);
     }
 
-    fn project_subscription_view_now(&self, mut sub: Subscription) -> Subscription {
+    pub(crate) fn project_subscription_view_now(&self, mut sub: Subscription) -> Subscription {
         if sub.status != SubscriptionStatus::Active || sub.cancel_at_period_end {
             return sub;
         }
-        let now = block_timestamp();
-        while now >= sub.end_ns.0 {
-            let next_start = sub.end_ns.0;
-            let next_end = add_months_stripe_style(sub.anchor_day, 1, next_start);
-            sub.start_ns = U64(next_start);
-            sub.end_ns = U64(next_end);
+
+        let mut projection_start_ns = sub.start_ns.0;
+        if let Some(pending) = sub.pending_update.clone() {
+            if block_timestamp() >= pending.apply_ns.0 {
+                projection_start_ns = pending.apply_ns.0;
+                self.project_due_update_fields(&mut sub, &pending);
+            }
         }
+
+        let (start_ns, end_ns) =
+            self.projected_subscription_window_from(sub.anchor_day, projection_start_ns);
+        sub.start_ns = start_ns;
+        sub.end_ns = end_ns;
         sub
+    }
+
+    fn project_due_update_fields(
+        &self,
+        sub: &mut Subscription,
+        pending: &PendingSubscriptionUpdate,
+    ) {
+        if let Some(target_price_id) = pending.target_price_id.clone() {
+            let target_price = self.require_price(&target_price_id);
+            sub.product_id = target_price.product_id;
+            sub.price_id = target_price_id;
+        }
+        Self::clear_pending_update(sub);
     }
 }
 

@@ -22,7 +22,7 @@ fn first_lock_fails_if_storage_below_min_plus_per_lock() {
 
     let dur = c.get_config().min_lock_duration_ns.0.saturating_add(1);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    c.lock_for_product(Some(price_id), U64(dur), None);
+    c.lock(Some(price_id), None, Some(U64(dur)));
 }
 
 #[test]
@@ -39,7 +39,7 @@ fn first_lock_succeeds_with_sufficient_combined_storage() {
 
     let dur = c.get_config().min_lock_duration_ns.0.saturating_add(1);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    let _ = c.lock_for_product(Some(price_id), U64(dur), None);
+    let _ = c.lock(Some(price_id), None, Some(U64(dur)));
 }
 
 #[test]
@@ -57,11 +57,11 @@ fn third_lock_fails_when_prepaid_storage_insufficient_for_three_locks() {
 
     let dur = c.get_config().min_lock_duration_ns.0.saturating_add(1);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    let _ = c.lock_for_product(Some(price_id.clone()), U64(dur), None);
+    let _ = c.lock(Some(price_id.clone()), None, Some(U64(dur)));
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    let _ = c.lock_for_product(Some(price_id.clone()), U64(dur), None);
+    let _ = c.lock(Some(price_id.clone()), None, Some(U64(dur)));
 
     // Required for a third lock: 100m + 50m × 3 = 250m; only 200m prepaid.
     testing_env!(ctx(acct(BUYER), NearToken::from_near(50)));
-    c.lock_for_product(Some(price_id), U64(dur), None);
+    c.lock(Some(price_id), None, Some(U64(dur)));
 }
