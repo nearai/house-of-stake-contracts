@@ -78,6 +78,7 @@ async fn staking_epoch_settle_fast_path_succeeds_after_lock_consumed_slot()
 
     buyer
         .call(staking.id(), "storage_deposit")
+        .args_json(json!({}))
         .deposit(NearToken::from_millinear(500))
         .gas(WsGas::from_tgas(50))
         .transact()
@@ -135,6 +136,7 @@ async fn staking_two_locks_aggregate_then_epoch_settle_next_epoch_clears_pending
     for buyer in [&buyer_a, &buyer_b] {
         buyer
             .call(staking.id(), "storage_deposit")
+            .args_json(json!({}))
             .deposit(NearToken::from_millinear(500))
             .gas(WsGas::from_tgas(50))
             .transact()
@@ -230,6 +232,7 @@ async fn staking_pause_validator_blocks_new_lock() -> Result<(), Box<dyn std::er
 
     buyer
         .call(staking.id(), "storage_deposit")
+        .args_json(json!({}))
         .deposit(NearToken::from_millinear(500))
         .gas(WsGas::from_tgas(50))
         .transact()
@@ -282,6 +285,7 @@ async fn staking_contract_pause_blocks_epoch_settle() -> Result<(), Box<dyn std:
 
     buyer
         .call(staking.id(), "storage_deposit")
+        .args_json(json!({}))
         .deposit(NearToken::from_millinear(500))
         .gas(WsGas::from_tgas(50))
         .transact()
@@ -346,6 +350,7 @@ async fn staking_withdraw_succeeds_after_unlock_and_epoch_gates()
 
     buyer
         .call(staking.id(), "storage_deposit")
+        .args_json(json!({}))
         .deposit(NearToken::from_millinear(500))
         .gas(WsGas::from_tgas(50))
         .transact()
@@ -433,6 +438,7 @@ async fn staking_withdraw_fails_when_pool_withdraw_bucket_not_ready()
 
     buyer
         .call(staking.id(), "storage_deposit")
+        .args_json(json!({}))
         .deposit(NearToken::from_millinear(500))
         .gas(WsGas::from_tgas(50))
         .transact()
@@ -655,6 +661,7 @@ async fn staking_validator_total_staked_balance_matches_pool_after_lock()
 
     buyer
         .call(staking.id(), "storage_deposit")
+        .args_json(json!({}))
         .deposit(NearToken::from_millinear(500))
         .gas(WsGas::from_tgas(50))
         .transact()
