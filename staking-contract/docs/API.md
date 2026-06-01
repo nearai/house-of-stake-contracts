@@ -95,6 +95,7 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 |--------|--------|---------|---------|-------------|
 | `pay` | Buyer | **Attach exact NEAR price × quantity** | `PurchaseId` | Direct one-off payment for `price_id` or a product default price. Requires an active one-off price with no billing period, creates a `pay_*` purchase record, increments product/price usage, and accrues validator revenue. Does not create a lock or touch pool staking. |
 | `withdraw_revenue` | Validator owner | **1 yocto** | `Promise` | `validator_id`. Verifies ownership through pool `get_owner_id()`, then transfers all direct-payment revenue for that validator to the validator owner. |
+| `get_revenue_balance_for_validator` | Anyone | 0 | `NearToken` | `validator_id`. Returns currently withdrawable direct-payment revenue for the validator. |
 
 ---
 

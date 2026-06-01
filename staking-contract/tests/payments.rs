@@ -41,10 +41,6 @@ fn pay_one_off_happy_path_records_purchase_and_revenue() {
         c.get_revenue_balance_for_validator(acct(POOL)),
         NearToken::from_yoctonear(3)
     );
-    assert_eq!(
-        c.get_revenue_balance_for_product(purchase.product_id),
-        NearToken::from_yoctonear(3)
-    );
     assert!(c.get_lock(purchase_id).is_none());
 
     let price = c.get_price(price_id).expect("price");

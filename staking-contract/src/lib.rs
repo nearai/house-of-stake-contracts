@@ -51,7 +51,6 @@ enum StorageKeys {
     PurchasesByProduct,
     UserPurchaseCount,
     RevenueByValidator,
-    RevenueByProduct,
 }
 
 #[derive(PanicOnDefault)]
@@ -98,8 +97,6 @@ pub struct Contract {
     pub user_purchase_count: LookupMap<AccountId, u32>,
     /// Withdrawable direct-payment revenue aggregated by validator pool account.
     pub revenue_by_validator: LookupMap<ValidatorId, NearToken>,
-    /// Direct-payment revenue aggregated by product for accounting views.
-    pub revenue_by_product: LookupMap<ProductId, NearToken>,
     /// Secondary index: `(subscriber, product_id)` → `subscription_id` for at-most-one subscription per product per account.
     pub subscription_by_account_product: LookupMap<(AccountId, ProductId), SubscriptionId>,
     /// Secondary index: `subscriber` → owned subscription ids. Used for account-level listing and
@@ -140,7 +137,6 @@ impl Contract {
             purchases_by_product: LookupMap::new(StorageKeys::PurchasesByProduct),
             user_purchase_count: LookupMap::new(StorageKeys::UserPurchaseCount),
             revenue_by_validator: LookupMap::new(StorageKeys::RevenueByValidator),
-            revenue_by_product: LookupMap::new(StorageKeys::RevenueByProduct),
             subscription_by_account_product: LookupMap::new(
                 StorageKeys::SubscriptionByAccountProduct,
             ),

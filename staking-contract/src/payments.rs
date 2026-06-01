@@ -88,7 +88,6 @@ impl Contract {
         product.usage_count = product.usage_count.saturating_add(1);
 
         self.add_revenue_to_validator(&product.validator_id, paid);
-        self.add_revenue_to_product(&product.product_id, paid);
 
         self.internal_set_price(price.price_id.clone(), price.clone());
         self.internal_set_product(product.product_id.clone(), product.clone());
@@ -188,13 +187,6 @@ impl Contract {
             .copied()
             .unwrap_or_else(|| NearToken::from_yoctonear(0))
     }
-
-    pub fn get_revenue_balance_for_product(&self, product_id: ProductId) -> NearToken {
-        self.revenue_by_product
-            .get(&product_id)
-            .copied()
-            .unwrap_or_else(|| NearToken::from_yoctonear(0))
-    }
 }
 
 impl Contract {
@@ -250,17 +242,5 @@ impl Contract {
             .checked_add(amount)
             .expect("Validator revenue overflow; reduce payment amount");
         self.revenue_by_validator.insert(validator_id.clone(), next);
-    }
-
-    fn add_revenue_to_product(&mut self, product_id: &ProductId, amount: NearToken) {
-        let current = self
-            .revenue_by_product
-            .get(product_id)
-            .copied()
-            .unwrap_or_else(|| NearToken::from_yoctonear(0));
-        let next = current
-            .checked_add(amount)
-            .expect("Product revenue overflow; reduce payment amount");
-        self.revenue_by_product.insert(product_id.clone(), next);
     }
 }

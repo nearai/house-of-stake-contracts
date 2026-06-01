@@ -56,7 +56,6 @@ pub purchases_by_account: LookupMap<AccountId, Vec<PurchaseId>>,
 pub purchases_by_product: LookupMap<ProductId, Vec<PurchaseId>>,
 pub user_purchase_count: LookupMap<AccountId, u32>,
 pub revenue_by_validator: LookupMap<ValidatorId, NearToken>,
-pub revenue_by_product: LookupMap<ProductId, NearToken>,
 ```
 
 Add corresponding `StorageKeys`.
@@ -113,7 +112,7 @@ Behavior:
 - Append indexes for global, account, and product purchase lookup.
 - Increment `user_purchase_count`.
 - Increment `Product.usage_count` and `Price.usage_count`.
-- Increase withdrawable direct-payment revenue for `product.validator_id` and `product_id`.
+- Increase withdrawable direct-payment revenue for `product.validator_id`.
 - Return `purchase_id`.
 
 ### Revenue Withdrawal
@@ -155,10 +154,9 @@ Add views:
 
 ```rust
 pub fn get_revenue_balance_for_validator(&self, validator_id: ValidatorId) -> NearToken
-pub fn get_revenue_balance_for_product(&self, product_id: ProductId) -> NearToken
 ```
 
-Keep `revenue_by_product` as an accounting view only in v1. Withdrawal is validator-level so the verified validator owner can withdraw aggregate revenue for all products attached to that validator.
+Withdrawal is validator-level so the verified validator owner can withdraw aggregate revenue for all products attached to that validator. The contract does not store cumulative product revenue totals; product-level history can be derived from purchase records.
 
 ### Views
 
@@ -243,12 +241,11 @@ Add contract tests for:
 - Required storage increases after each purchase.
 - `get_purchase` returns the stored purchase.
 - Account and product purchase list views paginate correctly.
-- `pay` increases validator and product revenue balances.
+- `pay` increases the validator revenue balance.
 - `withdraw_revenue` rejects non-owners through the callback authorization path.
-- `withdraw_revenue` transfers full balance when `amount` is omitted.
 - `withdraw_revenue` transfers the full validator revenue balance.
-- `withdraw_revenue` rejects zero or over-balance amounts.
-- Revenue withdrawal emits `revenue_withdraw` and leaves purchase records unchanged.
+- `withdraw_revenue` rejects zero validator revenue balance.
+- Revenue withdrawal emits `revenue_withdraw`, clears the validator revenue balance, and leaves purchase records unchanged.
 - Existing `lock` one-off and subscription tests continue to pass.
 
 ## Assumptions
