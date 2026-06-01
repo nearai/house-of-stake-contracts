@@ -3,61 +3,138 @@ use near_sdk::{NearToken, Promise, assert_one_yocto, env, near, require};
 
 #[near]
 impl Contract {
-    /// NEP-145-style: attach NEAR to register an account for locks and withdrawals.
-    /// **Storage:** [`crate::config::Config::min_storage_deposit`] +
-    /// [`crate::config::Config::per_lock_storage_stake`] × [`crate::Contract::user_lock_count`] (locks ever
-    /// created; not decremented on unlock) +
-    /// [`crate::config::Config::per_purchase_storage_stake`] × [`crate::Contract::user_purchase_count`].
-    #[payable]
-    pub fn storage_deposit(&mut self) {
-        self.assert_not_paused();
-        let attached = env::attached_deposit();
-        require!(attached.as_yoctonear() > 0, "Attach NEAR for storage");
-        let depositor = env::predecessor_account_id();
-        let mut account = self.internal_get_account(&depositor).unwrap_or_default();
-        account.storage_deposit = account
-            .storage_deposit
-            .checked_add(attached)
-            .expect("Storage deposit overflow; reduce the attached amount");
-        self.internal_set_account(depositor, account);
+    pub fn storage_balance_bounds(&self) -> StorageBalanceBounds {
+        StorageBalanceBounds {
+            min: self.internal_get_config().min_storage_deposit,
+            max: None,
+        }
     }
 
-    /// Withdraw prepaid storage above [`crate::config::Config::min_storage_deposit`].
+    pub fn storage_balance_of(&self, account_id: AccountId) -> Option<StorageBalance> {
+        self.internal_storage_balance_of(&account_id)
+    }
+
+    /// NEP-145: attach NEAR to register or top up prepaid storage.
+    ///
+    /// Storage is retained as the base registration deposit plus configured per-lock and
+    /// per-purchase surcharges for records created by the account.
     #[payable]
-    pub fn storage_withdraw(&mut self, amount: NearToken) -> Promise {
+    pub fn storage_deposit(
+        &mut self,
+        account_id: Option<AccountId>,
+        registration_only: Option<bool>,
+    ) -> StorageBalance {
+        self.assert_not_paused();
+        let attached = env::attached_deposit();
+        let predecessor = env::predecessor_account_id();
+        let account_id = account_id.unwrap_or_else(|| predecessor.clone());
+        let registration_only = registration_only.unwrap_or(false);
+
+        let current = self.internal_get_account(&account_id);
+        let current_total = current
+            .as_ref()
+            .map(|account| account.storage_deposit.as_yoctonear())
+            .unwrap_or(0);
+        let min = self.storage_balance_bounds().min.as_yoctonear();
+
+        let accepted_yocto = if registration_only {
+            min.saturating_sub(current_total)
+                .min(attached.as_yoctonear())
+        } else {
+            require!(attached.as_yoctonear() > 0, "Attach NEAR for storage");
+            attached.as_yoctonear()
+        };
+
+        let new_total = current_total
+            .checked_add(accepted_yocto)
+            .expect("Storage deposit overflow; reduce the attached amount");
+        require!(
+            new_total >= min,
+            "Attached deposit is less than the minimum storage balance"
+        );
+
+        let mut account = current.unwrap_or_default();
+        account.storage_deposit = NearToken::from_yoctonear(new_total);
+        self.internal_set_account(account_id.clone(), account);
+
+        let refund_yocto = attached.as_yoctonear().saturating_sub(accepted_yocto);
+        if refund_yocto > 0 {
+            Promise::new(predecessor).transfer(NearToken::from_yoctonear(refund_yocto));
+        }
+
+        self.internal_storage_balance_of(&account_id)
+            .expect("Account was just registered")
+    }
+
+    /// NEP-145: withdraw available prepaid storage.
+    #[payable]
+    pub fn storage_withdraw(&mut self, amount: Option<NearToken>) -> StorageBalance {
         assert_one_yocto();
         self.assert_not_paused();
-        require!(
-            amount.as_yoctonear() > 0,
-            "Withdraw amount must be greater than zero"
-        );
 
         let account_id = env::predecessor_account_id();
         let mut account = self
             .internal_get_account(&account_id)
             .expect("Account not registered; call storage_deposit first");
 
-        let storage_yocto = account.storage_deposit.as_yoctonear();
-        // Never withdraw more than prepaid: avoids transferring more than recorded storage when
-        // `min_storage_deposit` is zero or small (do not rely on saturating math alone).
-        require!(
-            amount.as_yoctonear() <= storage_yocto,
-            "Withdraw exceeds prepaid storage"
-        );
+        let available_yocto = self.available_storage_yocto(&account_id, &account);
+        let withdraw_yocto = match amount {
+            Some(amount) => {
+                require!(
+                    amount.as_yoctonear() > 0,
+                    "Withdraw amount must be greater than zero"
+                );
+                require!(
+                    amount.as_yoctonear() <= available_yocto,
+                    "Withdraw exceeds available storage"
+                );
+                amount.as_yoctonear()
+            }
+            None => available_yocto,
+        };
 
-        let required_yocto = self.required_storage_deposit_yocto(&account_id, 0, 0);
-        let after = storage_yocto
-            .checked_sub(amount.as_yoctonear())
+        if withdraw_yocto == 0 {
+            return self
+                .internal_storage_balance_of(&account_id)
+                .expect("Registered account must have a storage balance");
+        }
+
+        account.storage_deposit = account
+            .storage_deposit
+            .checked_sub(NearToken::from_yoctonear(withdraw_yocto))
             .expect("Internal error: storage withdraw amount was not bounded correctly");
-        require!(
-            after >= required_yocto,
-            "Must retain required storage (min + per-record stake)"
-        );
-
-        account.storage_deposit = NearToken::from_yoctonear(after);
         self.internal_set_account(account_id.clone(), account);
 
-        Promise::new(account_id).transfer(amount)
+        Promise::new(account_id.clone()).transfer(NearToken::from_yoctonear(withdraw_yocto));
+
+        self.internal_storage_balance_of(&account_id)
+            .expect("Registered account must have a storage balance")
+    }
+
+    /// NEP-145: unregister an account when no per-record storage is retained.
+    ///
+    /// `force=true` is intentionally rejected because later claim/withdraw paths need account
+    /// registration to remain present while locks, purchases, or subscriptions are retained.
+    #[payable]
+    pub fn storage_unregister(&mut self, force: Option<bool>) -> bool {
+        assert_one_yocto();
+        self.assert_not_paused();
+        require!(!force.unwrap_or(false), "Force unregister is not supported");
+
+        let account_id = env::predecessor_account_id();
+        let Some(account) = self.internal_get_account(&account_id) else {
+            return false;
+        };
+
+        if self.has_retained_record_storage(&account_id) {
+            return false;
+        }
+
+        self.accounts.remove(&account_id);
+        if account.storage_deposit.as_yoctonear() > 0 {
+            Promise::new(account_id).transfer(account.storage_deposit);
+        }
+        true
     }
 
     pub fn get_account(&self, account_id: AccountId) -> Option<Account> {
@@ -72,6 +149,38 @@ impl Contract {
 
     pub(crate) fn internal_set_account(&mut self, id: AccountId, account: Account) {
         self.accounts.insert(id, account.into());
+    }
+
+    fn internal_storage_balance_of(&self, account_id: &AccountId) -> Option<StorageBalance> {
+        let account = self.internal_get_account(account_id)?;
+        Some(StorageBalance {
+            total: account.storage_deposit,
+            available: NearToken::from_yoctonear(
+                self.available_storage_yocto(account_id, &account),
+            ),
+        })
+    }
+
+    fn available_storage_yocto(&self, account_id: &AccountId, account: &Account) -> u128 {
+        account
+            .storage_deposit
+            .as_yoctonear()
+            .saturating_sub(self.required_storage_deposit_yocto(account_id, 0, 0))
+    }
+
+    fn has_retained_record_storage(&self, account_id: &AccountId) -> bool {
+        self.user_lock_count.get(account_id).copied().unwrap_or(0) > 0
+            || self
+                .user_purchase_count
+                .get(account_id)
+                .copied()
+                .unwrap_or(0)
+                > 0
+            || self
+                .subscriptions_by_account
+                .get(account_id)
+                .map(|subscription_ids| !subscription_ids.is_empty())
+                .unwrap_or(false)
     }
 
     fn require_registered_account(&self, account_id: &AccountId) -> Account {

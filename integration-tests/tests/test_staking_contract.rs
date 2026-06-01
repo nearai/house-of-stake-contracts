@@ -93,6 +93,7 @@ async fn staking_contract_storage_deposit_get_account() -> Result<(), Box<dyn st
 
     let user = worker.dev_create_account().await?;
     user.call(contract_account.id(), "storage_deposit")
+        .args_json(json!({}))
         .deposit(NearToken::from_millinear(500))
         .gas(Gas::from_tgas(50))
         .transact()

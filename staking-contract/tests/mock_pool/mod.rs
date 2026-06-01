@@ -346,6 +346,7 @@ pub async fn buyer_storage_deposit(
 ) -> Result<(), Box<dyn std::error::Error>> {
     buyer
         .call(staking_id, "storage_deposit")
+        .args_json(json!({}))
         .deposit(NearToken::from_millinear(500))
         .gas(WsGas::from_tgas(50))
         .transact()

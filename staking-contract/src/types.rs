@@ -97,6 +97,22 @@ impl Default for Account {
     }
 }
 
+/// NEP-145 storage balance for a registered account.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [json])]
+pub struct StorageBalance {
+    pub total: NearToken,
+    pub available: NearToken,
+}
+
+/// NEP-145 registration bounds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [json])]
+pub struct StorageBalanceBounds {
+    pub min: NearToken,
+    pub max: Option<NearToken>,
+}
+
 /// Allowlisted staking pool row (pool contract account id + share-pool accounting).
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]

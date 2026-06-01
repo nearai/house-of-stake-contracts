@@ -149,7 +149,7 @@ fn pay_storage_requirement_increases_after_purchase() {
     let (_product_id, price_id) = setup_catalog_near_oneoff(&mut c);
 
     testing_env!(ctx(acct(BUYER), NearToken::from_near(3)));
-    c.storage_deposit();
+    c.storage_deposit(None, None);
 
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
     c.pay(Some(price_id.clone()), None, U64(1));
