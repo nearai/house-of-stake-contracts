@@ -1,16 +1,24 @@
-//! Cancel-at-period-end, upgrade (immediate), downgrade (next period).
+//! Cancel-at-period-end and unified subscription updates.
 
 mod common;
 
 use common::{
+<<<<<<< HEAD
     BUYER, POOL, VALIDATOR_OWNER_ACCOUNT, acct, add_subscription_price, add_subscription_product,
     ctx, ctx_ts, deploy, register_buyer, setup_catalog_near_subscription,
     testing_env_catalog_callback, unwrap_sync_lock_id,
+=======
+    BUYER, POOL, VALIDATOR_OWNER_ACCOUNT, acct, add_subscription_price,
+    add_subscription_price_with_metadata, add_subscription_product, ctx, ctx_ts, deploy,
+    register_buyer, setup_catalog_near_subscription, testing_env_catalog_callback,
+    unwrap_sync_lock_id,
+>>>>>>> origin/feat/stake-dao
 };
 use near_sdk::NearToken;
 use near_sdk::PromiseOrValue;
 use near_sdk::json_types::U128;
 use near_sdk::testing_env;
+use staking_contract::types::PriceMetadata;
 use staking_contract::types::TransactionStatus;
 use staking_contract::types::{LockStatus, OrderRef, SubscriptionStatus};
 use staking_contract::utils::AVG_MONTH_NS;
@@ -111,7 +119,7 @@ fn resume_subscription_fails_after_period_end() {
 }
 
 #[test]
-fn upgrade_subscription_updates_tier_and_lock_amount() {
+fn update_subscription_updates_tier_and_lock_amount() {
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
     let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);
@@ -149,7 +157,11 @@ fn upgrade_subscription_updates_tier_and_lock_amount() {
 }
 
 #[test]
+<<<<<<< HEAD
 fn upgrade_subscription_allows_different_product_on_same_validator() {
+=======
+fn update_subscription_allows_different_product_on_same_validator() {
+>>>>>>> origin/feat/stake-dao
     let mut c = deploy();
     let (product_low, price_low) = setup_catalog_near_subscription(&mut c);
     let (product_high, price_high) = add_subscription_product(&mut c, "High product", 10);
@@ -171,7 +183,11 @@ fn upgrade_subscription_allows_different_product_on_same_validator() {
     assert!(
         c.get_subscription_for_product(acct(BUYER), product_low)
             .is_none(),
+<<<<<<< HEAD
         "old product index should be removed after cross-product upgrade"
+=======
+        "old product index should be removed after cross-product update"
+>>>>>>> origin/feat/stake-dao
     );
     let sub_after = c
         .get_subscription_for_product(acct(BUYER), product_high.clone())
@@ -211,14 +227,72 @@ fn get_subscriptions_for_account_lists_all_owned_subscriptions() {
 }
 
 #[test]
+<<<<<<< HEAD
 fn upgrade_subscription_uses_projected_billing_window_after_stale_end_ns() {
+=======
+#[should_panic(expected = "Target stake amount is above the price maximum")]
+fn recurring_lock_rejects_amount_above_price_max_amount() {
+    let mut c = deploy();
+    let (product_id, _price_id) = setup_catalog_near_subscription(&mut c);
+    let capped_price = add_subscription_price_with_metadata(
+        &mut c,
+        product_id,
+        "Capped",
+        1,
+        Some(PriceMetadata {
+            max_amount: Some(U128(NearToken::from_near(60).as_yoctonear())),
+        }),
+    );
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(61), BASE_TS));
+    c.lock(Some(capped_price), None, None);
+}
+
+#[test]
+#[should_panic(expected = "Target stake amount is above the price maximum")]
+fn update_subscription_rejects_target_amount_above_price_max_amount() {
+    let mut c = deploy();
+    let (product_id, price_id) = setup_catalog_near_subscription(&mut c);
+    let capped_price = add_subscription_price_with_metadata(
+        &mut c,
+        product_id.clone(),
+        "Capped",
+        1,
+        Some(PriceMetadata {
+            max_amount: Some(U128(NearToken::from_near(60).as_yoctonear())),
+        }),
+    );
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_id), None, None));
+    let sub = c
+        .get_subscription_for_product(acct(BUYER), product_id)
+        .expect("subscription");
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_near(11)));
+    c.update_subscription(
+        sub.subscription_id,
+        capped_price,
+        U128(NearToken::from_near(61).as_yoctonear()),
+    );
+}
+
+#[test]
+fn update_subscription_uses_projected_billing_window_after_stale_end_ns() {
+>>>>>>> origin/feat/stake-dao
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
     let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+<<<<<<< HEAD
     let _ = unwrap_sync_lock_id(c.lock(Some(price_low), None, None));
+=======
+    let lock_id = unwrap_sync_lock_id(c.lock(Some(price_low), None, None));
+>>>>>>> origin/feat/stake-dao
 
     let stored_end = c
         .get_subscription_for_product(acct(BUYER), product_id.clone())
@@ -253,11 +327,25 @@ fn upgrade_subscription_uses_projected_billing_window_after_stale_end_ns() {
         .expect("subscription");
     assert_eq!(sub.price_id, price_high);
     assert_eq!(sub.end_ns.0, projected_end);
+    let lock = c.get_lock(lock_id).expect("lock");
+    assert_eq!(lock.start_ns, sub.start_ns);
+    assert_eq!(lock.end_ns, sub.end_ns);
+    match lock.order {
+        OrderRef::Subscription {
+            period_start_ns,
+            period_end_ns,
+            ..
+        } => {
+            assert_eq!(period_start_ns, sub.start_ns);
+            assert_eq!(period_end_ns, sub.end_ns);
+        }
+        OrderRef::ProductPurchase { .. } => panic!("expected subscription order"),
+    }
 }
 
 #[test]
 #[should_panic(expected = "Cannot delete this price while it is in use")]
-fn upgraded_subscription_price_is_marked_in_use() {
+fn updated_subscription_price_is_marked_in_use() {
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
     let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);
@@ -289,7 +377,7 @@ fn upgraded_subscription_price_is_marked_in_use() {
 
 #[test]
 #[should_panic(expected = "This price is not active")]
-fn upgrade_callback_rejects_price_archived_after_entry_checks() {
+fn update_callback_rejects_price_archived_after_entry_checks() {
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
     let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);
@@ -454,7 +542,40 @@ fn cross_product_update_rejects_existing_target_product_subscription() {
 }
 
 #[test]
+<<<<<<< HEAD
 fn pending_downgrade_projects_after_apply_time_without_manual_lock() {
+=======
+#[should_panic(expected = "Subscription already has a pending update for target product")]
+fn lock_rejects_product_reserved_by_pending_cross_product_update() {
+    let mut c = deploy();
+    let (_product_low, price_low) = setup_catalog_near_subscription(&mut c);
+    let (product_high, price_high) = add_subscription_product(&mut c, "High product", 10);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_high.clone()), None, None));
+    let sub_high = c
+        .get_subscription_for_product(acct(BUYER), product_high)
+        .expect("subscription");
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    c.update_subscription(
+        sub_high.subscription_id,
+        price_low.clone(),
+        U128(NearToken::from_near(25).as_yoctonear()),
+    );
+
+    testing_env!(ctx_ts(
+        acct(BUYER),
+        NearToken::from_near(50),
+        BASE_TS.saturating_add(1),
+    ));
+    c.lock(Some(price_low), None, None);
+}
+
+#[test]
+fn pending_update_projects_after_apply_time_without_manual_lock() {
+>>>>>>> origin/feat/stake-dao
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
     let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);
@@ -525,13 +646,22 @@ fn pending_downgrade_projects_after_apply_time_without_manual_lock() {
     assert!(
         c.user_pending_unstake
             .get(&(acct(BUYER), acct(POOL)))
+<<<<<<< HEAD
             .is_some(),
         "first later mutation should queue surplus unstake"
+=======
+            .is_none(),
+        "cancel should not queue surplus unstake"
+>>>>>>> origin/feat/stake-dao
     );
 }
 
 #[test]
+<<<<<<< HEAD
 fn cross_product_pending_downgrade_projects_under_target_product() {
+=======
+fn cross_product_pending_update_projects_under_target_product() {
+>>>>>>> origin/feat/stake-dao
     let mut c = deploy();
     let (product_low, price_low) = setup_catalog_near_subscription(&mut c);
     let (product_high, price_high) = add_subscription_product(&mut c, "High product", 10);
@@ -580,7 +710,11 @@ fn cross_product_pending_downgrade_projects_under_target_product() {
 }
 
 #[test]
+<<<<<<< HEAD
 fn immediate_update_clears_pending_downgrade() {
+=======
+fn immediate_update_clears_pending_update() {
+>>>>>>> origin/feat/stake-dao
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
     let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);
@@ -707,6 +841,30 @@ fn same_plan_stake_increase_applies_amount_only() {
 }
 
 #[test]
+<<<<<<< HEAD
+=======
+#[should_panic(expected = "Attached NEAR is below the contract minimum lock amount")]
+fn stake_increase_rejects_delta_below_min_lock_amount() {
+    let mut c = deploy();
+    let (_product_id, price_id) = setup_catalog_near_subscription(&mut c);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_id.clone()), None, None));
+    let sub = c
+        .get_subscription_for_price(acct(BUYER), price_id.clone())
+        .expect("subscription");
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    c.update_subscription(
+        sub.subscription_id,
+        price_id,
+        U128(NearToken::from_near(50).as_yoctonear().saturating_add(1)),
+    );
+}
+
+#[test]
+>>>>>>> origin/feat/stake-dao
 fn plan_upgrade_same_stake_applies_plan_now() {
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
@@ -819,6 +977,107 @@ fn same_plan_stake_decrease_schedules_amount_only() {
 }
 
 #[test]
+<<<<<<< HEAD
+=======
+fn pending_only_update_syncs_lock_window_after_stale_end_ns() {
+    let mut c = deploy();
+    let (product_id, price_id) = setup_catalog_near_subscription(&mut c);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let lock_id = unwrap_sync_lock_id(c.lock(Some(price_id.clone()), None, None));
+    let stored_end = c
+        .get_subscription_for_product(acct(BUYER), product_id.clone())
+        .expect("subscription")
+        .end_ns
+        .0;
+    let past_period_ts = stored_end.saturating_add(1);
+
+    testing_env!(ctx_ts(
+        acct(BUYER),
+        NearToken::from_yoctonear(1),
+        past_period_ts,
+    ));
+    let projected = c
+        .get_subscription_for_product(acct(BUYER), product_id.clone())
+        .expect("subscription");
+    assert!(projected.end_ns.0 > past_period_ts);
+    let _ = c.update_subscription(
+        projected.subscription_id,
+        price_id,
+        U128(NearToken::from_near(25).as_yoctonear()),
+    );
+
+    let sub = c
+        .get_subscription_for_product(acct(BUYER), product_id)
+        .expect("subscription");
+    let lock = c.get_lock(lock_id).expect("lock");
+    assert_eq!(lock.start_ns, sub.start_ns);
+    assert_eq!(lock.end_ns, sub.end_ns);
+    match lock.order {
+        OrderRef::Subscription {
+            period_start_ns,
+            period_end_ns,
+            ..
+        } => {
+            assert_eq!(period_start_ns, sub.start_ns);
+            assert_eq!(period_end_ns, sub.end_ns);
+        }
+        OrderRef::ProductPurchase { .. } => panic!("expected subscription order"),
+    }
+}
+
+#[test]
+fn cancel_clears_pending_update_without_applying_stake_decrease() {
+    let mut c = deploy();
+    let (product_id, price_id) = setup_catalog_near_subscription(&mut c);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let lock_id = unwrap_sync_lock_id(c.lock(Some(price_id.clone()), None, None));
+    let sub = c
+        .get_subscription_for_product(acct(BUYER), product_id.clone())
+        .expect("subscription");
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    c.update_subscription(
+        sub.subscription_id,
+        price_id,
+        U128(NearToken::from_near(25).as_yoctonear()),
+    );
+
+    let pending = c
+        .get_subscription_for_product(acct(BUYER), product_id.clone())
+        .expect("subscription")
+        .pending_update
+        .expect("pending update");
+    testing_env!(ctx_ts(
+        acct(BUYER),
+        NearToken::from_yoctonear(1),
+        pending.apply_ns.0.saturating_add(1),
+    ));
+    c.cancel_subscription(product_id.clone());
+
+    let cancelled = c
+        .get_subscription_for_product(acct(BUYER), product_id)
+        .expect("subscription");
+    assert!(cancelled.cancel_at_period_end);
+    assert!(cancelled.pending_update.is_none());
+    assert!(
+        c.user_pending_unstake
+            .get(&(acct(BUYER), acct(POOL)))
+            .is_none(),
+        "cancel should not apply a pending stake decrease"
+    );
+    let lock = c.get_lock(lock_id).expect("lock");
+    assert_eq!(
+        lock.amount_near.as_yoctonear(),
+        NearToken::from_near(50).as_yoctonear()
+    );
+}
+
+#[test]
+>>>>>>> origin/feat/stake-dao
 fn plan_downgrade_same_stake_schedules_plan_only() {
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);

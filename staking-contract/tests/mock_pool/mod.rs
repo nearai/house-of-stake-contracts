@@ -671,7 +671,7 @@ pub async fn add_validator_pair(
             "validator_id": pool.id(),
         }))
         .deposit(NearToken::from_yoctonear(1))
-        .gas(WsGas::from_tgas(50))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
         .await?
         .into_result()?;
@@ -788,7 +788,7 @@ pub async fn create_recurring_price_on_product(
     Ok(cpr.into_result()?.json()?)
 }
 
-pub async fn buyer_upgrade_subscription(
+pub async fn buyer_update_subscription_with_stake_increase(
     buyer: &near_workspaces::Account,
     staking_id: &near_workspaces::AccountId,
     subscription_id: &str,
@@ -815,7 +815,7 @@ pub async fn buyer_upgrade_subscription(
         .to_string())
 }
 
-pub async fn buyer_schedule_downgrade_subscription(
+pub async fn buyer_update_subscription_scheduled(
     buyer: &near_workspaces::Account,
     staking_id: &near_workspaces::AccountId,
     subscription_id: &str,
@@ -830,7 +830,7 @@ pub async fn buyer_schedule_downgrade_subscription(
             "target_amount": target_amount_yocto.to_string(),
         }))
         .deposit(NearToken::from_yoctonear(1))
-        .gas(WsGas::from_tgas(50))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
         .await?
         .into_result()?;

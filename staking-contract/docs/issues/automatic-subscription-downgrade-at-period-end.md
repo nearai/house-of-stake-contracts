@@ -1,29 +1,54 @@
-# Automatic subscription downgrade when billing period ends
+# Pending subscription updates at billing period end
 
-**Type:** Bug / product gap  
-**Component:** `staking-contract` — subscriptions (`subscriptions.rs`, `lock.rs`)  
-**Labels (suggested):** `bug`, `subscription`, `enhancement`, `house-of-stake`
+**Type:** Historical issue / resolved design note
+**Component:** `staking-contract` — subscriptions (`subscriptions.rs`, `lock.rs`)
+**Status:** Superseded by `update_subscription` + `pending_update`
 
 ---
 
 ## Summary
 
+<<<<<<< HEAD
 Scheduled subscription downgrades (`schedule_downgrade_subscription`) are **not applied when the current billing period ends**. The contract only records `pending_downgrade_price_id` and waits for the subscriber to manually call `lock` with the lower tier after `subscription.end_ns`.
+=======
+The old split downgrade flow required a subscriber to manually renew with `lock` after
+`subscription.end_ns` before a scheduled downgrade could take effect. That model has
+been replaced by `update_subscription(subscription_id, target_price_id, target_amount)`.
+>>>>>>> origin/feat/stake-dao
 
-From a subscriber and product perspective, this is a **bug**: users expect “downgrade at end of period” to take effect automatically at period boundary, similar to Stripe-style cancel-at-period-end / tier changes at renewal.
+The current model stores a `Subscription.pending_update` with:
+
+- optional `target_price_id` for a deferred plan change
+- optional `target_amount` for a deferred stake decrease
+- `apply_ns`, normally the current billing period end
+
+Views project a due pending update after `apply_ns`, and mutation paths can lazily
+commit the due update. This means the subscription can move to the next period
+without requiring the user to call `lock` with the target tier.
 
 ---
 
-## Current behavior (as implemented)
+## Current behavior
 
-### Phase A — schedule only
+1. `update_subscription` decides whether plan and stake changes apply immediately
+   or at period end.
+2. Immediate stake increases attach the exact NEAR delta and run through the
+   validator settlement pipeline before shares are minted.
+3. Deferred stake decreases and deferred plan changes are stored in
+   `Subscription.pending_update`.
+4. After `apply_ns`, subscription views project the target plan.
+5. A later mutation lazily commits the pending update and clears
+   `pending_update`. If the pending update includes a stake decrease, the
+   mutation first runs the validator settlement preamble, then queues the
+   surplus through the normal pending-unstake accounting.
 
-- `schedule_downgrade_subscription(target_price_id)` sets `Subscription.pending_downgrade_price_id`.
-- **`price_id` stays on the current (higher) tier** for the rest of the period.
-- No refund or stake adjustment mid-cycle (documented: Phase A, no automatic refund).
+There is still no autonomous on-chain cron. A transaction must touch the
+subscription before storage changes are committed, but callers no longer need to
+manually renew with the lower tier.
 
-### Phase B — manual renewal required
+---
 
+<<<<<<< HEAD
 Downgrade **completes** only when the user sends a successful **`lock`** transaction **after** `block_timestamp >= subscription.end_ns`, with:
 
 - `price_id` equal to the scheduled lower tier, and  
@@ -45,11 +70,22 @@ There is **no on-chain cron, keeper, or callback at `end_ns`**. Period end alone
 | Renewal gate (`now >= end_ns`) | `lock.rs` — `lock_with_price_id` |
 | Prorate at commit | `subscriptions.rs` — `apply_pending_downgrade_before_renewal_lock` |
 | Docs | `docs/API.md` — “lower tier applied at next `lock` renewal” |
+=======
+## Relevant code
+
+| Step | Location |
+|------|----------|
+| Schedule/update plan or stake | `subscriptions.rs` — `update_subscription` |
+| Pending update projection | `subscriptions.rs` — `project_subscription_view_now` |
+| Lazy commit | `subscriptions.rs` — `apply_due_subscription_update` |
+| Subscription lock/renewal | `lock.rs` — `lock_recurring_subscription_with_catalog` |
+>>>>>>> origin/feat/stake-dao
 
 ---
 
-## Expected behavior (product)
+## Remaining operational note
 
+<<<<<<< HEAD
 When a user schedules a downgrade:
 
 1. **Through the current period:** remain on the higher tier (no mid-cycle refund) — acceptable.
@@ -123,3 +159,8 @@ No contract change; operational burden and trust model shift.
 
 - Review thread: scheduled downgrade applied only at manual `lock` renewal.  
 - Test (happy path, manual renewal): `tests/subscription_lifecycle.rs` — `downgrade_applies_at_next_renewal`.
+=======
+If product requirements need state to change exactly at `apply_ns` without any user
+or backend interaction, an off-chain keeper or scheduler transaction is still
+required. NEAR contracts do not execute automatically at a timestamp.
+>>>>>>> origin/feat/stake-dao

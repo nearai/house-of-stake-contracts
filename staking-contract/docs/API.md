@@ -94,6 +94,7 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 | Method | Access | Deposit | Returns | Description |
 |--------|--------|---------|---------|-------------|
 | `lock` | Buyer / subscriber | **Attach NEAR** | **`PromiseOrValue<LockId>`** | **`price_id`**, **`product_id`**, **`duration_ns`** — provide exactly one of **`price_id`** or **`product_id`**. One-off prices require **`duration_ns`** (`U64`). Recurring monthly subscription prices require **`duration_ns: null`** and derive the duration from the billing period. Default price from **`Product.default_price_id`** when only **`product_id`** is set. **WASM:** shared per-epoch pipeline (**0–3**) then mint (**5a**); see [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md). **Host tests:** synchronous mint (no promise chain). |
+<<<<<<< HEAD
 
 ## Direct payments (`payments.rs`)
 
@@ -101,6 +102,8 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 |--------|--------|---------|---------|-------------|
 | `pay` | Buyer | **Attach exact NEAR price × quantity** | `PurchaseId` | Direct one-off payment for `price_id` or a product default price. Requires an active one-off price with no billing period, creates a `pay_*` purchase record, increments product/price usage, and accrues validator revenue. Does not create a lock or touch pool staking. |
 | `withdraw_revenue` | Validator owner | **1 yocto** | `Promise` | `validator_id`, optional `amount`. Verifies ownership through pool `get_owner_id()`, then transfers direct-payment revenue to the validator owner. Omitted `amount` withdraws the full validator balance. |
+=======
+>>>>>>> origin/feat/stake-dao
 
 ---
 
@@ -112,7 +115,11 @@ Lifecycle RPCs (locking / renewal stays in **`lock`** above).
 |--------|--------|---------|---------|-------------|
 | `cancel_subscription` | Subscriber | **1 yocto** | — | **`product_id`** — set **`cancel_at_period_end`**; lock remains until **`lock.end_ns`**, then **`unlock`**. After **`end_ns`**, next **`lock`** starts a new period. |
 | `resume_subscription` | Subscriber | **1 yocto** | — | **`product_id`** — clear **`cancel_at_period_end`** while **`Active`**, only before stored **`end_ns`** (current billing period). Fails after period end; use **`lock`** for a new period. Requires **`cancel_at_period_end == true`**. |
+<<<<<<< HEAD
 | `update_subscription` | Subscriber | **Attach delta NEAR for increases; 1 yocto otherwise** | **`PromiseOrValue<SubscriptionPlanChangeOutcome>`** | **`subscription_id`, `target_price_id`, `target_amount`** — unified plan update. Stake increases apply immediately after the same pre-user pipeline as **`lock`**; stake decreases are scheduled for the next **`lock`** renewal; price-only changes with unchanged stake apply immediately. |
+=======
+| `update_subscription` | Subscriber | **Attach delta NEAR for increases; 1 yocto otherwise** | **`PromiseOrValue<SubscriptionPlanChangeOutcome>`** | **`subscription_id`, `target_price_id`, `target_amount`** — unified plan update. Stake increases apply immediately after the same pre-user pipeline as **`lock`**; stake decreases are scheduled for the billing boundary, projected in views after `apply_ns`, and lazily committed by later mutations after validator settlement; price-only changes with unchanged stake apply immediately. |
+>>>>>>> origin/feat/stake-dao
 
 ---
 

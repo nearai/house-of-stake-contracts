@@ -55,8 +55,18 @@ pub trait ExtSelfEpoch {
         duration_ns: u128,
         order: OrderRef,
         validator_id: ValidatorId,
-        subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
     ) -> PromiseOrValue<LockId>;
+<<<<<<< HEAD
+=======
+    /// **[Pipeline 5a]** Recurring subscription lock resolved after settlement.
+    fn resolve_recurring_subscription_lock_after_settle(
+        &mut self,
+        buyer: AccountId,
+        locked: NearToken,
+        price_id: PriceId,
+        validator_id: ValidatorId,
+    ) -> PromiseOrValue<LockId>;
+>>>>>>> origin/feat/stake-dao
     /// **[Pipeline 5d]** Subscription update after pre-user settlement (`subscriptions.rs`).
     fn on_subscription_update_after_settle(
         &mut self,
@@ -83,7 +93,7 @@ pub trait ExtSelfEpoch {
     ) -> Promise;
     /// **[Pipeline 6]** After **4** tail promise completes: sets pipeline **`Idle`**.
     fn on_epoch_pipeline_terminal_release(&mut self, validator_id: ValidatorId);
-    /// **[Pipeline 6]** Release **`Busy`** and return lock id from mint/upgrade tail; refund on tail failure.
+    /// **[Pipeline 6]** Release **`Busy`** and return lock id from mint tail; refund on tail failure.
     fn on_epoch_pipeline_release_with_lock_id(
         &mut self,
         #[callback_result] lock_id_result: Result<LockId, PromiseError>,
@@ -521,17 +531,25 @@ impl Contract {
                 locked,
                 duration_ns,
                 order,
-                subscription_followup,
             } => (
                 ext_self_epoch::ext(env::current_account_id())
                     .with_static_gas(callbacks::ON_LOCK_FINALLY_MINT)
-                    .resolve_lock(
+                    .resolve_lock(buyer, locked, duration_ns, order, validator_id),
+                ReleaseKind::WithLockId,
+            ),
+            UserAction::CommitRecurringSubscriptionLock {
+                validator_id,
+                buyer,
+                locked,
+                price_id,
+            } => (
+                ext_self_epoch::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_LOCK_FINALLY_MINT)
+                    .resolve_recurring_subscription_lock_after_settle(
                         buyer,
                         locked,
-                        duration_ns,
-                        order,
+                        price_id,
                         validator_id,
-                        subscription_followup,
                     ),
                 ReleaseKind::WithLockId,
             ),
@@ -544,7 +562,11 @@ impl Contract {
                 subscription_id,
             } => (
                 ext_self_epoch::ext(env::current_account_id())
+<<<<<<< HEAD
                     .with_static_gas(callbacks::ON_SUBSCRIPTION_UPGRADE_AFTER_SETTLE)
+=======
+                    .with_static_gas(callbacks::ON_SUBSCRIPTION_UPDATE_AFTER_SETTLE)
+>>>>>>> origin/feat/stake-dao
                     .on_subscription_update_after_settle(
                         buyer,
                         deposit,
@@ -616,7 +638,11 @@ impl Contract {
 
     // --- [Pipeline 6] ---
 
+<<<<<<< HEAD
     /// Refund NEAR from a payable pipeline entry (`lock_*`, `update_subscription`) after pre-user
+=======
+    /// Refund NEAR from a payable pipeline entry (`lock`, `update_subscription`) after pre-user
+>>>>>>> origin/feat/stake-dao
     /// settlement aborts (e.g. `get_account` failure). Clears **`Busy`** and returns the refund transfer.
     pub(crate) fn refund_payable_pipeline(
         &mut self,
@@ -642,7 +668,7 @@ impl Contract {
         self.release_validator_pool_pipeline(&validator_id);
     }
 
-    /// **[Pipeline 6]** Release pipeline and return lock id from mint/upgrade tails; refund payable entry on tail failure.
+    /// **[Pipeline 6]** Release pipeline and return lock id from mint tail; refund payable entry on tail failure.
     #[private]
     pub fn on_epoch_pipeline_release_with_lock_id(
         &mut self,

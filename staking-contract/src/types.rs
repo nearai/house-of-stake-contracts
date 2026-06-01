@@ -337,7 +337,14 @@ pub enum UserAction {
         locked: NearToken,
         duration_ns: u128,
         order: OrderRef,
-        subscription_followup: Option<(Subscription, SubscriptionId, bool)>,
+    },
+    /// Recurring subscription lock resolved after the validator settlement preamble,
+    /// before subscription renewal or new-period state is committed.
+    CommitRecurringSubscriptionLock {
+        validator_id: ValidatorId,
+        buyer: AccountId,
+        locked: NearToken,
+        price_id: PriceId,
     },
     UnlockQueueUnstake {
         validator_id: ValidatorId,
@@ -367,6 +374,7 @@ impl UserAction {
     pub fn validator_id(&self) -> &ValidatorId {
         match self {
             Self::CommitLock { validator_id, .. }
+            | Self::CommitRecurringSubscriptionLock { validator_id, .. }
             | Self::UnlockQueueUnstake { validator_id, .. }
             | Self::WithdrawUserTransfer { validator_id, .. }
             | Self::SettleOnly { validator_id }
@@ -374,11 +382,22 @@ impl UserAction {
         }
     }
 
+<<<<<<< HEAD
     /// NEAR attached on the entry receipt for payable flows (`lock_*`, `update_subscription`).
     /// Used to refund when the async pre-user pipeline aborts before mint / upgrade commits.
     pub fn payable_refund(&self) -> Option<(AccountId, NearToken)> {
         match self {
             Self::CommitLock { buyer, locked, .. } => Some((buyer.clone(), *locked)),
+=======
+    /// NEAR attached on the entry receipt for payable flows (`lock`, `update_subscription`).
+    /// Used to refund when the async pre-user pipeline aborts before the user-flow tail commits.
+    pub fn payable_refund(&self) -> Option<(AccountId, NearToken)> {
+        match self {
+            Self::CommitLock { buyer, locked, .. } => Some((buyer.clone(), *locked)),
+            Self::CommitRecurringSubscriptionLock { buyer, locked, .. } => {
+                Some((buyer.clone(), *locked))
+            }
+>>>>>>> origin/feat/stake-dao
             Self::SubscriptionUpdate { buyer, deposit, .. } => Some((buyer.clone(), *deposit)),
             _ => None,
         }

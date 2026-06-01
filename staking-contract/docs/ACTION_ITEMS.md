@@ -63,7 +63,11 @@ Backlog for taking **`stake.dao`** (`staking-contract`) from **implemented v1** 
 
 ### Product / economics
 
+<<<<<<< HEAD
 - [ ] **Automatic downgrade at period end** — Today downgrade applies only when the user calls **`lock`** after `end_ns` ([issue](issues/automatic-subscription-downgrade-at-period-end.md)). Decide: ship v1 with manual renewal + docs, or implement keeper/callback at period boundary before launch.
+=======
+- [ ] **Automatic period-end updates** — Due subscription updates are projected in views after `apply_ns` and lazily committed by later mutations ([issue](issues/automatic-subscription-downgrade-at-period-end.md)). Decide whether v1 also needs an off-chain keeper for exact-at-boundary storage commits.
+>>>>>>> origin/feat/stake-dao
 - [ ] **Calendar-accurate billing** — Replace linear [`add_months_stripe_style`](../src/subscriptions.rs) with true calendar month / anchor-day end dates (anchor_day is stored; logic is approximate today).
 - [ ] **Stranded `pending_to_withdraw` dust** — Rounding can leave bucket balance with zero user liability ([DESIGN.md](DESIGN.md) §7). Either implement owner-only **`sweep_stranded_withdraw_bucket`**, or accept dust and document for governance.
 
