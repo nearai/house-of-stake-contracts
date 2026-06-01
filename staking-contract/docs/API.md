@@ -89,6 +89,14 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 |--------|--------|---------|---------|-------------|
 | `lock` | Buyer / subscriber | **Attach NEAR** | **`PromiseOrValue<LockId>`** | **`price_id`**, **`product_id`**, **`duration_ns`** — provide exactly one of **`price_id`** or **`product_id`**. One-off prices require **`duration_ns`** (`U64`). Recurring monthly subscription prices require **`duration_ns: null`** and derive the duration from the billing period. Default price from **`Product.default_price_id`** when only **`product_id`** is set. **WASM:** shared per-epoch pipeline (**0–3**) then mint (**5a**); see [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md). **Host tests:** synchronous mint (no promise chain). |
 
+## Direct payments (`payments.rs`)
+
+| Method | Access | Deposit | Returns | Description |
+|--------|--------|---------|---------|-------------|
+| `pay` | Buyer | **Attach exact NEAR price × quantity** | `PurchaseId` | Direct one-off payment for `price_id` or a product default price. Requires an active one-off price with no billing period, creates a `pay_*` purchase record, increments product/price usage, and accrues validator revenue. Does not create a lock or touch pool staking. |
+| `withdraw_revenue` | Validator owner | **1 yocto** | `Promise` | `validator_id`. Verifies ownership through pool `get_owner_id()`, then transfers all direct-payment revenue for that validator to the validator owner. |
+| `get_revenue_balance_for_validator` | Anyone | 0 | `NearToken` | `validator_id`. Returns currently withdrawable direct-payment revenue for the validator. |
+
 ---
 
 ## Subscriptions (`subscriptions.rs`)

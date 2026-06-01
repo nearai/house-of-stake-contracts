@@ -1,4 +1,4 @@
-//! Stripe-like deterministic IDs: `prod_*`, `price_*`, `sub_*`, `lock_*`.
+//! Stripe-like deterministic IDs: `prod_*`, `price_*`, `sub_*`, `lock_*`, `pay_*`.
 
 use crate::utils::block_timestamp;
 use near_sdk::env;
@@ -7,6 +7,7 @@ use near_sdk::env;
 pub const PROD_SUFFIX_LEN: usize = 14;
 pub const PRICE_SUFFIX_LEN: usize = 24;
 pub const SUB_LOCK_SUFFIX_LEN: usize = 17;
+pub const PURCHASE_SUFFIX_LEN: usize = 17;
 
 const BASE62: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
@@ -24,6 +25,10 @@ pub fn next_subscription_id(nonce: &mut u64) -> String {
 
 pub fn next_lock_id(nonce: &mut u64) -> String {
     next_id("lock", SUB_LOCK_SUFFIX_LEN, nonce)
+}
+
+pub fn next_purchase_id(nonce: &mut u64) -> String {
+    next_id("pay", PURCHASE_SUFFIX_LEN, nonce)
 }
 
 pub fn next_unique_generated_id<FGen, FContains>(

@@ -40,6 +40,12 @@ impl Contract {
     }
 
     #[payable]
+    pub fn set_per_purchase_storage_stake(&mut self, per_purchase_storage_stake: NearToken) {
+        self.assert_owner_payable();
+        self.internal_get_config_mut().per_purchase_storage_stake = per_purchase_storage_stake;
+    }
+
+    #[payable]
     pub fn set_lock_bounds(&mut self, min_lock_duration_ns: U64, max_lock_duration_ns: U64) {
         self.assert_owner_payable();
         require!(

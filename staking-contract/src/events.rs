@@ -84,6 +84,38 @@ pub fn log_lock(lock_id: &str, account: &AccountId) {
     );
 }
 
+pub fn log_payment_create(
+    purchase_id: &str,
+    account: &AccountId,
+    product_id: &str,
+    price_id: &str,
+    quantity: u64,
+    amount_paid: u128,
+) {
+    emit(
+        "payment_create",
+        serde_json::json!({
+            "purchase_id": purchase_id,
+            "account_id": account.to_string(),
+            "product_id": product_id,
+            "price_id": price_id,
+            "quantity": quantity.to_string(),
+            "amount_paid": amount_paid.to_string(),
+        }),
+    );
+}
+
+pub fn log_revenue_withdraw(validator_id: &ValidatorId, account: &AccountId, amount: u128) {
+    emit(
+        "revenue_withdraw",
+        serde_json::json!({
+            "validator_id": validator_id.to_string(),
+            "account_id": account.to_string(),
+            "amount": amount.to_string(),
+        }),
+    );
+}
+
 pub fn log_unlock(lock_id: &str, account: &AccountId, validator_id: &ValidatorId) {
     emit(
         "unlock",

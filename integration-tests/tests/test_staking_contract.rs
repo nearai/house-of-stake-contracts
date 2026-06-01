@@ -33,6 +33,7 @@ fn staking_new_args(owner: &near_workspaces::AccountId) -> serde_json::Value {
             "epoch_unstake_settle_epochs": 4,
             "min_storage_deposit": "10000000000000000000000",
             "per_lock_storage_stake": "0",
+            "per_purchase_storage_stake": "0",
             "min_lock_amount": "1000000000000000000000000",
         }
     })

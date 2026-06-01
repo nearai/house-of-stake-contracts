@@ -9,6 +9,7 @@ pub type ProductId = String;
 pub type PriceId = String;
 pub type SubscriptionId = String;
 pub type LockId = String;
+pub type PurchaseId = String;
 
 /// Staking pool contract account id (allowlist key, catalog scope, lock pool).
 pub type ValidatorId = AccountId;
@@ -310,6 +311,18 @@ pub struct Lock {
     pub status: LockStatus,
 }
 
+#[derive(Clone)]
+#[near(serializers = [borsh, json])]
+pub struct Purchase {
+    pub purchase_id: PurchaseId,
+    pub account_id: AccountId,
+    pub product_id: ProductId,
+    pub price_id: PriceId,
+    pub quantity: U64,
+    pub amount_paid: NearToken,
+    pub created_ns: U64,
+}
+
 /// User-facing tail chained after [`Contract::promise_validator_per_epoch_settlement_then`]:
 /// either the full pre-user pipeline ran (balance sync → withdraw-if-ready →
 /// [`crate::epoch::Contract::try_epoch_stake_or_unstake`]), or the pool had **already** settled this NEAR epoch and
@@ -549,6 +562,26 @@ impl From<VLock> for Lock {
     }
 }
 
+#[derive(Clone)]
+#[near(serializers = [borsh])]
+pub enum VPurchase {
+    V0(Purchase),
+}
+
+impl From<Purchase> for VPurchase {
+    fn from(value: Purchase) -> Self {
+        Self::V0(value)
+    }
+}
+
+impl From<VPurchase> for Purchase {
+    fn from(value: VPurchase) -> Self {
+        match value {
+            VPurchase::V0(inner) => inner,
+        }
+    }
+}
+
 #[cfg(test)]
 mod versioned_tests {
     use super::*;
@@ -566,6 +599,7 @@ mod versioned_tests {
             epoch_unstake_settle_epochs: 4,
             min_storage_deposit: NearToken::from_near(1),
             per_lock_storage_stake: NearToken::from_near(0),
+            per_purchase_storage_stake: NearToken::from_near(0),
             min_lock_amount: NearToken::from_near(1),
         };
         let v: VConfig = cfg.clone().into();
