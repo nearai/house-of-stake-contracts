@@ -669,7 +669,7 @@ pub async fn add_validator_pair(
             "validator_id": pool.id(),
         }))
         .deposit(NearToken::from_yoctonear(1))
-        .gas(WsGas::from_tgas(50))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
         .await?
         .into_result()?;

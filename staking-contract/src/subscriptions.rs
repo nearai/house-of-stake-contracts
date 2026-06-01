@@ -756,6 +756,8 @@ impl Contract {
         let stake_direction = target_amount.0.cmp(&current_amount);
         let rem_ns = u128::from(inputs.sub.end_ns.0.saturating_sub(block_timestamp()));
 
+        // Plan and stake amount can move independently: e.g. upgrade the plan now
+        // while scheduling a lower stake amount for the next billing period.
         let immediate_stake_increase = (stake_direction == std::cmp::Ordering::Greater)
             .then(|| NearToken::from_yoctonear(target_amount.0.saturating_sub(current_amount)));
         let pending_stake_decrease_target =
@@ -904,6 +906,8 @@ impl Contract {
         }
 
         if decision.has_pending_change() {
+            // Deferred changes replace any earlier pending update and become effective
+            // at the current billing boundary.
             sub.pending_update = Some(PendingSubscriptionUpdate {
                 target_price_id: decision
                     .pending_plan_change
@@ -915,180 +919,6 @@ impl Contract {
 
         Self::sync_lock_window_fields(lock, sub);
         (old_product_id, new_product_id)
-    }
-
-    fn persist_subscription_update_state(
-        &mut self,
-        buyer: &AccountId,
-        subscription_id: &SubscriptionId,
-        decision: &SubscriptionUpdateDecision,
-        sub: Subscription,
-        target_price: Price,
-        target_product: Product,
-        lock: Lock,
-        old_product_id: ProductId,
-        new_product_id: ProductId,
-    ) -> LockId {
-        let lock_id = lock.lock_id.clone();
-        self.internal_set_lock(lock_id.clone(), lock);
-        if decision.immediate_plan_change {
-            self.move_subscription_product_index(
-                buyer,
-                subscription_id,
-                &old_product_id,
-                &new_product_id,
-            );
-        }
-        self.internal_set_subscription(subscription_id.clone(), sub);
-        if decision.immediate_plan_change {
-            self.internal_set_price(target_price.price_id.clone(), target_price);
-            self.internal_set_product(target_product.product_id.clone(), target_product);
-        }
-        lock_id
-    }
-
-    fn commit_subscription_update_state(
-        &mut self,
-        buyer: &AccountId,
-        subscription_id: &SubscriptionId,
-        target_price_id: &PriceId,
-        decision: &SubscriptionUpdateDecision,
-        mut sub: Subscription,
-        mut target_price: Price,
-        mut target_product: Product,
-        mut lock: Lock,
-    ) -> LockId {
-        let (old_product_id, new_product_id) = Self::apply_subscription_update_state(
-            target_price_id,
-            decision,
-            &mut sub,
-            &mut target_price,
-            &mut target_product,
-            &mut lock,
-        );
-        self.persist_subscription_update_state(
-            buyer,
-            subscription_id,
-            decision,
-            sub,
-            target_price,
-            target_product,
-            lock,
-            old_product_id,
-            new_product_id,
-        )
-    }
-
-    fn commit_subscription_update_without_stake_increase(
-        &mut self,
-        buyer: AccountId,
-        subscription_id: SubscriptionId,
-        target_price_id: PriceId,
-        target_amount: U128,
-        decision: SubscriptionUpdateDecision,
-        sub: Subscription,
-        target_price: Price,
-        target_product: Product,
-        lock: Lock,
-    ) -> SubscriptionPlanChangeOutcome {
-        let current_amount = lock.amount_near.as_yoctonear();
-        self.commit_subscription_update_state(
-            &buyer,
-            &subscription_id,
-            &target_price_id,
-            &decision,
-            sub,
-            target_price,
-            target_product,
-            lock,
-        );
-
-        crate::events::log_subscription_update(&buyer, &target_price_id, target_amount.0);
-        let kind = Self::subscription_update_kind(&decision);
-        Self::subscription_update_outcome(
-            kind,
-            subscription_id,
-            target_price_id,
-            target_amount,
-            None,
-            &decision,
-            current_amount,
-        )
-    }
-
-    pub(crate) fn commit_subscription_stake_increase(
-        &mut self,
-        buyer: AccountId,
-        deposit: NearToken,
-        target_price_id: PriceId,
-        target_amount: U128,
-        subscription_id: SubscriptionId,
-        expected_validator_id: ValidatorId,
-    ) -> SubscriptionPlanChangeOutcome {
-        let inputs = self.checked_subscription_update_inputs(
-            &buyer,
-            &target_price_id,
-            target_amount,
-            &subscription_id,
-            Some(&expected_validator_id),
-        );
-        let decision =
-            self.build_subscription_update_decision(&inputs, &target_price_id, target_amount);
-        let expected_delta = decision
-            .immediate_stake_increase
-            .expect("stake increase decision");
-        require!(
-            deposit.as_yoctonear() == expected_delta.as_yoctonear(),
-            "Attached NEAR must equal the target stake increase"
-        );
-        require!(
-            deposit.as_yoctonear() >= self.internal_get_config().min_lock_amount.as_yoctonear(),
-            "Attached NEAR is below the contract minimum lock amount (min_lock_amount)"
-        );
-        let SubscriptionUpdateInputs {
-            sub,
-            target_price,
-            target_product,
-            mut lock,
-            ..
-        } = inputs;
-
-        let add_shares = self.internal_stake(&buyer, &expected_validator_id, deposit);
-        require!(
-            add_shares > 0,
-            "Stake increase must mint at least one share"
-        );
-        let current_amount = lock.amount_near.as_yoctonear();
-
-        lock.amount_near = lock
-            .amount_near
-            .checked_add(deposit)
-            .expect("lock amount_near overflow");
-        lock.shares = U128(lock.shares.0.saturating_add(add_shares));
-        let lock_id_out = self.commit_subscription_update_state(
-            &buyer,
-            &subscription_id,
-            &target_price_id,
-            &decision,
-            sub,
-            target_price,
-            target_product,
-            lock,
-        );
-
-        crate::events::log_subscription_update(&buyer, &target_price_id, target_amount.0);
-        crate::events::log_lock(lock_id_out.as_str(), &buyer);
-
-        let kind = Self::subscription_update_kind(&decision);
-        Self::subscription_update_outcome(
-            kind,
-            subscription_id,
-            target_price_id,
-            target_amount,
-            Some(lock_id_out),
-            &decision,
-            current_amount,
-        )
     }
 
     fn commit_subscription_update_after_settle(
@@ -1110,31 +940,84 @@ impl Contract {
         );
         let decision =
             self.build_subscription_update_decision(&inputs, &target_price_id, target_amount);
-        if decision.immediate_stake_increase.is_some() {
-            return self.commit_subscription_stake_increase(
-                buyer,
-                deposit,
-                target_price_id,
-                target_amount,
-                subscription_id,
-                expected_validator_id,
+        let SubscriptionUpdateInputs {
+            mut sub,
+            mut target_price,
+            mut target_product,
+            mut lock,
+            ..
+        } = inputs;
+        let current_amount = lock.amount_near.as_yoctonear();
+
+        // The callback is the single mutation point after validator settlement.
+        // It revalidates current state, applies stake increases if needed, then
+        // commits plan/pending-update changes and storage indexes together.
+        let lock_id_out = if let Some(expected_delta) = decision.immediate_stake_increase {
+            require!(
+                deposit.as_yoctonear() == expected_delta.as_yoctonear(),
+                "Attached NEAR must equal the target stake increase"
+            );
+            require!(
+                deposit.as_yoctonear() >= self.internal_get_config().min_lock_amount.as_yoctonear(),
+                "Attached NEAR is below the contract minimum lock amount (min_lock_amount)"
+            );
+
+            let add_shares = self.internal_stake(&buyer, &expected_validator_id, deposit);
+            require!(
+                add_shares > 0,
+                "Stake increase must mint at least one share"
+            );
+            lock.amount_near = lock
+                .amount_near
+                .checked_add(deposit)
+                .expect("lock amount_near overflow");
+            lock.shares = U128(lock.shares.0.saturating_add(add_shares));
+            Some(lock.lock_id.clone())
+        } else {
+            require!(
+                deposit.as_yoctonear() == 1,
+                "Requires attached deposit of exactly 1 yoctoNEAR"
+            );
+            None
+        };
+
+        let (old_product_id, new_product_id) = Self::apply_subscription_update_state(
+            &target_price_id,
+            &decision,
+            &mut sub,
+            &mut target_price,
+            &mut target_product,
+            &mut lock,
+        );
+        self.internal_set_lock(lock.lock_id.clone(), lock);
+        if decision.immediate_plan_change {
+            self.move_subscription_product_index(
+                &buyer,
+                &subscription_id,
+                &old_product_id,
+                &new_product_id,
             );
         }
+        self.internal_set_subscription(subscription_id.clone(), sub);
+        if decision.immediate_plan_change {
+            self.internal_set_price(target_price.price_id.clone(), target_price);
+            self.internal_set_product(target_product.product_id.clone(), target_product);
+        }
 
-        require!(
-            deposit.as_yoctonear() == 1,
-            "Requires attached deposit of exactly 1 yoctoNEAR"
-        );
-        self.commit_subscription_update_without_stake_increase(
-            buyer,
+        crate::events::log_subscription_update(&buyer, &target_price_id, target_amount.0);
+        if let Some(lock_id) = lock_id_out.as_ref() {
+            crate::events::log_lock(lock_id.as_str(), &buyer);
+        }
+
+        let kind = Self::subscription_update_kind(&decision);
+        Self::subscription_update_outcome(
+            kind,
             subscription_id,
             target_price_id,
             target_amount,
-            decision,
-            inputs.sub,
-            inputs.target_price,
-            inputs.target_product,
-            inputs.lock,
+            lock_id_out,
+            &decision,
+            current_amount,
         )
     }
 
