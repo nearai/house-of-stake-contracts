@@ -229,11 +229,7 @@ Credit behavior:
 Add or update host tests for:
 
 - Initial `lock` accepts any amount within the plan range.
-<<<<<<< HEAD
-- Initial `lock` rejects amounts below min or at/above max.
-=======
 - Initial `lock` rejects amounts below min or above max.
->>>>>>> origin/feat/stake-dao
 - Immediate stake increase returns `changed_immediately` and a `lock_id`.
 - Stake decrease returns `scheduled_for_period_end`.
 - Scheduled decrease applies at renewal.

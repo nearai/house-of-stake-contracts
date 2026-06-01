@@ -211,6 +211,28 @@ fn validator_owner_can_withdraw_partial_revenue() {
 }
 
 #[test]
+#[should_panic(expected = "The contract is paused; try again after it has been unpaused")]
+fn revenue_withdraw_rejects_paused_contract() {
+    let mut config = base_config();
+    config.guardians = vec![acct(OWNER)];
+    let mut c = staking_contract::Contract::new(config);
+    let (_product_id, price_id) = setup_catalog_near_oneoff(&mut c);
+    register_buyer(&mut c);
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(5)));
+    c.pay(Some(price_id), None, U64(5));
+
+    testing_env!(ctx(acct(OWNER), NearToken::from_yoctonear(1)));
+    c.pause();
+
+    testing_env!(ctx(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        NearToken::from_yoctonear(1)
+    ));
+    c.withdraw_revenue(acct(POOL), None);
+}
+
+#[test]
 #[should_panic(expected = "Only the validator owner can call this method")]
 fn revenue_withdraw_rejects_non_owner() {
     let mut c = deploy();
@@ -293,6 +315,20 @@ fn pay_rejects_paused_validator() {
 
     testing_env!(ctx(acct(OWNER), NearToken::from_yoctonear(1)));
     c.pause_validator(acct(POOL));
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    c.pay(Some(price_id), None, U64(1));
+}
+
+#[test]
+#[should_panic(expected = "This validator is paused or removed")]
+fn pay_rejects_removed_validator() {
+    let mut c = deploy();
+    let (_product_id, price_id) = setup_catalog_near_oneoff(&mut c);
+    register_buyer(&mut c);
+
+    testing_env!(ctx(acct(OWNER), NearToken::from_yoctonear(1)));
+    c.remove_validator(acct(POOL));
 
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
     c.pay(Some(price_id), None, U64(1));

@@ -113,6 +113,7 @@ impl Contract {
         amount: Option<NearToken>,
     ) -> Promise {
         assert_one_yocto();
+        self.assert_not_paused();
         if let Some(value) = amount {
             require!(
                 value.as_yoctonear() > 0,

@@ -56,8 +56,6 @@ pub trait ExtSelfEpoch {
         order: OrderRef,
         validator_id: ValidatorId,
     ) -> PromiseOrValue<LockId>;
-<<<<<<< HEAD
-=======
     /// **[Pipeline 5a]** Recurring subscription lock resolved after settlement.
     fn resolve_recurring_subscription_lock_after_settle(
         &mut self,
@@ -66,7 +64,6 @@ pub trait ExtSelfEpoch {
         price_id: PriceId,
         validator_id: ValidatorId,
     ) -> PromiseOrValue<LockId>;
->>>>>>> origin/feat/stake-dao
     /// **[Pipeline 5d]** Subscription update after pre-user settlement (`subscriptions.rs`).
     fn on_subscription_update_after_settle(
         &mut self,
@@ -562,11 +559,7 @@ impl Contract {
                 subscription_id,
             } => (
                 ext_self_epoch::ext(env::current_account_id())
-<<<<<<< HEAD
-                    .with_static_gas(callbacks::ON_SUBSCRIPTION_UPGRADE_AFTER_SETTLE)
-=======
                     .with_static_gas(callbacks::ON_SUBSCRIPTION_UPDATE_AFTER_SETTLE)
->>>>>>> origin/feat/stake-dao
                     .on_subscription_update_after_settle(
                         buyer,
                         deposit,
@@ -638,11 +631,7 @@ impl Contract {
 
     // --- [Pipeline 6] ---
 
-<<<<<<< HEAD
-    /// Refund NEAR from a payable pipeline entry (`lock_*`, `update_subscription`) after pre-user
-=======
     /// Refund NEAR from a payable pipeline entry (`lock`, `update_subscription`) after pre-user
->>>>>>> origin/feat/stake-dao
     /// settlement aborts (e.g. `get_account` failure). Clears **`Busy`** and returns the refund transfer.
     pub(crate) fn refund_payable_pipeline(
         &mut self,

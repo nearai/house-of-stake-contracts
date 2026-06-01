@@ -42,7 +42,6 @@ enum StorageKeys {
     UserLockCount,
     SubscriptionByAccountProduct,
     SubscriptionsByAccount,
-<<<<<<< HEAD
     Purchases,
     PurchaseIds,
     PurchasesByAccount,
@@ -51,11 +50,8 @@ enum StorageKeys {
     RevenueByValidator,
     RevenueByProduct,
     SubscriptionIds,
-=======
-    SubscriptionIds,
     PendingUpdateTargetPriceCounts,
     PendingUpdateTargetProductCounts,
->>>>>>> origin/feat/stake-dao
 }
 
 #[derive(PanicOnDefault)]
@@ -111,13 +107,10 @@ pub struct Contract {
     pub subscriptions_by_account: LookupMap<AccountId, Vec<SubscriptionId>>,
     /// Creation order of subscription ids. Used by catalog admin guards to detect pending references.
     pub subscription_ids: Vector<SubscriptionId>,
-<<<<<<< HEAD
-=======
     /// Pending subscription-update target price reference counts, used by bounded catalog guards.
     pub pending_update_target_price_counts: LookupMap<PriceId, u32>,
     /// Pending subscription-update target product reference counts, used by bounded catalog guards.
     pub pending_update_target_product_counts: LookupMap<ProductId, u32>,
->>>>>>> origin/feat/stake-dao
     /// Counter mixed into deterministic ids ([`crate::ids`]) for products, prices, subscriptions, locks.
     pub id_nonce: u64,
 }
@@ -153,15 +146,12 @@ impl Contract {
             ),
             subscriptions_by_account: LookupMap::new(StorageKeys::SubscriptionsByAccount),
             subscription_ids: Vector::new(StorageKeys::SubscriptionIds),
-<<<<<<< HEAD
-=======
             pending_update_target_price_counts: LookupMap::new(
                 StorageKeys::PendingUpdateTargetPriceCounts,
             ),
             pending_update_target_product_counts: LookupMap::new(
                 StorageKeys::PendingUpdateTargetProductCounts,
             ),
->>>>>>> origin/feat/stake-dao
             id_nonce: 0,
         }
     }

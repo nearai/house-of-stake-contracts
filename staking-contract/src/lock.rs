@@ -177,7 +177,6 @@ impl Contract {
         );
         self.assert_validator_active_for_lock(&validator_id);
 
-        let price_id = price.price_id.clone();
         let product_id = product.product_id.clone();
         let sub_key = (buyer.clone(), product_id.clone());
         let now = block_timestamp();
@@ -190,12 +189,9 @@ impl Contract {
                 self.find_subscription_by_projected_product(&buyer, &product_id)
                     .map(|found| found.subscription_id)
             });
-<<<<<<< HEAD
-=======
         if existing_subscription_id.is_none() {
             self.assert_product_not_reserved_by_pending_update(&buyer, &product_id, None);
         }
->>>>>>> origin/feat/stake-dao
 
         let (subscription, sub_id, is_new_index) = if let Some(sid) = existing_subscription_id {
             self.apply_due_subscription_update(&sid);
@@ -219,11 +215,7 @@ impl Contract {
                 self.subscription_by_account_product.remove(&old_sub_key);
                 self.remove_subscription_from_account_index(&buyer, &sid);
                 self.remove_subscription_from_global_index(&sid);
-<<<<<<< HEAD
-                self.subscriptions.remove(sid.as_str());
-=======
                 self.internal_remove_subscription(&sid);
->>>>>>> origin/feat/stake-dao
                 let (sid_new, sub_new) =
                     self.new_subscription_for_lock(&buyer, &product, &price_id, now);
                 (sub_new, sid_new, true)
@@ -273,37 +265,6 @@ impl Contract {
             period_end_ns: subscription.end_ns,
         };
 
-<<<<<<< HEAD
-        let _validator = self.require_validator_idle(&validator_id);
-        // Same host synchronous path as the one-off branch (see comment there).
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            return PromiseOrValue::Value(self.commit_catalog_lock(
-                buyer.clone(),
-                locked,
-                duration_ns,
-                order,
-                validator_id,
-                Some((subscription, sub_id.clone(), is_new_index)),
-            ));
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            return self
-                .promise_validator_per_epoch_settlement_then(
-                    validator_id.clone(),
-                    UserAction::CommitLock {
-                        validator_id,
-                        buyer,
-                        locked,
-                        duration_ns,
-                        order,
-                        subscription_followup: Some((subscription, sub_id, is_new_index)),
-                    },
-                )
-                .into();
-        }
-=======
         self.commit_catalog_lock(
             buyer,
             locked,
@@ -312,7 +273,6 @@ impl Contract {
             validator_id,
             Some((subscription, sub_id, is_new_index)),
         )
->>>>>>> origin/feat/stake-dao
     }
 
     pub fn get_lock(&self, lock_id: LockId) -> Option<Lock> {
