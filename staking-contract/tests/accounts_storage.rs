@@ -2,7 +2,9 @@
 
 mod common;
 
-use common::{BUYER, acct, base_config, ctx, deploy_with_config, register_buyer};
+use common::{
+    BUYER, acct, base_config, ctx, deploy_with_config, register_buyer, setup_catalog_near_oneoff,
+};
 use near_sdk::{NearToken, testing_env};
 
 #[test]
@@ -33,6 +35,26 @@ fn storage_withdraw_rejects_dropping_below_required_retention() {
     let _ = c.lock(Some(price_id), None, Some(near_sdk::json_types::U64(dur)));
 
     // After one lock, required prepaid is min 100m + 50m × 1 lock = 150m; withdrawing 60m would drop below.
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    c.storage_withdraw(NearToken::from_millinear(60));
+}
+
+#[test]
+#[should_panic(expected = "Must retain required storage (min + per-record stake)")]
+fn storage_withdraw_rejects_dropping_below_purchase_retention() {
+    let mut cfg = base_config();
+    cfg.per_purchase_storage_stake = NearToken::from_millinear(50);
+    cfg.min_storage_deposit = NearToken::from_millinear(100);
+
+    let mut c = deploy_with_config(cfg);
+    let (_pid, price_id) = setup_catalog_near_oneoff(&mut c);
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_millinear(200)));
+    c.storage_deposit();
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    let _ = c.pay(Some(price_id), None, near_sdk::json_types::U64(1));
+
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
     c.storage_withdraw(NearToken::from_millinear(60));
 }
