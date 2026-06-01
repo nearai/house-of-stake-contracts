@@ -8,13 +8,8 @@
 mod mock_pool;
 
 use mock_pool::{
-<<<<<<< HEAD
-    buyer_lock_subscription, buyer_schedule_downgrade_subscription, buyer_storage_deposit,
-    buyer_upgrade_subscription, create_recurring_price_on_product,
-=======
     buyer_lock_subscription, buyer_storage_deposit, buyer_update_subscription_scheduled,
     buyer_update_subscription_with_stake_increase, create_recurring_price_on_product,
->>>>>>> origin/feat/stake-dao
     create_subscription_product_and_price, json_near_token_yocto, json_u64_field,
     set_mock_timestamp, setup_staking_fixture, top_up_buyer_near,
 };
@@ -58,11 +53,7 @@ async fn sandbox_update_subscription_raises_tier_and_lock_amount()
         .expect("subscription_id");
 
     top_up_buyer_near(&worker, &buyer, 50).await?;
-<<<<<<< HEAD
-    let _same_lock = buyer_upgrade_subscription(
-=======
     let _same_lock = buyer_update_subscription_with_stake_increase(
->>>>>>> origin/feat/stake-dao
         &buyer,
         staking.id(),
         subscription_id,
@@ -98,11 +89,7 @@ async fn sandbox_update_subscription_raises_tier_and_lock_amount()
 }
 
 #[tokio::test]
-<<<<<<< HEAD
-async fn sandbox_schedule_downgrade_projects_without_manual_lock()
-=======
 async fn sandbox_scheduled_update_projects_without_manual_lock()
->>>>>>> origin/feat/stake-dao
 -> Result<(), Box<dyn std::error::Error>> {
     let worker = near_workspaces::sandbox().await?;
     let (staking, pool, owner, _oneoff_product, _oneoff_price) =
@@ -127,11 +114,7 @@ async fn sandbox_scheduled_update_projects_without_manual_lock()
         .as_str()
         .expect("subscription_id");
 
-<<<<<<< HEAD
-    buyer_schedule_downgrade_subscription(
-=======
     buyer_update_subscription_scheduled(
->>>>>>> origin/feat/stake-dao
         &buyer,
         staking.id(),
         subscription_id,

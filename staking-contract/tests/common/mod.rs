@@ -187,11 +187,7 @@ pub fn add_subscription_price_with_metadata(
         PriceType::Recurring,
         Some(BillingPeriod::Monthly),
         U128(LOCK_FACTOR_DENOM),
-<<<<<<< HEAD
-        None,
-=======
         metadata,
->>>>>>> origin/feat/stake-dao
         acct(VALIDATOR_OWNER_ACCOUNT),
     )
 }

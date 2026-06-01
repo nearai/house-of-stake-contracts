@@ -145,7 +145,6 @@ pub struct Config {
     pub epoch_unstake_settle_epochs: u64,
     pub min_storage_deposit: NearToken,
     pub per_lock_storage_stake: NearToken,
-    pub per_purchase_storage_stake: NearToken,
     pub min_lock_amount: NearToken,
 }
 ```
@@ -312,11 +311,7 @@ sequenceDiagram
     participant User
     participant StakeDao as stake.dao
 
-<<<<<<< HEAD
-    User->>StakeDao: lock(price_id XOR product_id, duration_ns) attached_deposit=N NEAR
-=======
     User->>StakeDao: lock(price_id, product_id, duration_ns) attached_deposit=N NEAR
->>>>>>> origin/feat/stake-dao
     StakeDao->>StakeDao: assert_not_paused, load Price and Product, assert validator Active
     StakeDao->>StakeDao: check_near_price_lock(price, N, duration_ns)
     StakeDao->>StakeDao: mint shares for N at validator (last balance + pending_to_stake)
@@ -326,11 +321,7 @@ sequenceDiagram
 ```
 
 Notes:
-<<<<<<< HEAD
-- Production `lock` / `lock` return `PromiseOrValue<LockId>`: after optional pre-user balance sync and `try_epoch_stake_or_unstake`, the contract mints shares and records `pending_to_stake`; actual `deposit_and_stake` follows the per-epoch rules in [`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md) (not a separate public `epoch_stake` call).
-=======
 - Production `lock` returns `PromiseOrValue<LockId>`: after optional pre-user balance sync and `try_epoch_stake_or_unstake`, the contract mints shares and records `pending_to_stake`; actual `deposit_and_stake` follows the per-epoch rules in [`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md) (not a separate public `epoch_stake` call).
->>>>>>> origin/feat/stake-dao
 - Catalog mutations (`create_product`, `create_price`, …) use a pool `get_owner_id` callback to verify the validator owner; that is unrelated to pricing—locks are priced purely in NEAR on-chain as above.
 
 ### 5.2 Locking for a subscription (`lock`)
@@ -381,7 +372,7 @@ Two distinct roles. The contract owner administers the protocol; each validator 
 
 - `propose_new_owner_account_id`, `accept_ownership`.
 - `set_guardians`.
-- `set_lock_bounds`, `set_min_lock_amount`, `set_min_storage_deposit`, `set_per_lock_storage_stake`, `set_per_purchase_storage_stake`, `set_epoch_unstake_settle_epochs` (see [governance.rs](../src/governance.rs)).
+- `set_lock_bounds`, `set_min_lock_amount`, `set_min_storage_deposit`, `set_per_lock_storage_stake`, `set_epoch_unstake_settle_epochs` (see [governance.rs](../src/governance.rs)).
 
 Validator allowlist (contract owner only):
 - `add_validator(validator_id)` — synchronous; inserts into the on-contract `validators` map with `total_shares = 0`, `status = Active` (the on-contract `validators` map is itself the allowlist; see §4.2). Pool ownership for catalog changes is always verified via on-chain `get_owner_id` (§6).
@@ -460,11 +451,7 @@ Extend [common/src/events.rs](house-of-stake-contracts/common/src/events.rs) (ne
 ## 12. Testing strategy
 
 - Unit tests inside each module using `near_sdk::testing_env!` for share math, `check_near_price_lock`, lock duration bounds, paused/owner asserts.
-<<<<<<< HEAD
-- Integration-style tests in [staking-contract/tests/](../tests/) (deploy catalog via pool-owner callbacks, `lock` / `lock`, storage). Full epoch/pool pipelines may use workspace integration tests or sandbox later.
-=======
 - Integration-style tests in [staking-contract/tests/](../tests/) (deploy catalog via pool-owner callbacks, `lock`, storage). Full epoch/pool pipelines may use workspace integration tests or sandbox later.
->>>>>>> origin/feat/stake-dao
 - Scenarios worth covering:
   - Owner setup → add validator → create product+price → user lock → (sandbox: advance epochs / drive `unlock` / `withdraw` / `epoch_settle` as needed) → claim path.
   - Insufficient NEAR or duration for catalog line → lock panics.

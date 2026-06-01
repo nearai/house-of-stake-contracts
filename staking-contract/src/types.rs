@@ -382,13 +382,6 @@ impl UserAction {
         }
     }
 
-<<<<<<< HEAD
-    /// NEAR attached on the entry receipt for payable flows (`lock_*`, `update_subscription`).
-    /// Used to refund when the async pre-user pipeline aborts before mint / upgrade commits.
-    pub fn payable_refund(&self) -> Option<(AccountId, NearToken)> {
-        match self {
-            Self::CommitLock { buyer, locked, .. } => Some((buyer.clone(), *locked)),
-=======
     /// NEAR attached on the entry receipt for payable flows (`lock`, `update_subscription`).
     /// Used to refund when the async pre-user pipeline aborts before the user-flow tail commits.
     pub fn payable_refund(&self) -> Option<(AccountId, NearToken)> {
@@ -397,7 +390,6 @@ impl UserAction {
             Self::CommitRecurringSubscriptionLock { buyer, locked, .. } => {
                 Some((buyer.clone(), *locked))
             }
->>>>>>> origin/feat/stake-dao
             Self::SubscriptionUpdate { buyer, deposit, .. } => Some((buyer.clone(), *deposit)),
             _ => None,
         }

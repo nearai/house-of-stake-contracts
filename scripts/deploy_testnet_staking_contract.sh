@@ -143,10 +143,7 @@ if [[ "$ACTION" == "deploy" ]]; then
       --argjson epoch_unstake "$EPOCH_UNSTAKE_SETTLE_EPOCHS" \
       --arg min_storage "$MIN_STORAGE_DEPOSIT_YOCTO" \
       --arg per_lock "$PER_LOCK_STORAGE_STAKE_YOCTO" \
-<<<<<<< HEAD
       --arg per_purchase "0" \
-=======
->>>>>>> origin/feat/stake-dao
       --arg min_lock_amt "$MIN_LOCK_AMOUNT_YOCTO" \
       '{
         config: {
@@ -158,10 +155,7 @@ if [[ "$ACTION" == "deploy" ]]; then
           epoch_unstake_settle_epochs: $epoch_unstake,
           min_storage_deposit: $min_storage,
           per_lock_storage_stake: $per_lock,
-<<<<<<< HEAD
           per_purchase_storage_stake: $per_purchase,
-=======
->>>>>>> origin/feat/stake-dao
           min_lock_amount: $min_lock_amt
         }
       }'

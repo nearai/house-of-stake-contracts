@@ -74,11 +74,7 @@ One cross-contract view replaces separate total/unstaked queries.
 
 | Entry | When | `UserAction` tail |
 |--------|------|-------------------------|
-<<<<<<< HEAD
-| `lock` | User attaches NEAR | `CommitLock` |
-=======
 | `lock` | User attaches NEAR | `CommitLock` or `CommitRecurringSubscriptionLock` when a due subscription stake decrease must settle first |
->>>>>>> origin/feat/stake-dao
 | `unlock` | Lock owner, after `end_ns` | `UnlockQueueUnstake` |
 | `withdraw` | User claims tranches (WASM) | `WithdrawUserTransfer` |
 | `epoch_settle(validator_id)` | Anyone; manual retry | `SettleOnly` |

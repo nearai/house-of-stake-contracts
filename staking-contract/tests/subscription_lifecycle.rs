@@ -3,16 +3,10 @@
 mod common;
 
 use common::{
-<<<<<<< HEAD
-    BUYER, POOL, VALIDATOR_OWNER_ACCOUNT, acct, add_subscription_price, add_subscription_product,
-    ctx, ctx_ts, deploy, register_buyer, setup_catalog_near_subscription,
-    testing_env_catalog_callback, unwrap_sync_lock_id,
-=======
     BUYER, POOL, VALIDATOR_OWNER_ACCOUNT, acct, add_subscription_price,
     add_subscription_price_with_metadata, add_subscription_product, ctx, ctx_ts, deploy,
     register_buyer, setup_catalog_near_subscription, testing_env_catalog_callback,
     unwrap_sync_lock_id,
->>>>>>> origin/feat/stake-dao
 };
 use near_sdk::NearToken;
 use near_sdk::PromiseOrValue;
@@ -157,11 +151,7 @@ fn update_subscription_updates_tier_and_lock_amount() {
 }
 
 #[test]
-<<<<<<< HEAD
-fn upgrade_subscription_allows_different_product_on_same_validator() {
-=======
 fn update_subscription_allows_different_product_on_same_validator() {
->>>>>>> origin/feat/stake-dao
     let mut c = deploy();
     let (product_low, price_low) = setup_catalog_near_subscription(&mut c);
     let (product_high, price_high) = add_subscription_product(&mut c, "High product", 10);
@@ -183,11 +173,7 @@ fn update_subscription_allows_different_product_on_same_validator() {
     assert!(
         c.get_subscription_for_product(acct(BUYER), product_low)
             .is_none(),
-<<<<<<< HEAD
-        "old product index should be removed after cross-product upgrade"
-=======
         "old product index should be removed after cross-product update"
->>>>>>> origin/feat/stake-dao
     );
     let sub_after = c
         .get_subscription_for_product(acct(BUYER), product_high.clone())
@@ -227,9 +213,6 @@ fn get_subscriptions_for_account_lists_all_owned_subscriptions() {
 }
 
 #[test]
-<<<<<<< HEAD
-fn upgrade_subscription_uses_projected_billing_window_after_stale_end_ns() {
-=======
 #[should_panic(expected = "Target stake amount is above the price maximum")]
 fn recurring_lock_rejects_amount_above_price_max_amount() {
     let mut c = deploy();
@@ -281,18 +264,13 @@ fn update_subscription_rejects_target_amount_above_price_max_amount() {
 
 #[test]
 fn update_subscription_uses_projected_billing_window_after_stale_end_ns() {
->>>>>>> origin/feat/stake-dao
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
     let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-<<<<<<< HEAD
-    let _ = unwrap_sync_lock_id(c.lock(Some(price_low), None, None));
-=======
     let lock_id = unwrap_sync_lock_id(c.lock(Some(price_low), None, None));
->>>>>>> origin/feat/stake-dao
 
     let stored_end = c
         .get_subscription_for_product(acct(BUYER), product_id.clone())
@@ -542,9 +520,6 @@ fn cross_product_update_rejects_existing_target_product_subscription() {
 }
 
 #[test]
-<<<<<<< HEAD
-fn pending_downgrade_projects_after_apply_time_without_manual_lock() {
-=======
 #[should_panic(expected = "Subscription already has a pending update for target product")]
 fn lock_rejects_product_reserved_by_pending_cross_product_update() {
     let mut c = deploy();
@@ -575,7 +550,6 @@ fn lock_rejects_product_reserved_by_pending_cross_product_update() {
 
 #[test]
 fn pending_update_projects_after_apply_time_without_manual_lock() {
->>>>>>> origin/feat/stake-dao
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
     let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);
@@ -646,22 +620,13 @@ fn pending_update_projects_after_apply_time_without_manual_lock() {
     assert!(
         c.user_pending_unstake
             .get(&(acct(BUYER), acct(POOL)))
-<<<<<<< HEAD
-            .is_some(),
-        "first later mutation should queue surplus unstake"
-=======
             .is_none(),
         "cancel should not queue surplus unstake"
->>>>>>> origin/feat/stake-dao
     );
 }
 
 #[test]
-<<<<<<< HEAD
-fn cross_product_pending_downgrade_projects_under_target_product() {
-=======
 fn cross_product_pending_update_projects_under_target_product() {
->>>>>>> origin/feat/stake-dao
     let mut c = deploy();
     let (product_low, price_low) = setup_catalog_near_subscription(&mut c);
     let (product_high, price_high) = add_subscription_product(&mut c, "High product", 10);
@@ -710,11 +675,7 @@ fn cross_product_pending_update_projects_under_target_product() {
 }
 
 #[test]
-<<<<<<< HEAD
-fn immediate_update_clears_pending_downgrade() {
-=======
 fn immediate_update_clears_pending_update() {
->>>>>>> origin/feat/stake-dao
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
     let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);
@@ -841,8 +802,6 @@ fn same_plan_stake_increase_applies_amount_only() {
 }
 
 #[test]
-<<<<<<< HEAD
-=======
 #[should_panic(expected = "Attached NEAR is below the contract minimum lock amount")]
 fn stake_increase_rejects_delta_below_min_lock_amount() {
     let mut c = deploy();
@@ -864,7 +823,6 @@ fn stake_increase_rejects_delta_below_min_lock_amount() {
 }
 
 #[test]
->>>>>>> origin/feat/stake-dao
 fn plan_upgrade_same_stake_applies_plan_now() {
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
@@ -977,8 +935,6 @@ fn same_plan_stake_decrease_schedules_amount_only() {
 }
 
 #[test]
-<<<<<<< HEAD
-=======
 fn pending_only_update_syncs_lock_window_after_stale_end_ns() {
     let mut c = deploy();
     let (product_id, price_id) = setup_catalog_near_subscription(&mut c);
@@ -1077,7 +1033,6 @@ fn cancel_clears_pending_update_without_applying_stake_decrease() {
 }
 
 #[test]
->>>>>>> origin/feat/stake-dao
 fn plan_downgrade_same_stake_schedules_plan_only() {
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);

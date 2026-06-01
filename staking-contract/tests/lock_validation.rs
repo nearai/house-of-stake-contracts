@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-//! `lock` / `lock` guards.
-=======
 //! `lock` guards.
->>>>>>> origin/feat/stake-dao
 
 mod common;
 
