@@ -58,7 +58,7 @@ Backlog for taking **`stake.dao`** (`staking-contract`) from **implemented v1** 
 
 ### Testing
 
-- [ ] **Accounting invariants** — Property or scripted tests: Σ user shares vs `Validator.total_shares`; `pending_user_unstake_total` vs tranches; after net-zero, `pending_to_unstake` re-rooted correctly.
+- [ ] **Accounting invariants** — Property or scripted tests: Σ user shares vs `Validator.total_shares`; validator pending buckets vs `user_pending_unstake` tranches; after net-zero, `pending_to_unstake` re-rooted correctly.
 - [x] **Subscription lifecycle (sandbox)** — [`sandbox_subscription_e2e.rs`](../../tests/sandbox_subscription_e2e.rs): `update_subscription` immediate and scheduled updates + renewal. Host coverage: [`subscription_lifecycle.rs`](../../tests/subscription_lifecycle.rs) (incl. Phase B prorate on `user_pending_unstake`).
 
 ### Product / economics

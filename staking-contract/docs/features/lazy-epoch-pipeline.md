@@ -44,8 +44,9 @@ Withdraw-from-pool does **not** consume the stake/unstake epoch slot; only succe
 | `last_balance_refresh_ns` | Timestamp of last successful pool balance sync. |
 | `pending_to_stake` | NEAR queued for next pool `deposit_and_stake` (from locks). |
 | `pending_to_unstake` | NEAR queued for next pool `unstake` (from unlocks). Net-settled against `pending_to_stake`. |
-| `pending_to_withdraw` | NEAR pulled from the pool; users claim via `withdraw`. |
-| `pending_user_unstake_total` | Sum of user tranche liability; after net-zero settle, `pending_to_unstake` is re-rooted here. |
+| `pending_to_withdraw` | NEAR expected from / in-flight from pool `withdraw` after pool-side unstake becomes withdrawable. |
+| `pending_to_claim` | NEAR already moved from the pool into this contract and claimable by users through `withdraw`. |
+| `user_pending_unstake` tranches | Per-account pending unstake liabilities; after net-zero settle, `pending_to_unstake` is re-rooted to the sum of these tranches. |
 | `last_unstake_epoch` | NEAR epoch of last successful pool `unstake` callback. |
 | `last_settlement_epoch` | Last epoch that completed pre-user pipeline + net settle (or net-zero). **Mutex** for one stake/unstake per pool per NEAR epoch. |
 | `tx_status` | `Idle` vs `Busy` — at most one in-flight mutating pool pipeline per validator row. |
@@ -114,7 +115,7 @@ flowchart TD
   EZERO["apply_net_zero_pending_matched_clear"]
   TES["try_epoch_stake_or_unstake"]
   POOL_OP["deposit_and_stake OR unstake"]
-  AFTER_S["on_epoch_settlement_after_try_epoch_stake_or_unstake"]
+  POOL_DONE["on_deposit_and_stake OR on_unstake"]
 
   START --> FAST
   FAST -->|no| DISPATCH
@@ -125,7 +126,7 @@ flowchart TD
   TES --> NET
   NET -->|no pending or slot used| DISPATCH
   NET -->|equal non-zero| EZERO --> DISPATCH
-  NET -->|asymmetric| POOL_OP --> AFTER_S --> DISPATCH
+  NET -->|asymmetric| POOL_OP --> POOL_DONE --> DISPATCH
 ```
 
 Numbered steps match `/** [Pipeline N] */` in [`epoch.rs`](../../src/epoch.rs).
@@ -153,15 +154,15 @@ try_epoch_withdraw_known_unstaked  [2a]
   → on_after_pool_withdraw_maybe_settle  [2c]
 ```
 
-**2c** with `Some(cont)` runs **3** → **4**; with `None` (unlock tail) runs tail **3** only.
+**2c** continues through **3** → **4** for the original `UserAction`.
 
-### **[Pipeline 3]** — `try_epoch_stake_or_unstake` (callbacks **3a–3c**, **3′**)
+### **[Pipeline 3]** — `try_epoch_stake_or_unstake` (callbacks **3a–3c**)
 
 | Condition | Action |
 |-----------|--------|
 | No pending or `last_settlement_epoch >= epoch_height` | → **4** |
 | `pending_to_stake == pending_to_unstake > 0` | Inline **3a** net-zero → **4** |
-| Asymmetric pending, slot free | Pool op → **3b** / **3c** → **3′** → **4** |
+| Asymmetric pending, slot free | Pool op → **3b** / **3c** → **4** |
 
 | Pending comparison | Pool action | On success |
 |--------------------|-------------|------------|
@@ -169,15 +170,17 @@ try_epoch_withdraw_known_unstaked  [2a]
 | Stake > unstake | `deposit_and_stake(net)` | Current epoch |
 | Unstake > stake | `unstake(net)` (may need `validator_unstake_waiting_finished`) | Current epoch; `last_unstake_epoch` |
 
-**Net-zero:** `pending_to_stake = 0`; `pending_to_unstake = pending_user_unstake_total`.
+**Net-zero:** `pending_to_stake = 0`; `pending_to_unstake` is re-rooted to the sum of `user_pending_unstake` tranches.
 
 ### **[Pipeline 4–6]** — dispatch and release
 
 | `UserAction` | Handler | Module |
 |--------------------|---------|--------|
-| `CommitLock` | `on_lock_finally_mint_and_maybe_post_settle` | `lock.rs` |
-| `UnlockQueueUnstake` | `on_unlock_tail_after_pre_user_settle` | `unlock.rs` |
-| `WithdrawUserTransfer` | `payout_user_withdraw` | `withdraw.rs` |
+| `CommitLock` | `resolve_lock` → `on_epoch_pipeline_release_with_lock_id` | `lock.rs` / `epoch.rs` |
+| `CommitRecurringSubscriptionLock` | `resolve_recurring_subscription_lock_after_settle` → `on_epoch_pipeline_release_with_lock_id` | `lock.rs` / `epoch.rs` |
+| `SubscriptionUpdate` | `on_subscription_update_after_settle` → `on_epoch_pipeline_release_with_subscription_update_outcome` | `subscriptions.rs` / `epoch.rs` |
+| `UnlockQueueUnstake` | `resolve_unlock` → `on_epoch_pipeline_terminal_release` | `unlock.rs` / `epoch.rs` |
+| `WithdrawUserTransfer` | `on_withdraw_user_transfer_after_settle` → `on_epoch_pipeline_terminal_release` | `withdraw.rs` / `epoch.rs` |
 | `SettleOnly` | No-op → `on_epoch_pipeline_terminal_release` | `epoch.rs` |
 
 ---
@@ -187,18 +190,12 @@ try_epoch_withdraw_known_unstaked  [2a]
 ```
 unlock
   → promise_validator_per_epoch_settlement_then (full or fast)
-  → on_unlock_tail_after_pre_user_settle
+  → resolve_unlock
        → commit_share_exit, lock → UnlockRequested
-       → promise_post_unlock_unstaked_pipeline
-            → get_account
-            → on_unstake_pipeline_pool_account
-                 → [optional] try_epoch_withdraw_known_unstaked
-                 → on_after_pool_withdraw_maybe_settle
-                 → [optional] try_epoch_stake_or_unstake
-                 → on_epoch_pipeline_terminal_release
+  → on_epoch_pipeline_terminal_release
 ```
 
-If the pool **already** settled this epoch in the preamble, the unlock tail may still run **`try_epoch_stake_or_unstake`** when the epoch slot is free and pending queues are non-zero.
+`resolve_unlock` only burns shares, marks the lock `UnlockRequested`, and queues `pending_to_unstake` / user tranches. The pool `unstake` for that exit runs on a later `lock`, `unlock`, `withdraw`, or `epoch_settle` when the validator is idle and the epoch slot is available.
 
 ---
 
@@ -208,10 +205,12 @@ Defined in [`types.rs`](../../src/types.rs). Keep fields small; reload catalog r
 
 ```rust
 pub enum UserAction {
-    CommitLock { validator_id, buyer, locked, duration_ns, order, subscription_followup },
+    CommitLock { validator_id, buyer, locked, duration_ns, order },
+    CommitRecurringSubscriptionLock { validator_id, buyer, locked, price_id },
     UnlockQueueUnstake { validator_id, lock_id, account_id, shares_remove },
     WithdrawUserTransfer { validator_id, account_id },
     SettleOnly { validator_id },
+    SubscriptionUpdate { validator_id, buyer, deposit, target_price_id, target_amount, subscription_id },
 }
 ```
 
@@ -241,13 +240,15 @@ pub enum UserAction {
 | **3** | `try_epoch_stake_or_unstake` | **1**, **2c** |
 | **3b** | `on_deposit_and_stake` | Pool `deposit_and_stake` |
 | **3c** | `on_unstake` | Pool `unstake` |
-| **3′** | `on_epoch_settlement_after_try_epoch_stake_or_unstake` | Async **3** |
 | **4** | `on_epoch_settlement_dispatch_continue` | End of pre-user pipeline |
-| **5a** | `on_lock_finally_mint_and_maybe_post_settle` | **4** (lock) |
-| **5b** | `on_unlock_tail_after_pre_user_settle` | **4** (unlock) |
-| **5b′** | `on_unstake_pipeline_pool_account` | Pool `get_account` (unlock tail) |
-| **5c** | `payout_user_withdraw` | **4** (withdraw) |
-| **6** | `on_epoch_pipeline_terminal_release` | Tail complete → **`Idle`** |
+| **5a** | `resolve_lock` | **4** (one-off lock) |
+| **5a** | `resolve_recurring_subscription_lock_after_settle` | **4** (recurring subscription lock) |
+| **5b** | `resolve_unlock` | **4** (unlock) |
+| **5c** | `on_withdraw_user_transfer_after_settle` | **4** (withdraw) |
+| **5d** | `on_subscription_update_after_settle` | **4** (subscription update) |
+| **6** | `on_epoch_pipeline_terminal_release` | Tail complete → **`Idle`** for terminal tails |
+| **6** | `on_epoch_pipeline_release_with_lock_id` | Tail complete → **`Idle`** and returns `LockId`; refunds on tail failure |
+| **6** | `on_epoch_pipeline_release_with_subscription_update_outcome` | Tail complete → **`Idle`** and returns `SubscriptionPlanChangeOutcome`; refunds on tail failure |
 
 **Events:** `epoch_withdraw`, `epoch_settle_net_zero`, `epoch_settle_stake`, `epoch_settle_unstake` via `events::log_epoch_operation`.
 
@@ -290,7 +291,7 @@ Host `tests/*.rs` use synchronous lock mint (`not(target_arch = "wasm32")`) beca
 
 - [ ] Fast path only when `last_settlement_epoch` is current (not when cache is stale for business rules).
 - [ ] `total_staked_balance` consistent across refresh, withdraw, stake/unstake callbacks.
-- [ ] `pending_to_unstake` / `pending_user_unstake_total` aligned after net-zero and unlock.
+- [ ] `pending_to_unstake` / `user_pending_unstake` tranche totals aligned after net-zero and unlock.
 - [ ] **`Busy`** cleared on all success and failure paths.
 - [ ] At most one successful stake/unstake per pool per NEAR epoch.
 - [ ] `UserAction` args bounded for callback gas.
