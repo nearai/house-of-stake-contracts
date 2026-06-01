@@ -42,6 +42,9 @@ enum StorageKeys {
     UserLockCount,
     SubscriptionByAccountProduct,
     SubscriptionsByAccount,
+    SubscriptionIds,
+    PendingUpdateTargetPriceCounts,
+    PendingUpdateTargetProductCounts,
     Purchases,
     PurchaseIds,
     PurchasesByAccount,
@@ -49,9 +52,6 @@ enum StorageKeys {
     UserPurchaseCount,
     RevenueByValidator,
     RevenueByProduct,
-    SubscriptionIds,
-    PendingUpdateTargetPriceCounts,
-    PendingUpdateTargetProductCounts,
 }
 
 #[derive(PanicOnDefault)]

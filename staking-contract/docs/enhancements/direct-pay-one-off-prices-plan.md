@@ -127,7 +127,6 @@ Add:
 pub fn withdraw_revenue(
     &mut self,
     validator_id: ValidatorId,
-    amount: Option<NearToken>,
 ) -> Promise
 ```
 
@@ -135,12 +134,10 @@ Behavior:
 
 - Attach exactly 1 yocto.
 - Reject when paused.
-- Require `amount > 0` when provided.
 - Resolve authorization through the existing validator-owner pattern: call the staking pool `get_owner_id()` for `validator_id`, then verify the callback `pool_owner == expected_caller`.
-- If `amount` is `None`, withdraw the full `revenue_by_validator[validator_id]` balance.
-- Require the requested amount does not exceed the validator revenue balance.
-- Decrement `revenue_by_validator[validator_id]` before transferring funds.
-- Transfer withdrawn NEAR to the verified validator owner account.
+- Require `revenue_by_validator[validator_id] > 0`.
+- Clear `revenue_by_validator[validator_id]` before transferring funds.
+- Transfer the full validator revenue balance to the verified validator owner account.
 - Do not modify purchase records or usage counts.
 
 Add private callback:
@@ -150,7 +147,6 @@ pub fn withdraw_revenue_after_get_owner(
     &mut self,
     #[callback] pool_owner: AccountId,
     validator_id: ValidatorId,
-    amount: Option<NearToken>,
     expected_caller: AccountId,
 ) -> Promise
 ```
@@ -250,7 +246,7 @@ Add contract tests for:
 - `pay` increases validator and product revenue balances.
 - `withdraw_revenue` rejects non-owners through the callback authorization path.
 - `withdraw_revenue` transfers full balance when `amount` is omitted.
-- `withdraw_revenue` transfers partial balance when `amount` is provided.
+- `withdraw_revenue` transfers the full validator revenue balance.
 - `withdraw_revenue` rejects zero or over-balance amounts.
 - Revenue withdrawal emits `revenue_withdraw` and leaves purchase records unchanged.
 - Existing `lock` one-off and subscription tests continue to pass.

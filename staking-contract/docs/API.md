@@ -33,12 +33,6 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 | `get_price` | `price_id: string` | `Price \| null` | Catalog price (`price_*`). |
 | `get_products` | `from_index: u64`, `limit: u64` | `Product[]` | Paginated catalog (stable creation order in contract index). |
 | `get_product_default_price` | `product_id: string` | `string \| null` | Same as **`Product.default_price_id`** from **`get_product`** / **`get_products`** — default catalog **`price_id`** (see **`set_product_default_price`**); **`null`** if unset. |
-| `get_purchase` | `purchase_id: string` | `Purchase \| null` | Direct-payment purchase record (`pay_*`). |
-| `get_purchases` | `from_index: u64`, `limit: u64` | `Purchase[]` | Paginated direct-payment purchases. |
-| `get_purchases_for_account` | `account_id`, `from_index`, `limit` | `Purchase[]` | Paginated direct-payment purchases by buyer. |
-| `get_purchases_for_product` | `product_id`, `from_index`, `limit` | `Purchase[]` | Paginated direct-payment purchases by product. |
-| `get_revenue_balance_for_validator` | `validator_id` | `NearToken` | Withdrawable direct-payment revenue for a validator. |
-| `get_revenue_balance_for_product` | `product_id` | `NearToken` | Gross direct-payment revenue recorded for a product. |
 | `get_lock` | `lock_id: string` | `Lock \| null` | Lock record (`lock_*`). |
 | `get_subscription` | `subscription_id: string` | `Subscription \| null` | Subscription (`sub_*`). |
 | `get_subscription_for_product` | `account_id`, `product_id` | `Subscription \| null` | Lookup by `(account, product)`. |
@@ -50,8 +44,8 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 
 | Method | Access | Deposit | Description |
 |--------|--------|---------|-------------|
-| `storage_deposit` | Any | **Attach NEAR** | Register/update prepaid storage: must satisfy `min_storage_deposit` + `per_lock_storage_stake × user_lock_count` + `per_purchase_storage_stake × user_purchase_count`. |
-| `storage_withdraw` | Account owner | **1 yocto** + logical `amount: NearToken` | Withdraw prepaid storage down to the required minimum for current lock and purchase counts. Returns transfer promise. |
+| `storage_deposit` | Any | **Attach NEAR** | Register/update prepaid storage: must satisfy `min_storage_deposit` + `per_lock_storage_stake × user_lock_count`. |
+| `storage_withdraw` | Account owner | **1 yocto** + logical `amount: NearToken` | Withdraw prepaid storage down to the required minimum for current lock count. Returns transfer promise. |
 
 ---
 
@@ -100,7 +94,7 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 | Method | Access | Deposit | Returns | Description |
 |--------|--------|---------|---------|-------------|
 | `pay` | Buyer | **Attach exact NEAR price × quantity** | `PurchaseId` | Direct one-off payment for `price_id` or a product default price. Requires an active one-off price with no billing period, creates a `pay_*` purchase record, increments product/price usage, and accrues validator revenue. Does not create a lock or touch pool staking. |
-| `withdraw_revenue` | Validator owner | **1 yocto** | `Promise` | `validator_id`, optional `amount`. Verifies ownership through pool `get_owner_id()`, then transfers direct-payment revenue to the validator owner. Omitted `amount` withdraws the full validator balance. |
+| `withdraw_revenue` | Validator owner | **1 yocto** | `Promise` | `validator_id`. Verifies ownership through pool `get_owner_id()`, then transfers all direct-payment revenue for that validator to the validator owner. |
 
 ---
 
@@ -193,7 +187,6 @@ Pipeline steps and callbacks: [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md).
 | `accept_ownership` | **Proposed** account accepts (must match `proposed_new_owner_account_id`). |
 | `set_guardians` | Replace **`guardians`** list. |
 | `set_per_lock_storage_stake` | Per-lock storage surcharge config. |
-| `set_per_purchase_storage_stake` | Per-direct-purchase storage surcharge config. |
 | `set_lock_bounds` | `min_lock_duration_ns`, `max_lock_duration_ns` (`U64`). |
 | `set_min_lock_amount` | Minimum attach for locks; must be **≥ 1 NEAR** (`PROTOCOL_MIN_LOCK_AMOUNT_YOCTO` in `config.rs`). |
 | `set_min_storage_deposit` | Minimum prepaid storage. |
@@ -231,7 +224,7 @@ Pipeline steps and callbacks: [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md).
 
 - **`Config`** — [`../src/config.rs`](../src/config.rs): `owner_account_id`, `guardians`, lock/storage economics, `epoch_unstake_settle_epochs`, … **`min_lock_amount`** is the minimum attach for locks (including first delegation to an empty pool); governance may raise it but not below **`PROTOCOL_MIN_LOCK_AMOUNT_YOCTO`** (1 NEAR), enforced in `new` and `set_min_lock_amount`.
 - **`Validator`** — [`../src/validators.rs`](../src/validators.rs): **`validator_id`** (pool contract account), accounting fields, pending buckets, **`tx_status`** (`Idle` \| `Busy`).
-- **`Product`**, **`Price`**, **`Purchase`**, **`Subscription`**, **`Lock`**, **`Account`** — [`../src/types.rs`](../src/types.rs), [`../src/accounts.rs`](../src/accounts.rs). **`Account`** is prepaid **`storage_deposit`** only (unlocked stake exits transfer directly to the user via **`withdraw`**).
+- **`Product`**, **`Price`**, **`Subscription`**, **`Lock`**, **`Account`** — [`../src/types.rs`](../src/types.rs), [`../src/accounts.rs`](../src/accounts.rs). **`Account`** is prepaid **`storage_deposit`** only (unlocked stake exits transfer directly to the user via **`withdraw`**).
 
 For EVENT_JSON shapes and naming, see [`../src/events.rs`](../src/events.rs).
 

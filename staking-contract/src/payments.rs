@@ -22,7 +22,6 @@ pub trait ExtSelfPayments {
         &mut self,
         #[callback] pool_owner: AccountId,
         validator_id: ValidatorId,
-        amount: Option<NearToken>,
         expected_caller: AccountId,
     ) -> Promise;
 }
@@ -105,27 +104,17 @@ impl Contract {
         purchase_id
     }
 
-    /// Withdraw direct-payment revenue accrued for a validator. Pool owner only; attach 1 yocto.
+    /// Withdraw all direct-payment revenue accrued for a validator. Pool owner only; attach 1 yocto.
     #[payable]
-    pub fn withdraw_revenue(
-        &mut self,
-        validator_id: ValidatorId,
-        amount: Option<NearToken>,
-    ) -> Promise {
+    pub fn withdraw_revenue(&mut self, validator_id: ValidatorId) -> Promise {
         assert_one_yocto();
         self.assert_not_paused();
-        if let Some(value) = amount {
-            require!(
-                value.as_yoctonear() > 0,
-                "Withdraw amount must be greater than zero"
-            );
-        }
         let (validator_id, expected_caller) = self.catalog_admin_entry_for_pool(&validator_id);
         Self::promise_pool_get_owner_id_then(
             validator_id.clone(),
             ext_self_payments::ext(env::current_account_id())
                 .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
-                .withdraw_revenue_after_get_owner(validator_id, amount, expected_caller),
+                .withdraw_revenue_after_get_owner(validator_id, expected_caller),
         )
     }
 
@@ -134,7 +123,6 @@ impl Contract {
         &mut self,
         #[callback] pool_owner: AccountId,
         validator_id: ValidatorId,
-        amount: Option<NearToken>,
         expected_caller: AccountId,
     ) -> Promise {
         self.assert_validator_owner(pool_owner.clone(), &expected_caller);
@@ -143,29 +131,16 @@ impl Contract {
             .get(&validator_id)
             .copied()
             .unwrap_or_else(|| NearToken::from_yoctonear(0));
-        let withdraw_amount = amount.unwrap_or(balance);
         require!(
-            withdraw_amount.as_yoctonear() > 0,
+            balance.as_yoctonear() > 0,
             "No revenue available to withdraw"
         );
-        require!(
-            withdraw_amount.as_yoctonear() <= balance.as_yoctonear(),
-            "Withdraw amount exceeds available revenue"
-        );
 
-        let remaining = balance
-            .as_yoctonear()
-            .checked_sub(withdraw_amount.as_yoctonear())
-            .expect("Withdraw amount was bounded by balance");
         self.revenue_by_validator
-            .insert(validator_id.clone(), NearToken::from_yoctonear(remaining));
+            .insert(validator_id.clone(), NearToken::from_yoctonear(0));
 
-        crate::events::log_revenue_withdraw(
-            &validator_id,
-            &pool_owner,
-            withdraw_amount.as_yoctonear(),
-        );
-        Promise::new(pool_owner).transfer(withdraw_amount)
+        crate::events::log_revenue_withdraw(&validator_id, &pool_owner, balance.as_yoctonear());
+        Promise::new(pool_owner).transfer(balance)
     }
 
     pub fn get_purchase(&self, purchase_id: PurchaseId) -> Option<Purchase> {
