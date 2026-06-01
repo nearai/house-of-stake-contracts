@@ -1,5 +1,5 @@
 //! Validator pool pipeline: balance refresh, withdraw-if-ready, net stake/unstake (one mutating pool op per NEAR epoch per pool).
-//! Pool pipeline design: [`docs/LAZY_EPOCH_PIPELINE.md`](../docs/LAZY_EPOCH_PIPELINE.md).
+//! Pool pipeline design: [`docs/features/lazy-epoch-pipeline.md`](../docs/features/lazy-epoch-pipeline.md).
 //!
 //! **Entry:** [`Contract::promise_validator_per_epoch_settlement_then`] (**0**, sets **`Busy`**) — shared by `lock`, `unlock`, `withdraw`, `epoch_settle`.
 //! Fast path when [`Validator::last_settlement_epoch`] ≥ current epoch: **0** → **4** only.

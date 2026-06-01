@@ -37,6 +37,12 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 | `get_subscription` | `subscription_id: string` | `Subscription \| null` | Subscription (`sub_*`). |
 | `get_subscription_for_product` | `account_id`, `product_id` | `Subscription \| null` | Lookup by `(account, product)`. |
 | `get_subscription_for_price` | `account_id`, `price_id` | `Subscription \| null` | Resolves product from price, then same as above. |
+| `get_subscriptions_for_account` | `account_id`, `from_index: u64`, `limit: u64` | `Subscription[]` | Paginated subscriptions owned by an account, with due pending updates projected in the returned views. |
+| `get_purchase` | `purchase_id: string` | `Purchase \| null` | Direct payment purchase record (`pay_*`). |
+| `get_purchases` | `from_index: u64`, `limit: u64` | `Purchase[]` | Paginated direct payment purchases. |
+| `get_purchases_for_account` | `account_id`, `from_index: u64`, `limit: u64` | `Purchase[]` | Paginated direct payment purchases by buyer account. |
+| `get_purchases_for_product` | `product_id`, `from_index: u64`, `limit: u64` | `Purchase[]` | Paginated direct payment purchases by product. |
+| `get_revenue_balance_for_validator` | `validator_id: AccountId` | `NearToken` | Current withdrawable direct-payment revenue for the validator. |
 
 ---
 
@@ -44,8 +50,8 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 
 | Method | Access | Deposit | Description |
 |--------|--------|---------|-------------|
-| `storage_deposit` | Any | **Attach NEAR** | Register/update prepaid storage: must satisfy `min_storage_deposit` + `per_lock_storage_stake × user_lock_count`. |
-| `storage_withdraw` | Account owner | **1 yocto** + logical `amount: NearToken` | Withdraw prepaid storage down to the required minimum for current lock count. Returns transfer promise. |
+| `storage_deposit` | Any | **Attach NEAR** | Register/update prepaid storage: must satisfy `min_storage_deposit + per_lock_storage_stake × user_lock_count + per_purchase_storage_stake × user_purchase_count`. |
+| `storage_withdraw` | Account owner | **1 yocto** + logical `amount: NearToken` | Withdraw prepaid storage down to the required minimum for current lock and purchase counts. Returns transfer promise. |
 
 ---
 
@@ -74,7 +80,7 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 | `archive_product` | `product_id`. |
 | `unarchive_product` | `product_id` — restore **`CatalogStatus::Active`** (must currently be archived). |
 | `delete_product` | `product_id` (invariants: no attached prices in use — see contract). |
-| `create_price` | `product_id`, `name`, `description`, `amount` (`U128` yocto), `price_type`, `billing_period`, `lock_factor_near_months`. |
+| `create_price` | `product_id`, `name`, `description`, `amount` (`U128` yocto), `price_type`, `billing_period`, `lock_factor_near_months`, `metadata`. For recurring variable-stake prices, `metadata.max_amount` is an optional inclusive upper bound and must be `>= amount`. |
 | `edit_price` | `price_id`, `name`, `description`. |
 | `archive_price` | `price_id`. |
 | `unarchive_price` | `price_id` — restore **`CatalogStatus::Active`** (must currently be archived). |
@@ -87,15 +93,21 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 
 | Method | Access | Deposit | Returns | Description |
 |--------|--------|---------|---------|-------------|
-| `lock` | Buyer / subscriber | **Attach NEAR** | **`PromiseOrValue<LockId>`** | **`price_id`**, **`product_id`**, **`duration_ns`** — provide exactly one of **`price_id`** or **`product_id`**. One-off prices require **`duration_ns`** (`U64`). Recurring monthly subscription prices require **`duration_ns: null`** and derive the duration from the billing period. Default price from **`Product.default_price_id`** when only **`product_id`** is set. **WASM:** shared per-epoch pipeline (**0–3**) then mint (**5a**); see [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md). **Host tests:** synchronous mint (no promise chain). |
+| `lock` | Buyer / subscriber | **Attach NEAR** | **`PromiseOrValue<LockId>`** | **`price_id`**, **`product_id`**, **`duration_ns`** — provide exactly one of **`price_id`** or **`product_id`**. One-off prices require **`duration_ns`** (`U64`). Recurring monthly subscription prices require **`duration_ns: null`** and derive the duration from the billing period. Default price from **`Product.default_price_id`** when only **`product_id`** is set. **WASM:** shared per-epoch pipeline (**0–3**) then mint (**5a**); see [features/lazy-epoch-pipeline.md](features/lazy-epoch-pipeline.md). **Host tests:** synchronous mint (no promise chain). |
 
 ## Direct payments (`payments.rs`)
 
 | Method | Access | Deposit | Returns | Description |
 |--------|--------|---------|---------|-------------|
-| `pay` | Buyer | **Attach exact NEAR price × quantity** | `PurchaseId` | Direct one-off payment for `price_id` or a product default price. Requires an active one-off price with no billing period, creates a `pay_*` purchase record, increments product/price usage, and accrues validator revenue. Does not create a lock or touch pool staking. |
+| `pay` | Buyer | **Attach exact NEAR price × quantity** | `PurchaseId` | Direct one-off payment for `price_id` or a product default price. Requires prepaid storage for one additional purchase, an active one-off price with no billing period, and an active validator. Creates a `pay_*` purchase record, increments product/price usage, and accrues validator revenue. Does not create a lock or touch pool staking. |
 | `withdraw_revenue` | Validator owner | **1 yocto** | `Promise` | `validator_id`. Verifies ownership through pool `get_owner_id()`, then transfers all direct-payment revenue for that validator to the validator owner. |
 | `get_revenue_balance_for_validator` | Anyone | 0 | `NearToken` | `validator_id`. Returns currently withdrawable direct-payment revenue for the validator. |
+| `get_purchase` | Anyone | 0 | `Purchase \| null` | `purchase_id`. Returns a direct payment purchase record. |
+| `get_purchases` | Anyone | 0 | `Purchase[]` | `from_index`, `limit`. Lists direct payment purchases. |
+| `get_purchases_for_account` | Anyone | 0 | `Purchase[]` | `account_id`, `from_index`, `limit`. Lists direct payment purchases by buyer. |
+| `get_purchases_for_product` | Anyone | 0 | `Purchase[]` | `product_id`, `from_index`, `limit`. Lists direct payment purchases by product. |
+
+Revenue withdrawal uses the same pool-owner callback pattern as catalog mutations: `withdraw_revenue` calls the pool `get_owner_id()`, then private `withdraw_revenue_after_get_owner` verifies the original caller, clears the validator revenue balance, and transfers the full balance.
 
 ---
 
@@ -134,17 +146,17 @@ Public **`epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator
 
 | Entry | `UserAction` tail | User tail |
 |--------|-------------------|-----------|
-| `lock` | `CommitLock` | Mint lock (**5a**); optional post-settle |
-| `update_subscription` | `SubscriptionUpdate` | Update subscription lock or schedule decrease (**5d**); optional post-settle |
-| `unlock` | `UnlockQueueUnstake` | Share exit only (**5b**) |
-| `withdraw` (WASM) | `WithdrawUserTransfer` | Payout (**5c**) |
+| `lock` | `CommitLock` or `CommitRecurringSubscriptionLock` | Mint one-off lock or resolve recurring subscription lock after settlement (**5a**), then release with lock id (**6**) |
+| `update_subscription` | `SubscriptionUpdate` | Update subscription lock or schedule deferred changes (**5d**), then release with outcome (**6**) |
+| `unlock` | `UnlockQueueUnstake` | Share exit only (**5b**), then terminal release (**6**) |
+| `withdraw` (WASM) | `WithdrawUserTransfer` | Payout from claim bucket (**5c**), then terminal release (**6**) |
 | `epoch_settle` | `SettleOnly` | No-op then **6** |
 
 | Method | Access | Deposit | Returns | Description |
 |--------|--------|---------|---------|-------------|
 | `epoch_settle` | Any | **None** | **`Promise`** | **`validator_id`** — manual retry / advance pending stake or unstake; same rules as automatic flows. |
 
-Pipeline steps and callbacks: [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md).
+Pipeline steps and callbacks: [features/lazy-epoch-pipeline.md](features/lazy-epoch-pipeline.md).
 
 ---
 
@@ -154,17 +166,20 @@ Pipeline steps and callbacks: [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md).
 
 | Callback | Pipeline | Role |
 |----------|----------|------|
-| `on_epoch_settlement_after_pool_account` | **1** | After pool **`get_account`**: refresh **`total_staked_balance`**, optional **2a–2c**, then **3** with `Some(cont)`. |
+| `on_epoch_settlement_after_pool_account` | **1** | After pool **`get_account`**: refresh **`total_staked_balance`**, optional **2a–2c**, then **3** for the original `UserAction`. |
 | `on_epoch_withdraw_transfer_done` | **2b** | Credit **`pending_to_withdraw`** after pool **`withdraw`**. |
-| `on_after_pool_withdraw_maybe_settle` | **2c** | After **2b**; **`Some(cont)`** → **3** + **4**, **`None`** → tail **3** only. |
+| `on_after_pool_withdraw_maybe_settle` | **2c** | After **2b**; continues through **3** → **4** for the original `UserAction`. |
 | `on_deposit_and_stake` | **3b** | Stake callback; pending queue + **`last_settlement_epoch`**. |
 | `on_unstake` | **3c** | Unstake callback; **`last_unstake_epoch`**, **`last_settlement_epoch`**. |
-| `on_epoch_settlement_after_try_epoch_stake_or_unstake` | **3′** | After async **3** → **4**. |
-| `on_epoch_settlement_dispatch_continue` | **4** | Fan-out to **5a** / **5b** / **5c** / **5d**, then **6**. |
-| `on_lock_finally_mint_and_maybe_post_settle` | **5a** | Catalog mint (`lock.rs`). |
-| `on_unlock_tail_after_pre_user_settle` | **5b** | Share exit (`unlock.rs`). |
-| `on_subscription_upgrade_after_settle` | **5d** | Subscription upgrade (`subscriptions.rs`). |
-| `on_epoch_pipeline_terminal_release` | **6** | Set **`tx_status`** → **`Idle`**. |
+| `on_epoch_settlement_dispatch_continue` | **4** | Fan-out to **5a** / **5b** / **5c** / **5d** and choose a terminal or value-returning release callback. |
+| `resolve_lock` | **5a** | One-off catalog lock mint (`lock.rs`). |
+| `resolve_recurring_subscription_lock_after_settle` | **5a** | Recurring subscription renewal/new-period resolution after validator settlement (`lock.rs`). |
+| `resolve_unlock` | **5b** | Share exit and lock status update (`unlock.rs`). |
+| `on_withdraw_user_transfer_after_settle` | **5c** | Claim from `pending_to_claim` and transfer to user (`withdraw.rs`). |
+| `on_subscription_update_after_settle` | **5d** | Subscription update after settlement (`subscriptions.rs`). |
+| `on_epoch_pipeline_terminal_release` | **6** | Set **`tx_status`** → **`Idle`** for no-value tails. |
+| `on_epoch_pipeline_release_with_lock_id` | **6** | Release **`Busy`** and return `LockId`; refunds payable lock deposit if the tail fails. |
+| `on_epoch_pipeline_release_with_subscription_update_outcome` | **6** | Release **`Busy`** and return `SubscriptionPlanChangeOutcome`; refunds attached update deposit if the tail fails. |
 
 ---
 
@@ -172,9 +187,9 @@ Pipeline steps and callbacks: [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md).
 
 | Method | Access | Deposit | Returns | Description |
 |--------|--------|---------|---------|-------------|
-| `withdraw` | User | **1 yocto** | **`Promise`** | JSON **`{ "validator_id": <AccountId> }`** — claim from **`pending_to_withdraw`** for your epoch-eligible pending-unstake tranches on that pool (up to the bucket balance), then **transfer** the NEAR to you in the same flow. May chain an internal pool withdraw when the bucket is empty but settlement allows (see `docs/LAZY_EPOCH_PIPELINE.md`). |
+| `withdraw` | User | **1 yocto** | **`Promise`** | JSON **`{ "validator_id": <AccountId> }`** — after shared settlement, claim epoch-eligible pending-unstake tranches from **`pending_to_claim`** and transfer NEAR to the caller. Settlement may first pull pool funds into `pending_to_claim` through `pending_to_withdraw` when the pool has withdrawable funds (see [features/lazy-epoch-pipeline.md](features/lazy-epoch-pipeline.md)). |
 
-> **Note:** An owner-only **`sweep_stranded_withdraw_bucket`**-style cleanup (when **`pending_user_unstake_total == 0`** but **`pending_to_withdraw > 0`**) is described in [DESIGN.md](DESIGN.md) but **not** exposed in the current ABI.
+> **Note:** An owner-only **`sweep_stranded_withdraw_bucket`**-style cleanup (when no user pending-unstake tranche liability remains for the validator but **`pending_to_withdraw > 0`**) is described in [DESIGN.md](DESIGN.md) but **not** exposed in the current ABI.
 
 ---
 
@@ -188,6 +203,7 @@ Pipeline steps and callbacks: [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md).
 | `accept_ownership` | **Proposed** account accepts (must match `proposed_new_owner_account_id`). |
 | `set_guardians` | Replace **`guardians`** list. |
 | `set_per_lock_storage_stake` | Per-lock storage surcharge config. |
+| `set_per_purchase_storage_stake` | Per-direct-purchase storage surcharge config. |
 | `set_lock_bounds` | `min_lock_duration_ns`, `max_lock_duration_ns` (`U64`). |
 | `set_min_lock_amount` | Minimum attach for locks; must be **≥ 1 NEAR** (`PROTOCOL_MIN_LOCK_AMOUNT_YOCTO` in `config.rs`). |
 | `set_min_storage_deposit` | Minimum prepaid storage. |
@@ -225,7 +241,7 @@ Pipeline steps and callbacks: [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md).
 
 - **`Config`** — [`../src/config.rs`](../src/config.rs): `owner_account_id`, `guardians`, lock/storage economics, `epoch_unstake_settle_epochs`, … **`min_lock_amount`** is the minimum attach for locks (including first delegation to an empty pool); governance may raise it but not below **`PROTOCOL_MIN_LOCK_AMOUNT_YOCTO`** (1 NEAR), enforced in `new` and `set_min_lock_amount`.
 - **`Validator`** — [`../src/validators.rs`](../src/validators.rs): **`validator_id`** (pool contract account), accounting fields, pending buckets, **`tx_status`** (`Idle` \| `Busy`).
-- **`Product`**, **`Price`**, **`Subscription`**, **`Lock`**, **`Account`** — [`../src/types.rs`](../src/types.rs), [`../src/accounts.rs`](../src/accounts.rs). **`Account`** is prepaid **`storage_deposit`** only (unlocked stake exits transfer directly to the user via **`withdraw`**).
+- **`Product`**, **`Price`**, **`PriceMetadata`**, **`Subscription`**, **`PendingSubscriptionUpdate`**, **`SubscriptionPlanChangeOutcome`**, **`Lock`**, **`Purchase`**, **`Account`** — [`../src/types.rs`](../src/types.rs), [`../src/accounts.rs`](../src/accounts.rs). **`Account`** is prepaid **`storage_deposit`** only (unlocked stake exits transfer directly to the user via **`withdraw`**).
 
 For EVENT_JSON shapes and naming, see [`../src/events.rs`](../src/events.rs).
 
@@ -235,6 +251,5 @@ For EVENT_JSON shapes and naming, see [`../src/events.rs`](../src/events.rs).
 
 | Doc | Content |
 |-----|---------|
-| [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md) | Per-epoch limits, fast path, promise pipeline **0–6**, callbacks |
+| [features/lazy-epoch-pipeline.md](features/lazy-epoch-pipeline.md) | Per-epoch limits, fast path, promise pipeline **0–6**, callbacks |
 | [DESIGN.md](DESIGN.md) | Architecture overview |
-| [PLAN.md](PLAN.md) | Detailed design notes |

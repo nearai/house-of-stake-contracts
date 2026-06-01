@@ -32,9 +32,9 @@ Quick reference for reviewers: what the contract does on-chain, and which source
 
 ## Design docs (read before deep line review)
 
-1. [`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md) — Pool scheduling and settlement rules  
-2. [`../README.md`](../README.md) — User cadence and status snapshot  
-3. [`API.md`](API.md) — Public RPC-facing methods  
+1. [`features/lazy-epoch-pipeline.md`](../features/lazy-epoch-pipeline.md) — Pool scheduling and settlement rules
+2. [`README.md`](../../README.md) — User cadence and status snapshot
+3. [`API.md`](../API.md) — Public RPC-facing methods
 
 ## Secondary (workspace / integration)
 

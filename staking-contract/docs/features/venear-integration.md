@@ -2,16 +2,16 @@
 
 **Status:** Design (v2)  
 **Component:** `staking-contract` (`stake.dao`) + `venear-contract`  
-**Supersedes:** Deferred veNEAR item in [DESIGN.md](DESIGN.md) (non-goals §1) and [PLAN.md](PLAN.md) §11.4  
+**Supersedes:** Deferred veNEAR item in [DESIGN.md](../DESIGN.md) (non-goals §1)
 
 **Related code:**
 
 | Contract | Path |
 |----------|------|
-| stake.dao | [staking-contract/src/](../src/) — `lock.rs`, `unlock.rs`, `subscriptions.rs`, `epoch.rs` |
-| veNEAR | [venear-contract/src/lockup.rs](../../venear-contract/src/lockup.rs) — `on_lockup_update`, `internal_lockup_update` |
-| lockup (reference) | [lockup-contract/src/venear.rs](../../lockup-contract/src/venear.rs) — `lock_near`, `begin_unlock_near`, `venear_lockup_update` |
-| shared types | [common/src/lockup_update.rs](../../common/src/lockup_update.rs) — `LockupUpdateV1`, `VLockupUpdate` |
+| stake.dao | [staking-contract/src/](../../src/) — `lock.rs`, `unlock.rs`, `subscriptions.rs`, `epoch.rs` |
+| veNEAR | [venear-contract/src/lockup.rs](../../../venear-contract/src/lockup.rs) — `on_lockup_update`, `internal_lockup_update` |
+| lockup (reference) | [lockup-contract/src/venear.rs](../../../lockup-contract/src/venear.rs) — `lock_near`, `begin_unlock_near`, `venear_lockup_update` |
+| shared types | [common/src/lockup_update.rs](../../../common/src/lockup_update.rs) — `LockupUpdateV1`, `VLockupUpdate` |
 
 ---
 
@@ -39,7 +39,7 @@ The integration is intentionally **minimal**: reuse `LockupUpdateV1` and mirror 
 - veNEAR for NEAR that is only in `user_pending_unstake` or withdrawn but never catalog-locked.
 - Generic liquid stake without catalog (future API would need its own design).
 - Fungible receipt / share tokens on `stake.dao`.
-- Changes to [voting-contract](../../voting-contract/) (still consumes veNEAR snapshots).
+- Changes to [voting-contract](../../../voting-contract/) (still consumes veNEAR snapshots).
 - Indexer-only or event-driven minting as the source of truth for balances.
 - veNEAR delegation UX on `stake.dao` (users continue to use `venear-contract` directly).
 
@@ -47,7 +47,7 @@ The integration is intentionally **minimal**: reuse `LockupUpdateV1` and mirror 
 
 ## 3. Reference behavior: lockup → veNEAR
 
-Today, veNEAR power for lockup users works as follows (see [house-of-stake-contracts/README.md](../../README.md)):
+Today, veNEAR power for lockup users works as follows (see [house-of-stake-contracts/README.md](../../../README.md)):
 
 1. User **registers** on `venear-contract` (`storage_deposit`).
 2. User deploys a **lockup** subaccount via veNEAR and calls `lock_near` on the lockup.
@@ -56,7 +56,7 @@ Today, veNEAR power for lockup users works as follows (see [house-of-stake-contr
 
 ### 3.1 Update payload
 
-[`LockupUpdateV1`](../../common/src/lockup_update.rs):
+[`LockupUpdateV1`](../../../common/src/lockup_update.rs):
 
 | Field | Role |
 |-------|------|
@@ -68,7 +68,7 @@ Wrapped as `VLockupUpdate::V1(...)`.
 
 ### 3.2 veNEAR handler (lockup path)
 
-[`on_lockup_update`](../../venear-contract/src/lockup.rs) requires `predecessor == get_lockup_account_id(owner)` and delegates to [`internal_lockup_update`](../../venear-contract/src/lockup.rs):
+[`on_lockup_update`](../../../venear-contract/src/lockup.rs) requires `predecessor == get_lockup_account_id(owner)` and delegates to [`internal_lockup_update`](../../../venear-contract/src/lockup.rs):
 
 - Nonce must increase.
 - If new locked NEAR &lt; previous `account.balance.near_balance` → `extra_venear_balance = 0`.
@@ -77,7 +77,7 @@ Wrapped as `VLockupUpdate::V1(...)`.
 
 ### 3.3 Lockup owner actions
 
-[`lockup-contract/src/venear.rs`](../../lockup-contract/src/venear.rs):
+[`lockup-contract/src/venear.rs`](../../../lockup-contract/src/venear.rs):
 
 | Action | Effect on veNEAR-reported locked NEAR |
 |--------|--------------------------------------|
@@ -85,7 +85,7 @@ Wrapped as `VLockupUpdate::V1(...)`.
 | `begin_unlock_near` | Decrease locked, move to pending → update (forfeit extra if total down) |
 | `end_unlock_near` / `lock_pending_near` | Adjust pending vs locked → update |
 
-Gas for the veNEAR call: `GAS_FOR_VENEAR_LOCKUP_UPDATE` (~20 TGas) in [lockup-contract/src/venear_ext.rs](../../lockup-contract/src/venear_ext.rs).
+Gas for the veNEAR call: `GAS_FOR_VENEAR_LOCKUP_UPDATE` (~20 TGas) in [lockup-contract/src/venear_ext.rs](../../../lockup-contract/src/venear_ext.rs).
 
 **stake.dao should mirror this reporter pattern**, not reimplement veNEAR math locally.
 
@@ -178,7 +178,7 @@ Locks in `UnlockRequested` or `Withdrawn` do not count (removed at unlock).
 
 ### 6.1 Configuration
 
-[`config.rs`](../src/config.rs):
+[`config.rs`](../../src/config.rs):
 
 ```rust
 pub venear_account_id: Option<AccountId>,
@@ -189,7 +189,7 @@ pub venear_account_id: Option<AccountId>,
 
 ### 6.2 Lock type
 
-[`types.rs`](../src/types.rs) — extend `Lock`:
+[`types.rs`](../../src/types.rs) — extend `Lock`:
 
 ```rust
 pub register_with_venear: bool,  // default false on migrate
@@ -203,7 +203,7 @@ Default: `false` (recommended for rollout).
 
 ### 6.3 New module `venear.rs`
 
-Patterned on [lockup-contract/src/venear.rs](../../lockup-contract/src/venear.rs):
+Patterned on [lockup-contract/src/venear.rs](../../../lockup-contract/src/venear.rs):
 
 - `ext_venear` contract trait: `on_stake_dao_update(owner_account_id, update: VLockupUpdate)`
 - `GAS_FOR_VENEAR_STAKE_DAO_UPDATE` ≈ 20 TGas (same as lockup)
@@ -212,17 +212,17 @@ Patterned on [lockup-contract/src/venear.rs](../../lockup-contract/src/venear.rs
   - Sends `VLockupUpdate::V1(LockupUpdateV1 { locked_near_balance, timestamp, lockup_update_nonce })`
   - `locked_near_balance` = `user_venear_locked[owner]`
 
-Register module in [`lib.rs`](../src/lib.rs).
+Register module in [`lib.rs`](../../src/lib.rs).
 
 ### 6.4 Hook points
 
 | Location | When to call veNEAR |
 |----------|---------------------|
-| [`lock.rs`](../src/lock.rs) — `resolve_lock` | After successful `commit_catalog_lock`, if lock opted in and `venear_account_id` set |
-| [`unlock.rs`](../src/unlock.rs) — `resolve_unlock` | After `internal_unstake` + status `UnlockRequested`, if lock had opt-in |
-| [`subscriptions.rs`](../src/subscriptions.rs) | Upgrade tail: increase aggregate by deposit delta; downgrade prorate: decrease by NEAR removed from lock |
+| [`lock.rs`](../../src/lock.rs) — `resolve_lock` | After successful `commit_catalog_lock`, if lock opted in and `venear_account_id` set |
+| [`unlock.rs`](../../src/unlock.rs) — `resolve_unlock` | After `internal_unstake` + status `UnlockRequested`, if lock had opt-in |
+| [`subscriptions.rs`](../../src/subscriptions.rs) | Upgrade tail: increase aggregate by deposit delta; downgrade prorate: decrease by NEAR removed from lock |
 
-Chain the veNEAR promise **after** the epoch pipeline tail succeeds (fire-and-forget, same as lockup’s `venear_lockup_update()` at end of `lock_near`). Extend [`gas.rs`](../src/gas.rs) callback budgets (`ON_LOCK_FINALLY_MINT`, `ON_UNLOCK_TAIL_AFTER_PRE_USER`) if the promise is attached in the release callback chain.
+Chain the veNEAR promise **after** the epoch pipeline tail succeeds (fire-and-forget, same as lockup’s `venear_lockup_update()` at end of `lock_near`). Extend [`gas.rs`](../../src/gas.rs) callback budgets (`ON_LOCK_FINALLY_MINT`, `ON_UNLOCK_TAIL_AFTER_PRE_USER`) if the promise is attached in the release callback chain.
 
 ### 6.5 Unlock timing vs veNEAR
 
@@ -250,7 +250,7 @@ When (2) without (1): **require** at lock entry (cross-contract view or explicit
 
 ### 7.1 Configuration
 
-[`venear-contract/src/config.rs`](../../venear-contract/src/config.rs):
+[`venear-contract/src/config.rs`](../../../venear-contract/src/config.rs):
 
 ```rust
 pub stake_dao_account_id: Option<AccountId>,
@@ -376,7 +376,7 @@ effective_locked_for_venear = lockup_locked_near + stake_dao_locked_near + depos
 | Subscription upgrade / downgrade prorate | Aggregate and veNEAR update match `amount_near` delta |
 | `register_with_venear: false` | No veNEAR calls; aggregate unchanged |
 
-Suggested locations: extend [integration-tests](../../integration-tests/) (venear + stake.dao), unit tests on aggregate math, sandbox tests following [tests/sandbox_epoch_settlement.rs](../tests/sandbox_epoch_settlement.rs) patterns.
+Suggested locations: extend [integration-tests](../../../integration-tests/) (venear + stake.dao), unit tests on aggregate math, sandbox tests following [tests/sandbox_epoch_settlement.rs](../../tests/sandbox_epoch_settlement.rs) patterns.
 
 ---
 
@@ -405,14 +405,14 @@ Suggested locations: extend [integration-tests](../../integration-tests/) (venea
 - [ ] `common`: no change (reuse `LockupUpdateV1`)
 - [ ] `venear-contract`: config, `AccountInternal`, migration, `on_stake_dao_update`, refactor `internal_lockup_update`
 - [ ] `staking-contract`: config, `Lock`, maps, `venear.rs`, hooks, gas, governance setter, tests
-- [ ] `docs`: update [DESIGN.md](DESIGN.md) architecture diagram when implemented; [API.md](API.md) new methods/args
-- [ ] Deploy scripts: link `stake_dao_account_id` / `venear_account_id` in [scripts/deploy_all.sh](../../scripts/deploy_all.sh)
+- [ ] `docs`: update [DESIGN.md](../DESIGN.md) architecture diagram when implemented; [API.md](../API.md) new methods/args
+- [ ] Deploy scripts: link `stake_dao_account_id` / `venear_account_id` in [scripts/deploy_all.sh](../../../scripts/deploy_all.sh)
 
 ---
 
 ## Appendix: deferred v1 seam (now specified)
 
-[PLAN.md](PLAN.md) §11.4 originally proposed:
+The earlier v1 notes only proposed:
 
 - `lock_create` / `unlock_settled` events for veNEAR consumption
 - `register_with_venear: bool` on `Lock`
