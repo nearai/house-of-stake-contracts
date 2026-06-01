@@ -162,6 +162,18 @@ fn storage_unregister_refunds_simple_registration() {
 }
 
 #[test]
+#[should_panic(expected = "Force unregister is not supported")]
+fn storage_unregister_rejects_force_true() {
+    let mut c = deploy_with_config(base_config());
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_millinear(100)));
+    c.storage_deposit(None, None);
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    c.storage_unregister(Some(true));
+}
+
+#[test]
 fn storage_unregister_returns_false_when_retained_storage_exists() {
     let mut cfg = base_config();
     cfg.per_purchase_storage_stake = NearToken::from_millinear(50);

@@ -113,19 +113,19 @@ impl Contract {
 
     /// NEP-145: unregister an account when no per-record storage is retained.
     ///
-    /// `force` is intentionally not used to remove accounts that still own locks or purchases,
-    /// because later claim/withdraw paths need the account registration to remain present.
+    /// `force=true` is intentionally rejected because later claim/withdraw paths need account
+    /// registration to remain present while locks, purchases, or subscriptions are retained.
     #[payable]
     pub fn storage_unregister(&mut self, force: Option<bool>) -> bool {
         assert_one_yocto();
         self.assert_not_paused();
+        require!(!force.unwrap_or(false), "Force unregister is not supported");
 
         let account_id = env::predecessor_account_id();
         let Some(account) = self.internal_get_account(&account_id) else {
             return false;
         };
 
-        let _ = force;
         if self.has_retained_record_storage(&account_id) {
             return false;
         }

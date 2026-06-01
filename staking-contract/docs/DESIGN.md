@@ -1,6 +1,6 @@
 # Staking Contract — Detailed Design
 
-This document is the design reference for `stake.dao` (the `staking-contract` crate). Implementation may evolve; see [README.md](../README.md), [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md) (authoritative for validator pool scheduling), [PLAN.md](PLAN.md), and [ACTION_ITEMS.md](ACTION_ITEMS.md) for scope and status.
+This document is the design reference for `stake.dao` (the `staking-contract` crate). Implementation may evolve; see [README.md](../README.md), [features/lazy-epoch-pipeline.md](features/lazy-epoch-pipeline.md) (authoritative for validator pool scheduling), and [operations/production-readiness.md](operations/production-readiness.md) for scope and status.
 
 ---
 
@@ -13,12 +13,12 @@ Goals:
 - Be the single on-chain entrypoint for that billing model: products, prices, subscriptions, locks.
 - Price catalog amounts are **NEAR (yocto) only**; lock sufficiency is enforced on-chain via [`check_near_price_lock`](../src/utils.rs) (locked NEAR × duration vs catalog line item). There is **no** oracle and **no** USD conversion path.
 - Use a pooled meta-validator model: `stake.dao` is the only delegator on each whitelisted validator pool; per-user accounting is internal via shares.
-- **User-driven pool work:** there is no separate operator role and no public `epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator_balance` ABI. Pool calls (`deposit_and_stake`, `unstake`, withdraw-from-pool, balance refresh) are chained from **`lock`**, **`unlock`**, **`withdraw`**, and optional manual **`epoch_settle(validator_id)`** for retry. See [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md).
+- **User-driven pool work:** there is no separate operator role and no public `epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator_balance` ABI. Pool calls (`deposit_and_stake`, `unstake`, withdraw-from-pool, balance refresh) are chained from **`lock`**, **`unlock`**, **`withdraw`**, and optional manual **`epoch_settle(validator_id)`** for retry. See [features/lazy-epoch-pipeline.md](features/lazy-epoch-pipeline.md).
 - Be governed by HoS DAO (initially a security multisig), upgradable in the same pattern as the sibling contracts.
 - Share patterns/types with the existing workspace ([common/](../../common/), [lockup-contract/](../../lockup-contract/), [venear-contract/](../../venear-contract/)).
 
 Non-goals (for v1):
-- Granting veNEAR voting power for `stake.dao` locks (kept independent of `venear-contract` in the shipped v1 contract). See [VENEAR_INTEGRATION.md](VENEAR_INTEGRATION.md) for the v2 design (opt-in per lock, `on_stake_dao_update` to veNEAR).
+- Granting veNEAR voting power for `stake.dao` locks (kept independent of `venear-contract` in the shipped v1 contract). See [features/venear-integration.md](features/venear-integration.md) for the v2 design (opt-in per lock, `on_stake_dao_update` to veNEAR).
 - Liquid staking tokens (no fungible share token issued; shares are internal).
 - Cross-validator rebalancing / autocompounding (stake stays where the user purchased).
 - On-chain credit redemption — "credits" are an off-chain billing concept driven by `lock` events or direct `pay` purchase records.
@@ -53,13 +53,14 @@ See source files under [src/](../src/). Key modules: `config`, `types`, `ids`, `
 
 ## 4. Data model (summary)
 
-- **Contract state**: `config`, `paused`, `validators` (allowlist + pool accounting), `validator_ids`, `product_ids`, catalog maps (`products`, `prices`), `accounts`, `subscriptions`, `locks`, direct-payment `purchases`, `user_validator_shares`, `user_pending_unstake`, `user_lock_count` (locks ever created; drives per-lock storage requirement), `user_purchase_count` (direct purchases ever created; drives per-purchase storage requirement), `subscription_by_account_product`, `id_nonce`.
+- **Contract state**: `config`, `paused`, `validators` (allowlist + pool accounting), `validator_ids`, `product_ids`, catalog maps (`products`, `prices`), `accounts`, `subscriptions`, `subscription_ids`, `subscriptions_by_account`, `subscription_by_account_product`, pending-update target reference counts, `locks`, direct-payment `purchases`, `purchase_ids`, `purchases_by_account`, `purchases_by_product`, withdrawable `revenue_by_validator`, `user_validator_shares`, `user_pending_unstake`, `user_lock_count` (locks ever created; drives per-lock storage requirement), `user_purchase_count` (direct purchases ever created; drives per-purchase storage requirement), and `id_nonce`.
 - **Config**: owner, guardians, min/max lock duration, `epoch_unstake_settle_epochs`, min storage deposit, `per_lock_storage_stake`, `per_purchase_storage_stake`, min lock amount. No oracle, no **`operators`** field (removed with the lazy pipeline).
 - **Validator**: `validator_id` (staking pool account id), status, `total_shares`, `total_staked_balance`, pending stake/unstake/withdraw, `last_unstake_epoch`, `last_settlement_epoch`, and `tx_status` (Idle/Busy), etc. (see [validators.rs](../src/validators.rs)). Catalog auth uses the pool’s `get_owner_id()`, not a cached owner on `Validator`.
-- **Price**: NEAR amount in yocto, `price_type` (one-off vs recurring), optional `billing_period`, `lock_factor_near_months` for the duration-weighted sufficiency check.
-- **IDs**: `prod_*`, `price_*`, `sub_*`, `lock_*` with deterministic base62 suffixes (details in [PLAN.md](PLAN.md)).
+- **Price**: NEAR amount in yocto, `price_type` (one-off vs recurring), optional `billing_period`, `lock_factor_near_months` for the duration-weighted sufficiency check, and optional typed `metadata.max_amount` for variable-stake subscription upper bounds.
+- **Subscriptions**: one active/history subscription per `(account, product)` index, account-level listing via `subscriptions_by_account`, and deferred plan/stake decreases via `pending_update` with target reference counts to guard archive/delete.
+- **IDs**: `prod_*`, `price_*`, `sub_*`, `lock_*`, `pay_*` with deterministic base62 suffixes generated by [`ids.rs`](../src/ids.rs).
 - **Direct payments**: `pay` accepts exact NEAR for active one-off prices, stores `pay_*` `Purchase` records, and accrues validator-level revenue withdrawable by the pool owner through `withdraw_revenue`.
-- **Unlock**: The lock owner calls `unlock(lock_id)` once `now >= lock.end_ns`; after the shared per-epoch pipeline, shares convert to NEAR liability and unstake is queued (see [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md)).
+- **Unlock**: The lock owner calls `unlock(lock_id)` once `now >= lock.end_ns`; after the shared per-epoch pipeline, shares convert to NEAR liability and unstake is queued (see [features/lazy-epoch-pipeline.md](features/lazy-epoch-pipeline.md)).
 
 ## 5. Governance
 
@@ -75,11 +76,11 @@ No HoS staking-pool whitelist cross-call — stake.dao allowlist is internal.
 
 ## 7. Withdraw bucket: stranded remainder (design only)
 
-Integer rounding on `min(eligible_tranche, pending_to_withdraw)` credits can leave **`pending_to_withdraw`** positive while **`Validator::pending_user_unstake_total`** is **zero**. Users cannot claim further because there is no eligible liability.
+Integer rounding on tranche claims can leave **`pending_to_withdraw`** positive after all `user_pending_unstake` tranches for that validator have been cleared. Users cannot claim further because there is no eligible liability.
 
 **Intended future mitigation (not in the current contract):** an **owner-only** method such as **`sweep_stranded_withdraw_bucket(validator_id)`** that:
 
-- requires **`pending_user_unstake_total == 0`** and **`pending_to_withdraw > 0`** (and typically **not paused**, **1 yocto** attach),
+- requires no remaining `user_pending_unstake` tranche liability for the validator and **`pending_to_withdraw > 0`** (and typically **not paused**, **1 yocto** attach),
 - zeros **`pending_to_withdraw`**,
 - transfers the remainder to **`config.owner_account_id`** (or another fixed sink agreed by governance).
 
@@ -87,4 +88,4 @@ Until that exists, any microscopic remainder stays on the contract balance for t
 
 ## 8. Open items
 
-See [PLAN.md](PLAN.md) for `lock_factor_near_months` / `LOCK_FACTOR_DENOM` semantics, Stripe ID suffix lengths, and subscription duration-equivalent details. For prepaid gas and settlement semantics, prefer [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md) and [API.md](API.md).
+For prepaid gas and settlement semantics, prefer [features/lazy-epoch-pipeline.md](features/lazy-epoch-pipeline.md) and [API.md](API.md). For pricing math, see [`utils.rs`](../src/utils.rs) and [`types.rs`](../src/types.rs).
