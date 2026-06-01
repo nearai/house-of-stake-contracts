@@ -4,7 +4,7 @@ use near_sdk::json_types::{U64, U128};
 use near_sdk::{AccountId, NearToken, PromiseOrValue, env, near, require};
 
 /// Stripe-style **billing anchor day** (1–31). Not the real UTC calendar day-of-month; it is a stable
-/// fingerprint from block time until civil-calendar billing is implemented (see `subscriptions` / `docs/ACTION_ITEMS.md`).
+/// fingerprint from block time until civil-calendar billing is implemented (see `subscriptions` / `docs/operations/production-readiness.md`).
 fn anchor_day_from_timestamp(ts: u64) -> u8 {
     let d = (ts / NS_PER_DAY_TIMESTAMP) % 31;
     (d as u8 + 1).min(31)

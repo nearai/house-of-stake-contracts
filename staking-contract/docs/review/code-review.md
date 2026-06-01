@@ -4,7 +4,7 @@
 **Baseline:** `main` @ `57482d6` (*Build v1.0.3 contract version.*)  
 **Branch:** `feat/stake-dao` (review prep: `chore/stake-dao-review-prep`)
 
-This is **review guidance**, not a security audit. The highest-risk surface is **`staking-contract`**: `epoch.rs`, `lock.rs`, `unlock.rs`, `withdraw.rs`, and `utils.rs` (share math / pricing) against [`LAZY_EPOCH_PIPELINE.md`](LAZY_EPOCH_PIPELINE.md).
+This is **review guidance**, not a security audit. The highest-risk surface is **`staking-contract`**: `epoch.rs`, `lock.rs`, `unlock.rs`, `withdraw.rs`, and `utils.rs` (share math / pricing) against [`features/lazy-epoch-pipeline.md`](../features/lazy-epoch-pipeline.md).
 
 ## What changed vs `main`
 
@@ -16,7 +16,7 @@ Review energy should go to **new staking code and tests**, not re-litigating vot
 
 ## Strengths
 
-- **Documented constraints:** `README.md`, `DESIGN.md`, and `LAZY_EPOCH_PIPELINE.md` spell out per-epoch pool limits, net settle, fast-path rules, and the promise pipeline.
+- **Documented constraints:** `README.md`, `DESIGN.md`, and `features/lazy-epoch-pipeline.md` spell out per-epoch pool limits, net settle, fast-path rules, and the promise pipeline.
 - **Modular layout:** pool promises in `epoch.rs`; user entrypoints in `lock` / `unlock` / `withdraw` / `subscriptions`.
 - **Test matrix:** focused host unit modules plus `sandbox_mock_pool.rs` / `sandbox_epoch_settlement.rs` for cross-contract behavior.
 - **CI:** build / format / clippy / test workflows; test job builds WASM via `build_all.sh` before `make test`.
@@ -32,7 +32,7 @@ Review energy should go to **new staking code and tests**, not re-litigating vot
 ### 2. Economics and catalog
 
 - **`min_lock_amount`** cannot go below **1 NEAR** (`PROTOCOL_MIN_LOCK_AMOUNT_YOCTO` in `config.rs`).
-- **Subscriptions:** upgrade / downgrade / renewal proration — assert yocto conservation where required; see `subscription_lifecycle.rs` and [`issues/automatic-subscription-downgrade-at-period-end.md`](issues/automatic-subscription-downgrade-at-period-end.md).
+- **Subscriptions:** upgrade / downgrade / renewal proration — assert yocto conservation where required; see `subscription_lifecycle.rs` and the Subscriptions section in [`API.md`](../API.md).
 
 ### 3. Gas
 
@@ -45,13 +45,13 @@ Review energy should go to **new staking code and tests**, not re-litigating vot
 
 ## Suggested follow-ups (non-blocking)
 
-- Sandbox golden path: [`tests/sandbox_golden_path.rs`](../tests/sandbox_golden_path.rs); subscription sandbox: [`tests/sandbox_subscription_e2e.rs`](../tests/sandbox_subscription_e2e.rs).
+- Sandbox golden path: [`tests/sandbox_golden_path.rs`](../../tests/sandbox_golden_path.rs); subscription sandbox: [`tests/sandbox_subscription_e2e.rs`](../../tests/sandbox_subscription_e2e.rs).
 - Calendar-accurate subscription billing vs linear-month helper.
 - Stronger invariant tests (shares vs `total_staked_balance` vs user positions).
 
 ## Review order (files)
 
-See [`CORE_FEATURES.md`](CORE_FEATURES.md) for priority table. Start with `epoch.rs`, then `utils.rs`, `lock.rs`, `subscriptions.rs`, `withdraw.rs`.
+See [`core-features.md`](core-features.md) for priority table. Start with `epoch.rs`, then `utils.rs`, `lock.rs`, `subscriptions.rs`, `withdraw.rs`.
 
 ## Local verification
 

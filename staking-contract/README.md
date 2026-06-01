@@ -8,11 +8,11 @@ NEAR smart contract for pooled staking tied to NEAR AI **products** and **prices
 |------|---------|
 | [docs/API.md](docs/API.md) | Public contract methods (RPC-facing API) |
 | [docs/DESIGN.md](docs/DESIGN.md) | Readable architecture summary + pointers |
-| [docs/PLAN.md](docs/PLAN.md) | Full detailed design (exported from planning session) |
-| [docs/ACTION_ITEMS.md](docs/ACTION_ITEMS.md) | Open work / backlog vs design |
-| [docs/CORE_FEATURES.md](docs/CORE_FEATURES.md) | Reviewer quick reference (features + file priority) |
-| [docs/LAZY_EPOCH_PIPELINE.md](docs/LAZY_EPOCH_PIPELINE.md) | Pool scheduling, settlement chain, callbacks (authoritative) |
-| [docs/REVIEW.md](docs/REVIEW.md) | Pre-merge review checklist |
+| [docs/README.md](docs/README.md) | Documentation index |
+| [docs/operations/production-readiness.md](docs/operations/production-readiness.md) | Open work / backlog vs design |
+| [docs/review/core-features.md](docs/review/core-features.md) | Reviewer quick reference (features + file priority) |
+| [docs/features/lazy-epoch-pipeline.md](docs/features/lazy-epoch-pipeline.md) | Pool scheduling, settlement chain, callbacks (authoritative) |
+| [docs/review/code-review.md](docs/review/code-review.md) | Pre-merge review checklist |
 | [tests/README.md](tests/README.md) | Unit vs sandbox test layout |
 
 ## Build
@@ -31,7 +31,7 @@ For **sandbox integration tests** that exercise real pool cross-contract calls, 
 
 ## User cadence (lazy pool pipeline)
 
-Typical sequence after locks exist (no public `epoch_stake` / `epoch_unstake` / `epoch_withdraw` batch APIs; pool work is driven from user methods and optional **`epoch_settle`**; see [`docs/LAZY_EPOCH_PIPELINE.md`](docs/LAZY_EPOCH_PIPELINE.md)):
+Typical sequence after locks exist (no public `epoch_stake` / `epoch_unstake` / `epoch_withdraw` batch APIs; pool work is driven from user methods and optional **`epoch_settle`**; see [`docs/features/lazy-epoch-pipeline.md`](docs/features/lazy-epoch-pipeline.md)):
 
 1. **`lock`** — Mints shares, queues `pending_to_stake`, then [`try_epoch_stake_or_unstake`](src/epoch.rs) runs after balance refresh (one pool **`deposit_and_stake`** or **`unstake`** per NEAR epoch, net of pending buckets).
 2. User **`unlock`** — After lock period; refresh balance, queue unstake, then **`unstake`** / withdraw-from-pool as needed.
@@ -57,7 +57,7 @@ Implemented in code:
 - **EVENT_JSON** for lock/unlock, catalog, validators, epoch ops, claim/withdraw, pool withdraw-in ([`events.rs`](src/events.rs)) — `standard: "stake.dao"`, `version: "1.0.0"`, nested `data`
 - **`get_products`**, **`get_product_default_price`**, catalog **`unarchive_*`**, **`set_product_default_price`**; **`lock`** accepts explicit **`price_id`** or **`product_id`** (uses **`Product.default_price_id`**) ([`products.rs`](src/products.rs), [`lock.rs`](src/lock.rs))
 
-**Before mainnet:** see [docs/ACTION_ITEMS.md](docs/ACTION_ITEMS.md) for the production readiness checklist (audit, real-pool testnet validation, deploy runbook, E2E tests, and launch follow-ups).
+**Before mainnet:** see [docs/operations/production-readiness.md](docs/operations/production-readiness.md) for the production readiness checklist (audit, real-pool testnet validation, deploy runbook, E2E tests, and launch follow-ups).
 
 ## Workspace
 

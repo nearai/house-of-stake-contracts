@@ -2,7 +2,7 @@
 
 Design reference for stake.dao’s validator pool work (`deposit_and_stake`, `unstake`, withdraw-from-pool, balance refresh). There is **no** separate operator role and **no** public `epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator_balance` batch API. Users drive settlement through **`lock`**, **`unlock`**, **`withdraw`**, and optional **`epoch_settle(validator_id)`** for manual retry.
 
-Implementation: [`src/epoch.rs`](../src/epoch.rs). Entrypoints: [`lock.rs`](../src/lock.rs), [`unlock.rs`](../src/unlock.rs), [`withdraw.rs`](../src/withdraw.rs).
+Implementation: [`src/epoch.rs`](../../src/epoch.rs). Entrypoints: [`lock.rs`](../../src/lock.rs), [`unlock.rs`](../../src/unlock.rs), [`withdraw.rs`](../../src/withdraw.rs).
 
 ---
 
@@ -14,12 +14,12 @@ Implementation: [`src/epoch.rs`](../src/epoch.rs). Entrypoints: [`lock.rs`](../s
 | `operators` / `set_operators` | **Removed** (no live deployments with old `Config`). |
 | Balance before mint / unlock | **`get_account`** when **`last_settlement_epoch` < `epoch_height`** (then withdraw-if-ready and **`try_epoch_stake_or_unstake`** on existing pending). When **`last_settlement_epoch` ≥ `epoch_height`**, **skip** that pre-user pipeline and mint / unlock using cached **`total_staked_balance`**. |
 | Withdraw before new unstake | If settle allows and the pool has withdrawable unstaked NEAR, **pull from pool first**, then `unstake`. |
-| First delegation to an empty validator | Same **`min_lock_amount`** gate as any lock (never below 1 NEAR — [`PROTOCOL_MIN_LOCK_AMOUNT_YOCTO`](../src/config.rs)). |
+| First delegation to an empty validator | Same **`min_lock_amount`** gate as any lock (never below 1 NEAR — [`PROTOCOL_MIN_LOCK_AMOUNT_YOCTO`](../../src/config.rs)). |
 | Deferred subscription stake decrease | Queues surplus unstake only after the validator settlement preamble has run. Due updates that include a stake decrease are routed through the same settlement pipeline before calling the internal unstake path. |
 | `withdraw` | May chain pool withdraw when the on-contract bucket is empty but settlement allows. |
 | Pool mutating actions per NEAR epoch | Per allowlisted pool (`validator_id` = pool account), at most **one** successful **`deposit_and_stake`** **or** **`unstake`** per `epoch_height` (**`Validator.last_settlement_epoch`**). **`try_epoch_stake_or_unstake`** nets **`pending_to_stake`** vs **`pending_to_unstake`**: stake excess, unstake excess, or clear both without a pool call when equal (still bumps **`last_settlement_epoch`**). Withdraw-from-pool does **not** consume that slot. |
 
-**Pre-ship concerns:** prepaid gas on long promise chains (see [`API.md`](API.md) and [`gas.rs`](../src/gas.rs)); small `UserAction` callback payloads; **`tx_status == Busy`** retries; sandbox/deploy scripts must use user flows, not removed `epoch_*` batch methods.
+**Pre-ship concerns:** prepaid gas on long promise chains (see [`API.md`](../API.md) and [`gas.rs`](../../src/gas.rs)); small `UserAction` callback payloads; **`tx_status == Busy`** retries; sandbox/deploy scripts must use user flows, not removed `epoch_*` batch methods.
 
 ---
 
@@ -58,7 +58,7 @@ Config **`epoch_unstake_settle_epochs`** gates further pool **`unstake`** via `v
 
 One cross-contract view replaces separate total/unstaked queries.
 
-**Pool call:** `get_account(staking_contract_id)` → [`PoolAccountView`](../src/types.rs):
+**Pool call:** `get_account(staking_contract_id)` → [`PoolAccountView`](../../src/types.rs):
 
 | Field | Meaning |
 |--------|---------|
@@ -128,7 +128,7 @@ flowchart TD
   NET -->|asymmetric| POOL_OP --> AFTER_S --> DISPATCH
 ```
 
-Numbered steps match `/** [Pipeline N] */` in [`epoch.rs`](../src/epoch.rs).
+Numbered steps match `/** [Pipeline N] */` in [`epoch.rs`](../../src/epoch.rs).
 
 ### **[Pipeline 0]** — `promise_validator_per_epoch_settlement_then`
 
@@ -204,7 +204,7 @@ If the pool **already** settled this epoch in the preamble, the unlock tail may 
 
 ## `UserAction`
 
-Defined in [`types.rs`](../src/types.rs). Keep fields small; reload catalog rows by id in callbacks.
+Defined in [`types.rs`](../../src/types.rs). Keep fields small; reload catalog rows by id in callbacks.
 
 ```rust
 pub enum UserAction {
@@ -264,7 +264,7 @@ pub enum UserAction {
 
 ## Gas
 
-See [`gas.rs`](../src/gas.rs): `GET_ACCOUNT`, `DEPOSIT_AND_STAKE`, `UNSTAKE`, `WITHDRAW`, and settlement callback budgets. Root transactions (`lock` / `unlock` / `withdraw`) need sufficient prepaid gas.
+See [`gas.rs`](../../src/gas.rs): `GET_ACCOUNT`, `DEPOSIT_AND_STAKE`, `UNSTAKE`, `WITHDRAW`, and settlement callback budgets. Root transactions (`lock` / `unlock` / `withdraw`) need sufficient prepaid gas.
 
 ---
 
@@ -282,7 +282,7 @@ See [`gas.rs`](../src/gas.rs): `GET_ACCOUNT`, `DEPOSIT_AND_STAKE`, `UNSTAKE`, `W
 
 ## Unit tests vs WASM
 
-Host `tests/*.rs` use synchronous lock mint (`not(target_arch = "wasm32")`) because `testing_env!` does not run promise chains. Production WASM uses the full async pipeline. Sandbox tests deploy built WASM — see [`tests/README.md`](../tests/README.md).
+Host `tests/*.rs` use synchronous lock mint (`not(target_arch = "wasm32")`) because `testing_env!` does not run promise chains. Production WASM uses the full async pipeline. Sandbox tests deploy built WASM — see [`tests/README.md`](../../tests/README.md).
 
 ---
 

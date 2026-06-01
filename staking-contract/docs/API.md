@@ -87,7 +87,7 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 
 | Method | Access | Deposit | Returns | Description |
 |--------|--------|---------|---------|-------------|
-| `lock` | Buyer / subscriber | **Attach NEAR** | **`PromiseOrValue<LockId>`** | **`price_id`**, **`product_id`**, **`duration_ns`** — provide exactly one of **`price_id`** or **`product_id`**. One-off prices require **`duration_ns`** (`U64`). Recurring monthly subscription prices require **`duration_ns: null`** and derive the duration from the billing period. Default price from **`Product.default_price_id`** when only **`product_id`** is set. **WASM:** shared per-epoch pipeline (**0–3**) then mint (**5a**); see [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md). **Host tests:** synchronous mint (no promise chain). |
+| `lock` | Buyer / subscriber | **Attach NEAR** | **`PromiseOrValue<LockId>`** | **`price_id`**, **`product_id`**, **`duration_ns`** — provide exactly one of **`price_id`** or **`product_id`**. One-off prices require **`duration_ns`** (`U64`). Recurring monthly subscription prices require **`duration_ns: null`** and derive the duration from the billing period. Default price from **`Product.default_price_id`** when only **`product_id`** is set. **WASM:** shared per-epoch pipeline (**0–3**) then mint (**5a**); see [features/lazy-epoch-pipeline.md](features/lazy-epoch-pipeline.md). **Host tests:** synchronous mint (no promise chain). |
 
 ## Direct payments (`payments.rs`)
 
@@ -144,7 +144,7 @@ Public **`epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator
 |--------|--------|---------|---------|-------------|
 | `epoch_settle` | Any | **None** | **`Promise`** | **`validator_id`** — manual retry / advance pending stake or unstake; same rules as automatic flows. |
 
-Pipeline steps and callbacks: [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md).
+Pipeline steps and callbacks: [features/lazy-epoch-pipeline.md](features/lazy-epoch-pipeline.md).
 
 ---
 
@@ -172,7 +172,7 @@ Pipeline steps and callbacks: [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md).
 
 | Method | Access | Deposit | Returns | Description |
 |--------|--------|---------|---------|-------------|
-| `withdraw` | User | **1 yocto** | **`Promise`** | JSON **`{ "validator_id": <AccountId> }`** — claim from **`pending_to_withdraw`** for your epoch-eligible pending-unstake tranches on that pool (up to the bucket balance), then **transfer** the NEAR to you in the same flow. May chain an internal pool withdraw when the bucket is empty but settlement allows (see `docs/LAZY_EPOCH_PIPELINE.md`). |
+| `withdraw` | User | **1 yocto** | **`Promise`** | JSON **`{ "validator_id": <AccountId> }`** — claim from **`pending_to_withdraw`** for your epoch-eligible pending-unstake tranches on that pool (up to the bucket balance), then **transfer** the NEAR to you in the same flow. May chain an internal pool withdraw when the bucket is empty but settlement allows (see `docs/features/lazy-epoch-pipeline.md`). |
 
 > **Note:** An owner-only **`sweep_stranded_withdraw_bucket`**-style cleanup (when **`pending_user_unstake_total == 0`** but **`pending_to_withdraw > 0`**) is described in [DESIGN.md](DESIGN.md) but **not** exposed in the current ABI.
 
@@ -235,6 +235,5 @@ For EVENT_JSON shapes and naming, see [`../src/events.rs`](../src/events.rs).
 
 | Doc | Content |
 |-----|---------|
-| [LAZY_EPOCH_PIPELINE.md](LAZY_EPOCH_PIPELINE.md) | Per-epoch limits, fast path, promise pipeline **0–6**, callbacks |
+| [features/lazy-epoch-pipeline.md](features/lazy-epoch-pipeline.md) | Per-epoch limits, fast path, promise pipeline **0–6**, callbacks |
 | [DESIGN.md](DESIGN.md) | Architecture overview |
-| [PLAN.md](PLAN.md) | Detailed design notes |

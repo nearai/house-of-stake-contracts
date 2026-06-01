@@ -11,7 +11,7 @@ use near_sdk::store::LookupMap;
 use near_sdk::{AccountId, NearToken, PromiseOrValue, assert_one_yocto, env, near, require};
 
 /// Extend `from_ns` by `months` × average Gregorian months (linear approximation).
-/// `anchor_day` is validated but not yet applied; see `docs/ACTION_ITEMS.md`.
+/// `anchor_day` is validated but not yet applied; see `docs/operations/production-readiness.md`.
 pub fn add_months_stripe_style(anchor_day: u8, months: u32, from_ns: u64) -> u64 {
     let _anchor_day = anchor_day.clamp(1, 31);
     let add_ns = (months as u128).saturating_mul(AVG_MONTH_NS);
