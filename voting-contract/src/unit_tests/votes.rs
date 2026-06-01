@@ -530,6 +530,18 @@ fn take_snapshot_and_vote_without_vote_returns_snapshot_promise() {
     let pid = create_proposal(&mut contract, ProposalFlow::Classic);
     approve_proposal(&mut contract, pid, None);
 
+    set_ctx(voter(), 0, TEST_NOW_NS);
+    let _ = contract.take_snapshot_and_vote(pid, None);
+}
+
+#[test]
+#[should_panic(expected = "Snapshot-only call must not attach a deposit")]
+fn take_snapshot_and_vote_without_vote_rejects_deposit() {
+    // Snapshot-only path must not strand an attached deposit.
+    let mut contract = fresh_contract();
+    let pid = create_proposal(&mut contract, ProposalFlow::Classic);
+    approve_proposal(&mut contract, pid, None);
+
     set_ctx(voter(), 1, TEST_NOW_NS);
     let _ = contract.take_snapshot_and_vote(pid, None);
 }

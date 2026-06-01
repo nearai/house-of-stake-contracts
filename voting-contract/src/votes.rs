@@ -114,7 +114,10 @@ impl Contract {
         );
 
         if attached_deposit > near_add(storage_added, NearToken::from_yoctonear(1)) {
-            let refund = near_sub(attached_deposit, storage_added);
+            let refund = near_sub(
+                attached_deposit,
+                near_add(storage_added, NearToken::from_yoctonear(1)),
+            );
             Promise::new(env::signer_account_id())
                 .transfer(refund)
                 .detach();
@@ -162,8 +165,14 @@ impl Contract {
         if proposal.status != ProposalStatus::Sandbox && proposal.status != ProposalStatus::Voting {
             env::panic_str("Proposal must be in Sandbox or Voting status to take a snapshot");
         }
-        if vote.is_none() && proposal.snapshot_and_state.is_some() {
-            env::panic_str("Snapshot is already set for this proposal");
+        if vote.is_none() {
+            if proposal.snapshot_and_state.is_some() {
+                env::panic_str("Snapshot is already set for this proposal");
+            }
+            require!(
+                env::attached_deposit().is_zero(),
+                "Snapshot-only call must not attach a deposit"
+            );
         }
 
         let mut promise: Option<Promise> = None;

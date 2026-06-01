@@ -81,7 +81,7 @@ impl Contract {
 
         self.tree.flush();
         let storage_after = env::storage_usage();
-        if storage_after > storage_before {
+        let refund = if storage_after > storage_before {
             let storage_cost = env::storage_byte_cost()
                 .checked_mul((storage_after - storage_before).into())
                 .expect("Storage cost overflow");
@@ -92,7 +92,11 @@ impl Contract {
                     storage_cost
                 )
             );
-            let refund = attached.checked_sub(storage_cost).unwrap();
+            attached.checked_sub(storage_cost).unwrap()
+        } else {
+            attached
+        };
+        if refund > NearToken::ZERO {
             Promise::new(predecessor_id).transfer(refund).detach();
         }
     }
@@ -132,11 +136,21 @@ mod tests {
         contract.set_delegations(entries.clone());
 
         assert_eq!(
-            contract.get_account_info(caller).unwrap().account.delegations,
+            contract
+                .get_account_info(caller)
+                .unwrap()
+                .account
+                .delegations,
             entries
         );
-        assert_eq!(delegated_total(&contract, "a.near"), NearToken::from_millinear(250));
-        assert_eq!(delegated_total(&contract, "b.near"), NearToken::from_millinear(150));
+        assert_eq!(
+            delegated_total(&contract, "a.near"),
+            NearToken::from_millinear(250)
+        );
+        assert_eq!(
+            delegated_total(&contract, "b.near"),
+            NearToken::from_millinear(150)
+        );
     }
 
     #[test]
@@ -148,11 +162,21 @@ mod tests {
         contract.set_delegations(entries.clone());
 
         assert_eq!(
-            contract.get_account_info(caller).unwrap().account.delegations,
+            contract
+                .get_account_info(caller)
+                .unwrap()
+                .account
+                .delegations,
             entries
         );
-        assert_eq!(delegated_total(&contract, "a.near"), NearToken::from_millinear(400));
-        assert_eq!(delegated_total(&contract, "b.near"), NearToken::from_millinear(600));
+        assert_eq!(
+            delegated_total(&contract, "a.near"),
+            NearToken::from_millinear(400)
+        );
+        assert_eq!(
+            delegated_total(&contract, "b.near"),
+            NearToken::from_millinear(600)
+        );
     }
 
     #[test]
@@ -164,10 +188,17 @@ mod tests {
         contract.set_delegations(entries.clone());
 
         assert_eq!(
-            contract.get_account_info(caller).unwrap().account.delegations,
+            contract
+                .get_account_info(caller)
+                .unwrap()
+                .account
+                .delegations,
             entries
         );
-        assert_eq!(delegated_total(&contract, "a.near"), NearToken::from_near(1));
+        assert_eq!(
+            delegated_total(&contract, "a.near"),
+            NearToken::from_near(1)
+        );
     }
 
     #[test]
