@@ -828,7 +828,7 @@ pub async fn buyer_update_subscription_scheduled(
             "target_amount": target_amount_yocto.to_string(),
         }))
         .deposit(NearToken::from_yoctonear(1))
-        .gas(WsGas::from_tgas(50))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
         .transact()
         .await?
         .into_result()?;
