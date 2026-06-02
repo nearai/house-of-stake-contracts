@@ -9,6 +9,7 @@ set -euo pipefail
 # Optional:
 #   CHAT_API_URL=http://localhost:8080
 #   DRY_RUN=1
+#   HOS_CREDITS_PER_STAKED_NEAR_NANO_USD=2500000000  # 0.4 NEAR per $1 credit
 #
 # Optional Stripe preservation/addition:
 #   STRIPE_STARTER_PRICE_ID=price_...
@@ -23,6 +24,7 @@ HOS_AGENT_STARTER_PRICE_ID="${HOS_AGENT_STARTER_PRICE_ID:-price_RjiajH4KEZ43w68D
 HOS_AGENT_BASIC_PRICE_ID="${HOS_AGENT_BASIC_PRICE_ID:-price_h577VYQUEynPA3uQt1u1neGn}"
 HOS_AGENT_PRO_PRICE_ID="${HOS_AGENT_PRO_PRICE_ID:-price_7EAls0E844ULR06EEl53fQoI}"
 HOS_CREDIT_PRICE_ID="${HOS_CREDIT_PRICE_ID:-price_z2EbTifr7Nyqwt6v5kFqSiUb}"
+HOS_CREDITS_PER_STAKED_NEAR_NANO_USD="${HOS_CREDITS_PER_STAKED_NEAR_NANO_USD:-2500000000}"
 
 DEFAULT_CREDITS_PROVIDER="${DEFAULT_CREDITS_PROVIDER:-stripe}"
 DRY_RUN="${DRY_RUN:-0}"
@@ -36,6 +38,7 @@ export HOS_AGENT_STARTER_PRICE_ID
 export HOS_AGENT_BASIC_PRICE_ID
 export HOS_AGENT_PRO_PRICE_ID
 export HOS_CREDIT_PRICE_ID
+export HOS_CREDITS_PER_STAKED_NEAR_NANO_USD
 export DEFAULT_CREDITS_PROVIDER
 
 python3 - "$CHAT_API_URL" "$ADMIN_SESSION_TOKEN" "$DRY_RUN" <<'PY'
@@ -82,8 +85,20 @@ def env(name, default=None):
     return value.strip() if isinstance(value, str) else value
 
 
+def int_env(name, default=None):
+    value = env(name, default)
+    try:
+        return int(value)
+    except (TypeError, ValueError) as error:
+        raise SystemExit(f"{name} must be an integer, got {value!r}") from error
+
+
 current = request_json("GET", "/v1/admin/configs") or {}
 subscription_plans = current.get("subscription_plans") or {}
+hos_credits_per_staked_near_nano_usd = int_env(
+    "HOS_CREDITS_PER_STAKED_NEAR_NANO_USD",
+    "2500000000",
+)
 
 hos_plans = {
     "starter": {
@@ -115,6 +130,9 @@ for plan_name, hos_config in hos_plans.items():
         providers["stripe"] = {"price_id": stripe_price_id}
     plan["providers"] = providers
     plan["agent_instances"] = hos_config["agent_instances"]
+    plan["stake_based_monthly_credits"] = {
+        "credits_per_staked_near_nano_usd": hos_credits_per_staked_near_nano_usd,
+    }
     subscription_plans[plan_name] = plan
 
 credits = dict(current.get("credits") or {})
