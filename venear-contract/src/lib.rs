@@ -16,13 +16,13 @@ use merkle_tree::{MerkleProof, MerkleTree, MerkleTreeSnapshot};
 
 use crate::account::VAccountInternal;
 use crate::config::Config;
+use common::Version;
 use common::account::*;
 use common::global_state::*;
 use common::venear::{VenearGrowthConfig, VenearGrowthConfigFixedRate};
-use common::Version;
 use near_sdk::store::LookupMap;
 use near_sdk::{
-    env, near, require, sys, AccountId, BorshStorageKey, CryptoHash, NearToken, PanicOnDefault,
+    AccountId, BorshStorageKey, CryptoHash, NearToken, PanicOnDefault, env, near, require, sys,
 };
 
 #[derive(BorshStorageKey)]

@@ -1,10 +1,10 @@
 pub mod venear_helpers;
 pub mod voting_helpers;
 
-#[allow(dead_code)]
-use common::voting::ProposalStatus;
 use common::Fraction;
 use common::TimestampNs;
+#[allow(dead_code)]
+use common::voting::ProposalStatus;
 use near_sdk::json_types::{Base58CryptoHash, U64};
 use near_sdk::{CryptoHash, Gas, NearToken, Timestamp};
 use near_workspaces::network::Sandbox;
@@ -685,10 +685,8 @@ impl VenearTestWorkspace {
             | ProposalStatus::Defeated
             | ProposalStatus::Succeeded
             | ProposalStatus::Executable => {
-                let voting_start: u64 = proposal["voting_start_time_ns"]
-                    .as_str()
-                    .unwrap()
-                    .parse()?;
+                let voting_start: u64 =
+                    proposal["voting_start_time_ns"].as_str().unwrap().parse()?;
                 let voting_duration: u64 =
                     proposal["voting_duration_ns"].as_str().unwrap().parse()?;
                 let timelock_duration: u64 =
@@ -724,22 +722,14 @@ impl VenearTestWorkspace {
         target: common::voting::ProposalStatus,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let proposal = self.get_proposal(proposal_id).await?;
-        let current_status: ProposalStatus =
-            serde_json::from_value(proposal["status"].clone())?;
+        let current_status: ProposalStatus = serde_json::from_value(proposal["status"].clone())?;
 
         let block = self.sandbox.view_block().await?;
         let now = block.timestamp();
 
         let target_ns: u64 = match target {
-            ProposalStatus::Voting => {
-                proposal["voting_start_time_ns"]
-                    .as_str()
-                    .unwrap()
-                    .parse()?
-            }
-            ProposalStatus::Succeeded
-            | ProposalStatus::Defeated
-            | ProposalStatus::Executable => {
+            ProposalStatus::Voting => proposal["voting_start_time_ns"].as_str().unwrap().parse()?,
+            ProposalStatus::Succeeded | ProposalStatus::Defeated | ProposalStatus::Executable => {
                 if current_status == ProposalStatus::Sandbox {
                     let sandbox_start: u64 = proposal["sandbox_start_time_ns"]
                         .as_str()
@@ -749,18 +739,14 @@ impl VenearTestWorkspace {
                         proposal["sandbox_duration_ns"].as_str().unwrap().parse()?;
                     sandbox_start + sandbox_duration
                 } else {
-                    let voting_start: u64 = proposal["voting_start_time_ns"]
-                        .as_str()
-                        .unwrap()
-                        .parse()?;
+                    let voting_start: u64 =
+                        proposal["voting_start_time_ns"].as_str().unwrap().parse()?;
                     let voting_duration: u64 =
                         proposal["voting_duration_ns"].as_str().unwrap().parse()?;
                     voting_start + voting_duration
                 }
             }
-            ProposalStatus::Expired => {
-                proposal["expiration_ns"].as_str().unwrap().parse()?
-            }
+            ProposalStatus::Expired => proposal["expiration_ns"].as_str().unwrap().parse()?,
             _ => panic!("Unsupported target status: {target:?}"),
         };
 

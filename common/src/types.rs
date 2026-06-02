@@ -1,6 +1,6 @@
 use crate::venear::VenearGrowthConfig;
 use crate::*;
-use near_sdk::json_types::{U128, U64};
+use near_sdk::json_types::{U64, U128};
 use near_sdk::require;
 use std::cmp::Ordering;
 use std::ops::{Add, AddAssign, Mul, Sub, SubAssign};
@@ -233,8 +233,14 @@ mod tests {
             extra_venear_balance: NearToken::from_near(50),
         };
         let scaled = balance.scale_by_bps(Bps::FULL);
-        assert_eq!(scaled.near_balance.as_yoctonear(), balance.near_balance.as_yoctonear());
-        assert_eq!(scaled.extra_venear_balance.as_yoctonear(), balance.extra_venear_balance.as_yoctonear());
+        assert_eq!(
+            scaled.near_balance.as_yoctonear(),
+            balance.near_balance.as_yoctonear()
+        );
+        assert_eq!(
+            scaled.extra_venear_balance.as_yoctonear(),
+            balance.extra_venear_balance.as_yoctonear()
+        );
     }
 
     #[test]
@@ -244,8 +250,14 @@ mod tests {
             extra_venear_balance: NearToken::from_near(50),
         };
         let scaled = balance.scale_by_bps(Bps::new(5_000));
-        assert_eq!(scaled.near_balance.as_yoctonear(), NearToken::from_near(50).as_yoctonear());
-        assert_eq!(scaled.extra_venear_balance.as_yoctonear(), NearToken::from_near(25).as_yoctonear());
+        assert_eq!(
+            scaled.near_balance.as_yoctonear(),
+            NearToken::from_near(50).as_yoctonear()
+        );
+        assert_eq!(
+            scaled.extra_venear_balance.as_yoctonear(),
+            NearToken::from_near(25).as_yoctonear()
+        );
     }
 
     #[test]
@@ -294,6 +306,9 @@ mod tests {
         };
         let scaled = balance.scale_by_bps(Bps::new(2_500));
         assert_eq!(scaled.near_balance.as_yoctonear(), 0);
-        assert_eq!(scaled.extra_venear_balance.as_yoctonear(), NearToken::from_near(25).as_yoctonear());
+        assert_eq!(
+            scaled.extra_venear_balance.as_yoctonear(),
+            NearToken::from_near(25).as_yoctonear()
+        );
     }
 }

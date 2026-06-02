@@ -3,10 +3,10 @@
 
 use crate::Contract;
 use crate::config::Config;
+use common::Bps;
 use common::account::DelegationEntry;
 use common::test_utils::{acc, fixed_rate_growth_config};
 pub use common::test_utils::{owner, set_ctx};
-use common::Bps;
 use near_sdk::json_types::U64;
 use near_sdk::{AccountId, NearToken};
 

@@ -65,7 +65,11 @@ async fn test_partial_delegation_voting() -> Result<(), Box<dyn std::error::Erro
 
     // Alice 200 (split 100+60+40) + Bob 50 + Carol 30 = 280, no double-counting
     let total = for_venear.as_yoctonear() + against_venear.as_yoctonear();
-    assert_almost_eq(NearToken::from_yoctonear(total), NearToken::from_near(280), delta);
+    assert_almost_eq(
+        NearToken::from_yoctonear(total),
+        NearToken::from_near(280),
+        delta,
+    );
 
     Ok(())
 }

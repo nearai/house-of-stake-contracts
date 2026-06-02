@@ -1,4 +1,4 @@
-use near_sdk::{near, AccountId, NearToken};
+use near_sdk::{AccountId, NearToken, near};
 
 mod bps;
 mod types;

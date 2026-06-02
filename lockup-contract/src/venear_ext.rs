@@ -1,6 +1,6 @@
 use crate::*;
 use common::lockup_update::VLockupUpdate;
-use near_sdk::{ext_contract, AccountId};
+use near_sdk::{AccountId, ext_contract};
 
 pub const GAS_FOR_VENEAR_LOCKUP_UPDATE: Gas = Gas::from_tgas(20);
 

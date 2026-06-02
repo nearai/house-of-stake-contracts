@@ -1,9 +1,9 @@
 use crate::config::LockupContractConfig;
 use crate::*;
-use near_sdk::borsh::{self, BorshDeserialize};
-use near_sdk::json_types::U64;
 #[cfg(target_arch = "wasm32")]
 use near_sdk::Gas;
+use near_sdk::borsh::{self, BorshDeserialize};
+use near_sdk::json_types::U64;
 
 #[cfg(target_arch = "wasm32")]
 const MIGRATE_STATE_GAS: Gas = Gas::from_tgas(50);

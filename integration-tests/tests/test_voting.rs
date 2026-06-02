@@ -1,7 +1,7 @@
 mod setup;
 
-use crate::setup::voting_helpers::*;
 use crate::setup::VenearTestWorkspaceBuilder;
+use crate::setup::voting_helpers::*;
 use common::voting::{ProposalStatus, VoteOption};
 use near_sdk::json_types::U64;
 use near_sdk::{Gas, NearToken};
@@ -458,7 +458,9 @@ async fn test_voting_veto_proposal() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Council can veto during timelock
-    veto_proposal(&v, council, proposal_id).await?.into_result()?;
+    veto_proposal(&v, council, proposal_id)
+        .await?
+        .into_result()?;
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(get_status(&proposal)?, ProposalStatus::Vetoed);
@@ -534,7 +536,9 @@ async fn test_voting_noveto_proposal() -> Result<(), Box<dyn std::error::Error>>
     );
 
     // Council can noveto during timelock — fast-forwards past timelock to Succeeded
-    noveto_proposal(&v, council, proposal_id).await?.into_result()?;
+    noveto_proposal(&v, council, proposal_id)
+        .await?
+        .into_result()?;
 
     let proposal = v.get_proposal(proposal_id).await?;
     assert_eq!(
@@ -544,7 +548,9 @@ async fn test_voting_noveto_proposal() -> Result<(), Box<dyn std::error::Error>>
     );
 
     // Second proposal: noveto from Timelock should go to Executable.
-    noveto_proposal(&v, council, proposal_id_2).await?.into_result()?;
+    noveto_proposal(&v, council, proposal_id_2)
+        .await?
+        .into_result()?;
 
     let proposal = v.get_proposal(proposal_id_2).await?;
     assert_eq!(
