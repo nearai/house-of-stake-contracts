@@ -104,14 +104,21 @@ hos_plans = {
     "starter": {
         "price_id": env("HOS_AGENT_STARTER_PRICE_ID"),
         "agent_instances": {"max": 1},
+        "monthly_credits": {"max": 5000000000},
     },
     "basic": {
         "price_id": env("HOS_AGENT_BASIC_PRICE_ID"),
         "agent_instances": {"max": 2},
+        "stake_based_monthly_credits": {
+            "credits_per_staked_near_nano_usd": hos_credits_per_staked_near_nano_usd,
+        },
     },
     "pro": {
         "price_id": env("HOS_AGENT_PRO_PRICE_ID"),
         "agent_instances": {"max": 5},
+        "stake_based_monthly_credits": {
+            "credits_per_staked_near_nano_usd": hos_credits_per_staked_near_nano_usd,
+        },
     },
 }
 
@@ -130,9 +137,12 @@ for plan_name, hos_config in hos_plans.items():
         providers["stripe"] = {"price_id": stripe_price_id}
     plan["providers"] = providers
     plan["agent_instances"] = hos_config["agent_instances"]
-    plan["stake_based_monthly_credits"] = {
-        "credits_per_staked_near_nano_usd": hos_credits_per_staked_near_nano_usd,
-    }
+    if "monthly_credits" in hos_config:
+        plan["monthly_credits"] = hos_config["monthly_credits"]
+    if "stake_based_monthly_credits" in hos_config:
+        plan["stake_based_monthly_credits"] = hos_config["stake_based_monthly_credits"]
+    else:
+        plan.pop("stake_based_monthly_credits", None)
     subscription_plans[plan_name] = plan
 
 credits = dict(current.get("credits") or {})
