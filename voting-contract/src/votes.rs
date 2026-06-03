@@ -118,9 +118,13 @@ impl Contract {
                 attached_deposit,
                 near_add(storage_added, NearToken::from_yoctonear(1)),
             );
-            Promise::new(env::signer_account_id())
-                .transfer(refund)
-                .detach();
+            // Refund whoever supplied the deposit: signer on the chained self-call, else predecessor.
+            let refund_recipient = if predecessor_account_id == &env::current_account_id() {
+                env::signer_account_id()
+            } else {
+                predecessor_account_id.clone()
+            };
+            Promise::new(refund_recipient).transfer(refund).detach();
         }
 
         events::emit::proposal_vote_action(

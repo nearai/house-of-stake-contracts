@@ -327,6 +327,7 @@ fn noveto_with_actions_moves_to_executable() {
     );
     set_ctx(reviewer(), 1, TEST_NOW_NS);
     let _ = contract.approve_proposal(id, None);
+    contract.proposals.flush();
     near_sdk::testing_env!(
         VMContextBuilder::new()
             .current_account_id(current_account())

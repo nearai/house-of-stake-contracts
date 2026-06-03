@@ -558,10 +558,10 @@ async fn test_vote_on_promoted_queued_without_snapshot() -> Result<(), Box<dyn s
     );
 
     // Now fetch the snapshot (no vote) and confirm it's persisted.
+    // Snapshot-only calls must not attach a deposit.
     let take = user
         .call(v.voting_id(), "take_snapshot_and_vote")
         .args_json(json!({ "proposal_id": p2, "vote": serde_json::Value::Null }))
-        .deposit(NearToken::from_yoctonear(1))
         .gas(Gas::from_tgas(100))
         .transact()
         .await?;
@@ -581,7 +581,6 @@ async fn test_vote_on_promoted_queued_without_snapshot() -> Result<(), Box<dyn s
     let again = user
         .call(v.voting_id(), "take_snapshot_and_vote")
         .args_json(json!({ "proposal_id": p2, "vote": serde_json::Value::Null }))
-        .deposit(NearToken::from_yoctonear(1))
         .gas(Gas::from_tgas(100))
         .transact()
         .await?;
@@ -596,7 +595,6 @@ async fn test_vote_on_promoted_queued_without_snapshot() -> Result<(), Box<dyn s
     let on_defeated = user
         .call(v.voting_id(), "take_snapshot_and_vote")
         .args_json(json!({ "proposal_id": p1, "vote": serde_json::Value::Null }))
-        .deposit(NearToken::from_yoctonear(1))
         .gas(Gas::from_tgas(100))
         .transact()
         .await?;

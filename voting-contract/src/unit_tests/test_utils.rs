@@ -131,6 +131,7 @@ pub fn approve_proposal(
     set_ctx(reviewer(), 1, TEST_NOW_NS);
     let _ = contract.approve_proposal(id, majority);
     if let Some(fixture) = snapshot {
+        contract.proposals.flush();
         near_sdk::testing_env!(
             VMContextBuilder::new()
                 .current_account_id(current_account())

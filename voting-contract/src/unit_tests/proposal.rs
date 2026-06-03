@@ -85,6 +85,7 @@ mod lifecycle_tests {
         );
         set_ctx(reviewer(), 1, TEST_NOW_NS);
         let _ = contract.approve_proposal(id, None);
+        contract.proposals.flush();
         near_sdk::testing_env!(
             VMContextBuilder::new()
                 .current_account_id(current_account())
@@ -486,6 +487,7 @@ mod lifecycle_tests {
         );
         set_ctx(reviewer(), 1, TEST_NOW_NS);
         let _ = contract.approve_proposal(id, Some(MajorityType::Simple));
+        contract.proposals.flush();
         near_sdk::testing_env!(
             VMContextBuilder::new()
                 .current_account_id(current_account())
@@ -810,6 +812,7 @@ mod long_flow_tests {
         // 2. Reviewer approves -> Voting (with snapshot wired by helper)
         set_ctx(reviewer(), 1, TEST_NOW_NS);
         let _ = contract.approve_proposal(id, None);
+        contract.proposals.flush();
         near_sdk::testing_env!(
             VMContextBuilder::new()
                 .current_account_id(current_account())
@@ -870,6 +873,7 @@ mod long_flow_tests {
         );
         set_ctx(reviewer(), 1, TEST_NOW_NS);
         let _ = contract.approve_proposal(id, None);
+        contract.proposals.flush();
         near_sdk::testing_env!(
             VMContextBuilder::new()
                 .current_account_id(current_account())
@@ -907,6 +911,7 @@ mod long_flow_tests {
 
         set_ctx(reviewer(), 1, TEST_NOW_NS);
         let _ = contract.approve_proposal(id, Some(MajorityType::Simple));
+        contract.proposals.flush();
         near_sdk::testing_env!(
             VMContextBuilder::new()
                 .current_account_id(current_account())

@@ -12,7 +12,7 @@ pub type ProposalId = u32;
 const NS_PER_DAY: u64 = 86_400_000_000_000;
 
 /// Bytes reserved at proposal-creation time to cover the future `SnapshotAndState` write.
-const SNAPSHOT_STORAGE_RESERVE_BYTES: u64 = 101;
+pub(crate) const SNAPSHOT_STORAGE_RESERVE_BYTES: u64 = 101;
 
 /// A single action that the voting contract can execute on behalf of a passed proposal.
 #[derive(Clone)]

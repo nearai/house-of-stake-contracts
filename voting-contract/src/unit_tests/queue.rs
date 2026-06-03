@@ -294,6 +294,7 @@ fn slot_frees_one_at_a_time_promotes_head_only() {
     );
     set_ctx(reviewer(), 1, b_creation);
     let _ = contract.approve_proposal(b, None);
+    contract.proposals.flush();
     near_sdk::testing_env!(
         VMContextBuilder::new()
             .current_account_id(current_account())

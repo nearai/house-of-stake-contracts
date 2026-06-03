@@ -1,4 +1,7 @@
-use crate::proposal::{MajorityType, ProposalFlow, ProposalInfo, ProposalStatus, SnapshotAndState};
+use crate::proposal::{
+    MajorityType, ProposalFlow, ProposalInfo, ProposalStatus, SNAPSHOT_STORAGE_RESERVE_BYTES,
+    SnapshotAndState,
+};
 use crate::*;
 use common::global_state::{GlobalState, VGlobalState};
 use common::{TimestampNs, events};
@@ -217,7 +220,15 @@ impl Contract {
             venear_growth_config: global_state.venear_growth_config,
         });
 
+        // Guard the reserve pre-paid at creation against future layout growth.
+        let storage_before = env::storage_usage();
         self.internal_set_proposal(proposal);
+        self.proposals.flush();
+        let storage_added = env::storage_usage().saturating_sub(storage_before);
+        require!(
+            storage_added <= SNAPSHOT_STORAGE_RESERVE_BYTES,
+            "Snapshot write exceeded reserved storage"
+        );
         self.get_proposal(proposal_id).unwrap()
     }
 }
