@@ -169,7 +169,7 @@ mod lifecycle_tests {
     fn created_proposal_expires_exactly_at_deadline() {
         let mut contract = fresh_contract();
         set_ctx(owner(), 1, TEST_NOW_NS);
-        contract.set_proposal_expiration(3600);
+        contract.set_classic_proposal_expiration(3600);
         let id = create_proposal(&mut contract, ProposalFlow::Classic);
 
         let expiration_ns = TEST_NOW_NS + contract.get_config().classic_proposal_expiration_ns.0;
@@ -187,7 +187,7 @@ mod lifecycle_tests {
     fn created_proposal_with_disabled_expiration_stays_created() {
         let mut contract = fresh_contract();
         set_ctx(owner(), 1, TEST_NOW_NS);
-        contract.set_proposal_expiration(0);
+        contract.set_classic_proposal_expiration(0);
         let id = create_proposal(&mut contract, ProposalFlow::Classic);
         let very_far = TEST_NOW_NS + 10 * 365 * 24 * 3600 * 1_000_000_000;
         assert_eq!(status_at(&contract, id, very_far), ProposalStatus::Created);

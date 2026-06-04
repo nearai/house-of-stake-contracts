@@ -280,10 +280,10 @@ fn set_quorum_floor_round_trips() {
 }
 
 #[test]
-fn set_proposal_expiration_round_trips() {
+fn set_classic_proposal_expiration_round_trips() {
     let mut contract = fresh_contract();
     set_ctx(owner(), 1, TEST_NOW_NS);
-    contract.set_proposal_expiration(12_345);
+    contract.set_classic_proposal_expiration(12_345);
     assert_eq!(
         contract.get_config().classic_proposal_expiration_ns.0,
         12_345u64 * 1_000_000_000

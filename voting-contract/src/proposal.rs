@@ -64,6 +64,7 @@ pub struct Proposal {
     pub timelock_duration_ns: U64,
     // FastTrack only
     pub sandbox_start_time_ns: Option<U64>,
+    /// Unclaimed bond NEAR; reset to 0 once the bond is claimed.
     pub bond_amount: NearToken,
     pub sandbox_duration_ns: U64,
     pub sandbox_threshold_bps: Bps,

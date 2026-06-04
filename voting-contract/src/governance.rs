@@ -116,7 +116,7 @@ impl Contract {
     /// Can only be called by the owner.
     /// Requires 1 yocto NEAR.
     #[payable]
-    pub fn set_proposal_expiration(&mut self, proposal_expiration_sec: u32) {
+    pub fn set_classic_proposal_expiration(&mut self, proposal_expiration_sec: u32) {
         assert_one_yocto();
         self.assert_owner();
         self.config.classic_proposal_expiration_ns =
