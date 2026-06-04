@@ -424,6 +424,14 @@ async fn test_contracts_upgrade() -> Result<(), Box<dyn std::error::Error>> {
         "Test assumes venear.dao is owned by the patched sandbox owner",
     );
 
+    // Capture the legacy proposals' JSON straight off the live v1.0.3 contract so that, after the
+    // upgrade, we can diff each migrated proposal field-by-field against its pre-migration value.
+    let old_proposals: Vec<serde_json::Value> = voting
+        .view("get_proposals")
+        .args_json(json!({ "from_index": 0u32, "limit": num_proposals_before }))
+        .await?
+        .json()?;
+
     // ============================================================
     // Phase 1: upgrade voting only.
     // ============================================================
@@ -509,6 +517,83 @@ async fn test_contracts_upgrade() -> Result<(), Box<dyn std::error::Error>> {
         num_proposals_after, num_proposals_before,
         "Proposal count must not change across the voting upgrade",
     );
+
+    // Verify migration is correct
+    let migrated_proposals: Vec<serde_json::Value> = voting
+        .view("get_proposals")
+        .args_json(json!({ "from_index": 0u32, "limit": num_proposals_before }))
+        .await?
+        .json()?;
+    assert_eq!(
+        u32::try_from(migrated_proposals.len()).unwrap(),
+        num_proposals_before,
+        "Every legacy proposal must remain fetchable after migrate_state()",
+    );
+    for (idx, (old, new)) in old_proposals
+        .iter()
+        .zip(migrated_proposals.iter())
+        .enumerate()
+    {
+        // Fields the migration must carry over verbatim from the v1.0.3 proposal (+ its metadata).
+        // `status` is deliberately excluded: both contracts re-`update()` on read against the
+        // current block time, so it can legitimately differ between the two reads.
+        for field in [
+            "id",
+            "creation_time_ns",
+            "proposer_id",
+            "reviewer_id",
+            "rejecter_id",
+            "voting_start_time_ns",
+            "voting_duration_ns",
+            "timelock_duration_ns",
+            "expiration_ns",
+            "snapshot_and_state",
+            "votes",
+            "total_votes",
+            "quorum_threshold_bps",
+            "quorum_floor",
+            "approval_threshold_bps",
+            "actions",
+            "title",
+            "description",
+        ] {
+            assert_eq!(
+                new[field], old[field],
+                "Migrated proposal {idx} field `{field}` was not preserved by migrate_state()\n\
+                 old: {old:#}\nnew: {new:#}",
+            );
+        }
+        assert_eq!(
+            new["id"].as_u64().unwrap(),
+            u64::try_from(idx).unwrap(),
+            "Migrated proposal {idx} should keep its index as `id`: {new:#}",
+        );
+        // New merged-flow fields the migration seeds onto every legacy (Classic) proposal.
+        assert_eq!(
+            new["flow"], "Classic",
+            "migrate_state() rewrites every legacy proposal with flow=Classic: {new:#}",
+        );
+        assert_eq!(
+            new["approval_time_ns"], old["voting_start_time_ns"],
+            "Legacy proposal {idx} should backfill approval_time_ns from voting_start_time_ns: {new:#}",
+        );
+        assert!(
+            new["sandbox_start_time_ns"].is_null(),
+            "Legacy proposal {idx} should have no sandbox_start_time_ns: {new:#}",
+        );
+        assert_eq!(
+            new["bond_amount"], "0",
+            "Legacy proposal {idx} should carry a zero bond: {new:#}",
+        );
+        assert_eq!(
+            new["sandbox_duration_ns"], "0",
+            "Legacy proposal {idx} should carry a zero sandbox duration: {new:#}",
+        );
+        assert_eq!(
+            new["sandbox_threshold_bps"], 0,
+            "Legacy proposal {idx} should carry a zero sandbox threshold: {new:#}",
+        );
+    }
 
     // ============================================================
     // Phase 2: new voting + OLD venear.
