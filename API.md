@@ -44,8 +44,12 @@ pub struct VenearGrowthConfigFixedRate {
 /// A single partial delegation entry. `bps` is in basis points (1 = 0.01%).
 pub struct DelegationEntry {
     pub account_id: AccountId,
-    pub bps: u16,
+    pub bps: Bps,
 }
+
+/// Basis-points newtype around `u16`. Construction validates `value <= 10_000`.
+/// Serializes transparently as a plain integer in JSON.
+pub struct Bps(u16);
 
 /// The account details that are stored in the Merkle Tree.
 pub struct Account {
@@ -221,21 +225,20 @@ pub fn get_num_accounts(&self) -> u32;
 pub fn get_account_by_index(&self, index: u32) -> Option<AccountInfo>;
 
 /// Returns a list of account info from the given index based on the merkle tree order.
-pub fn get_accounts(&self, from_index: Option<u32>, limit: Option<u32>);
+pub fn get_accounts(&self, from_index: Option<u32>, limit: Option<u32>) -> Vec<AccountInfo>;
 
 /// Returns a list of raw account data from the given index based on the merkle tree order.
-pub fn get_accounts_raw(&self, from_index: Option<u32>, limit: Option<u32>);
+pub fn get_accounts_raw(&self, from_index: Option<u32>, limit: Option<u32>) -> Vec<&VAccount>;
 
 /// Returns the current contract configuration.
-pub fn get_config(&self);
+pub fn get_config(&self) -> &Config;
 
 /// Atomically replace the caller's entire delegation set.
 /// `entries` must be sorted ascending by account_id (no duplicates), each
-/// `bps` in [1, 10_000], total `bps` ≤ 10_000, no self-delegation, no
-/// delegation to the contract account, every `account_id` registered
-/// in veNEAR, and at most `config.max_delegations` entries. Pass an empty
-/// Vec to undelegate all. Requires attached deposit ≥ storage growth cost;
-/// refunds overpay.
+/// `bps` in [1, 10_000], total `bps` ≤ 10_000, no self-delegation, every
+/// `account_id` registered in veNEAR, and at most `config.max_delegations`
+/// entries. Pass an empty Vec to undelegate all. Requires attached deposit
+/// ≥ storage growth cost; refunds overpay.
 #[payable]
 pub fn set_delegations(&mut self, entries: Vec<DelegationEntry>);
 
@@ -406,7 +409,7 @@ pub fn ft_metadata(&self) -> serde_json::Value;
 pub fn migrate_state() -> Self;
 
 /// Returns the version of the contract from the Cargo.toml.
-pub fn get_version(&self);
+pub fn get_version(&self) -> String;
 
 /// Upgrades the contract to the new version.
 /// Requires the method to be called by the owner.
@@ -520,7 +523,7 @@ pub fn get_balance(&self) -> NearToken;
 pub fn get_liquid_owners_balance(&self) -> NearToken;
 
 /// Returns the version of the Lockup contract.
-pub fn get_version(&self);
+pub fn get_version(&self) -> Version;
 
 /// OWNER'S METHOD
 ///
@@ -796,7 +799,7 @@ pub struct Config {
     pub guardians: Vec<AccountId>,
 
     /// Max time a Classic proposal may stay in `Created` before expiring (0 = no expiration).
-    pub proposal_expiration_ns: U64,
+    pub classic_proposal_expiration_ns: U64,
 
     /// Max time a FastTrack proposal may stay in `Created` before expiring (0 = no expiration).
     pub fast_track_proposal_expiration_ns: U64,
@@ -805,25 +808,25 @@ pub struct Config {
     pub proposed_new_owner_account_id: Option<AccountId>,
 
     /// Quorum threshold in basis points (e.g. 3500 = 35% of total supply).
-    pub quorum_threshold_bps: u16,
+    pub quorum_threshold_bps: Bps,
 
     /// Absolute minimum veNEAR required for quorum.
     pub quorum_floor: NearToken,
 
     /// Approval threshold in basis points for Classic proposals (e.g. 5000 = 50%).
-    pub approval_threshold_bps: u16,
+    pub approval_threshold_bps: Bps,
 
     /// FastTrack simple-majority threshold in basis points.
-    pub simple_majority_threshold_bps: u16,
+    pub simple_majority_threshold_bps: Bps,
 
     /// FastTrack strong-majority threshold in basis points.
-    pub strong_majority_threshold_bps: u16,
+    pub strong_majority_threshold_bps: Bps,
 
     /// Sandbox pre-voting duration (FastTrack flow).
     pub sandbox_duration_ns: U64,
 
     /// "For" votes threshold to graduate from Sandbox to Scheduled (basis points).
-    pub sandbox_threshold_bps: u16,
+    pub sandbox_threshold_bps: Bps,
 
     /// Maximum number of proposals simultaneously in Sandbox/Scheduled/Voting/Timelock.
     /// Approved proposals beyond this cap park in the pending queue.
@@ -911,12 +914,12 @@ pub struct Proposal {
     /// The status of the proposal.
     pub status: ProposalStatus,
     /// Quorum threshold in basis points.
-    pub quorum_threshold_bps: u16,
+    pub quorum_threshold_bps: Bps,
     /// Absolute minimum veNEAR required for quorum.
     pub quorum_floor: NearToken,
     /// Approval threshold in basis points. For Classic, copied from config; for
     /// FastTrack, set at approval time based on `MajorityType`.
-    pub approval_threshold_bps: u16,
+    pub approval_threshold_bps: Bps,
     /// Optional list of on-chain actions to execute when the proposal succeeds.
     pub actions: Option<Vec<ProposalAction>>,
     /// Which flow this proposal follows.
@@ -930,7 +933,7 @@ pub struct Proposal {
     /// FastTrack only. Sandbox pre-voting duration in nanoseconds.
     pub sandbox_duration_ns: U64,
     /// FastTrack only. Sandbox graduation threshold in basis points.
-    pub sandbox_threshold_bps: u16,
+    pub sandbox_threshold_bps: Bps,
 }
 
 /// The proposal information structure that contains the proposal and its metadata.
@@ -1094,7 +1097,7 @@ pub fn set_treasury_account_id(&mut self, treasury_account_id: AccountId);
 /// Can only be called by the owner.
 /// Requires 1 yocto NEAR.
 #[payable]
-pub fn set_proposal_expiration(&mut self, proposal_expiration_sec: u32);
+pub fn set_classic_proposal_expiration(&mut self, proposal_expiration_sec: u32);
 
 /// Updates the FastTrack proposal expiration duration in seconds. Set to 0 to disable.
 /// Can only be called by the owner.
@@ -1106,7 +1109,7 @@ pub fn set_fast_track_proposal_expiration(&mut self, proposal_expiration_sec: u3
 /// Can only be called by the owner.
 /// Requires 1 yocto NEAR.
 #[payable]
-pub fn set_quorum_threshold_bps(&mut self, quorum_threshold_bps: u16);
+pub fn set_quorum_threshold_bps(&mut self, quorum_threshold_bps: Bps);
 
 /// Updates the quorum floor (absolute minimum veNEAR required for quorum).
 /// Can only be called by the owner.
@@ -1118,19 +1121,19 @@ pub fn set_quorum_floor(&mut self, quorum_floor: NearToken);
 /// Can only be called by the owner.
 /// Requires 1 yocto NEAR.
 #[payable]
-pub fn set_approval_threshold_bps(&mut self, approval_threshold_bps: u16);
+pub fn set_approval_threshold_bps(&mut self, approval_threshold_bps: Bps);
 
 /// Updates the FastTrack simple-majority threshold in basis points (e.g. 5000 = 50%).
 /// Can only be called by the owner.
 /// Requires 1 yocto NEAR.
 #[payable]
-pub fn set_simple_majority_threshold_bps(&mut self, simple_majority_threshold_bps: u16);
+pub fn set_simple_majority_threshold_bps(&mut self, simple_majority_threshold_bps: Bps);
 
 /// Updates the FastTrack strong-majority threshold in basis points (e.g. 6667 ≈ 66.67%).
 /// Can only be called by the owner.
 /// Requires 1 yocto NEAR.
 #[payable]
-pub fn set_strong_majority_threshold_bps(&mut self, strong_majority_threshold_bps: u16);
+pub fn set_strong_majority_threshold_bps(&mut self, strong_majority_threshold_bps: Bps);
 
 /// Updates the FastTrack sandbox duration in seconds.
 /// Can only be called by the owner.
@@ -1142,7 +1145,7 @@ pub fn set_sandbox_duration(&mut self, sandbox_duration_sec: u32);
 /// Can only be called by the owner.
 /// Requires 1 yocto NEAR.
 #[payable]
-pub fn set_sandbox_threshold_bps(&mut self, sandbox_threshold_bps: u16);
+pub fn set_sandbox_threshold_bps(&mut self, sandbox_threshold_bps: Bps);
 
 /// Updates the maximum number of simultaneously-active proposals
 /// (Sandbox/Scheduled/Voting/Timelock). Approved proposals beyond the cap
@@ -1251,12 +1254,12 @@ pub fn noveto_proposal(&mut self, proposal_id: ProposalId);
 /// Requires 1 yocto attached to the call.
 /// Can only be called by the reviewers.
 #[payable]
-pub fn slash_proposal(&mut self, proposal_id: ProposalId);
+pub fn slash_proposal(&mut self, proposal_id: ProposalId) -> PromiseOrValue<()>;
 
 /// Refunds the FastTrack bond to the proposer. Only valid while the proposal
 /// is in `Expired` or `Rejected`; in any other terminal state the bond has
 /// already been forwarded to the treasury.
-pub fn claim_bond(&mut self, proposal_id: ProposalId);
+pub fn claim_bond(&mut self, proposal_id: ProposalId) -> Promise;
 
 /// Executes the on-chain actions for a proposal that has passed voting (and
 /// timelock for Classic). Can be called by anyone. The proposal must be in

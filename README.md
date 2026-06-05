@@ -85,6 +85,51 @@ All contracts are designed to be deployed without access keys, to make sure the 
     flexible majority types (simple/strong), council veto without timelock, and reviewer slash action.
   - See the proposal lifecycle below for the full status flow.
 
+### Classic — Proposal Lifecycle
+
+A Classic proposal moves through a series of statuses. Each transition is triggered by a specific action or condition:
+
+1. **Created** — Anyone creates a proposal by attaching a deposit (storage + base proposal fee). No bond is required.
+   - The proposal sits in `Created` waiting for a reviewer to act.
+   - If no reviewer acts before `classic_proposal_expiration_ns`, the proposal becomes `Expired`.
+   - If a reviewer rejects the proposal, it becomes `Rejected`.
+
+2. **Voting** — A reviewer approves the proposal.
+   - A veNEAR snapshot is fetched at approval time to determine voting power.
+   - Up to `max_active_proposals` proposals can occupy active slots (Sandbox / Scheduled /
+     Voting / Timelock) simultaneously. If all slots are full, the proposal lands in
+     `Queued` and is promoted FIFO as slots free up.
+   - Voting begins immediately and runs for `classic_voting_duration_ns`. All vote types are allowed: "For", "Against", "Abstain".
+   - Users vote using their veNEAR balance from the snapshot taken at approval time.
+   - Voters can change their vote during this period.
+   - When the voting duration expires, the result is evaluated:
+     - **Quorum check**: total votes must meet the quorum threshold (% of supply) or the quorum floor (absolute minimum).
+     - **Approval check**: "For" / ("For" + "Against") must meet `approval_threshold_bps`. "Abstain" votes count toward quorum but not toward approval.
+   - If either check fails, the proposal becomes `Defeated`. Otherwise it enters `Timelock`.
+
+3. **Timelock** — Post-voting waiting period of `timelock_duration_ns` during which the proposal cannot yet execute.
+   - A council member may call `veto_proposal` to move the proposal to `Vetoed`.
+   - A council member may call `noveto_proposal` to waive the veto right and end the timelock immediately.
+   - When the timelock expires (or is waived via `noveto_proposal`):
+     - Signaling-only proposals (no actions) finalize as `Succeeded`.
+     - Proposals with on-chain actions enter `Executable`.
+
+4. **Succeeded** / **Defeated** — Terminal voting outcomes.
+   - **Succeeded**: quorum and approval thresholds both met, timelock cleared, no actions to run (or all actions completed successfully).
+   - **Defeated**: quorum or approval threshold not met.
+
+5. **Executable** → **InProgress** → **Succeeded** / **Failed** — For proposals with on-chain actions.
+   - **Executable**: voting succeeded, timelock cleared, and actions are ready. Anyone can call `execute_proposal`.
+   - **InProgress**: actions have been dispatched, awaiting callback results.
+   - **Succeeded**: all actions completed successfully.
+   - **Failed**: one or more actions failed on-chain.
+
+6. **Rejected** — A reviewer rejects a proposal in `Created` status.
+
+7. **Vetoed** — A council member vetoes the proposal during `Timelock`.
+
+8. **Expired** — No reviewer acted before `classic_proposal_expiration_ns` elapsed.
+
 ### FastTrack — Proposal Lifecycle
 
 A FastTrack proposal moves through a series of statuses. Each transition is triggered by a specific action or condition:
@@ -155,7 +200,7 @@ A FastTrack proposal moves through a series of statuses. Each transition is trig
 ### API
 
 Contract methods and structures are described in
-the [API](https://github.com/fastnear/house-of-stake-contracts/blob/main/API.md)
+the [API](https://github.com/houseofstake/house-of-stake-contracts/blob/main/API.md)
 section.
 
 ### Events
