@@ -1,8 +1,8 @@
 use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
 use near_sdk::json_types::Base58CryptoHash;
 use near_sdk::store::LookupMap;
-use near_sdk::{borsh, BlockHeight, CryptoHash, IntoStorageKey};
-use near_sdk::{near, AccountId, BorshStorageKey};
+use near_sdk::{AccountId, BorshStorageKey, near};
+use near_sdk::{BlockHeight, CryptoHash, IntoStorageKey, borsh};
 
 #[derive(BorshStorageKey)]
 #[near(serializers=[borsh])]
@@ -175,6 +175,14 @@ where
         self.accounts
             .get(account_id)
             .and_then(|index| self.data.get(&index))
+    }
+
+    /// Flushes pending writes from the lazy `near_sdk::store` maps to storage.
+    /// Call before reading `env::storage_usage()` to see writes made through `set`.
+    pub fn flush(&mut self) {
+        self.hashes.flush();
+        self.data.flush();
+        self.accounts.flush();
     }
 
     /// Sets the value for the given account_id and returns the old value if it existed.

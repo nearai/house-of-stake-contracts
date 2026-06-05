@@ -1,13 +1,14 @@
 mod setup;
 
+use crate::setup::venear_helpers::*;
 use crate::setup::{
-    assert_almost_eq, VenearTestWorkspace, VenearTestWorkspaceBuilder, VENEAR_WASM_FILEPATH,
+    VENEAR_WASM_FILEPATH, VenearTestWorkspace, VenearTestWorkspaceBuilder, assert_almost_eq,
 };
-use common::{near_add, Fraction, TimestampNs};
+use common::{Fraction, TimestampNs, near_add};
 use near_sdk::json_types::Base58CryptoHash;
 use near_sdk::{CryptoHash, Gas};
-use near_workspaces::types::NearToken;
 use near_workspaces::AccountId;
+use near_workspaces::types::NearToken;
 use serde_json::json;
 use sha2::Digest;
 
@@ -80,191 +81,6 @@ async fn test_lock_near() -> Result<(), Box<dyn std::error::Error>> {
         lockup_update_nonce_initial + 1,
         lockup_update_nonce_current,
         "Lockup update nonce should be incremented"
-    );
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_delegate() -> Result<(), Box<dyn std::error::Error>> {
-    let v = VenearTestWorkspaceBuilder::default().build().await?;
-    let user_a = v.create_account_with_lockup().await?;
-
-    let temp_user = v.sandbox.dev_create_account().await?;
-
-    let account_info_a = v.account_info(user_a.id()).await?;
-    let balance_a: NearToken =
-        serde_json::from_value(account_info_a["account"]["balance"]["near_balance"].clone())?;
-    assert!(
-        account_info_a["account"]["delegation"].is_null(),
-        "Delegation should be null"
-    );
-
-    let outcome = user_a
-        .call(v.venear.id(), "delegate_all")
-        .args_json(json!({
-            "receiver_id": temp_user.id()
-        }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(100))
-        .transact()
-        .await?;
-
-    assert!(
-        outcome.is_failure(),
-        "Expected failure, but got success: {:#?}",
-        outcome.outcomes()
-    );
-
-    let user_b = v.create_account_with_lockup().await?;
-
-    let account_info_b = v.account_info(user_b.id()).await?;
-    let delegated_balance: NearToken = serde_json::from_value(
-        account_info_b["account"]["delegated_balance"]["near_balance"].clone(),
-    )?;
-    assert!(
-        delegated_balance.is_zero(),
-        "Delegated balance should be zero"
-    );
-
-    let outcome = user_a
-        .call(v.venear.id(), "delegate_all")
-        .args_json(json!({
-            "receiver_id": user_b.id()
-        }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(100))
-        .transact()
-        .await?;
-
-    assert!(
-        outcome.is_success(),
-        "Failed to delegate NEAR: {:#?}",
-        outcome.outcomes()
-    );
-
-    let account_info_a = v.account_info(user_a.id()).await?;
-    assert_eq!(
-        account_info_a["account"]["delegation"]["account_id"]
-            .as_str()
-            .unwrap(),
-        user_b.id().as_str(),
-        "Delegation account ID should be equal to user B"
-    );
-
-    let account_info_b = v.account_info(user_b.id()).await?;
-    let delegated_balance: NearToken = serde_json::from_value(
-        account_info_b["account"]["delegated_balance"]["near_balance"].clone(),
-    )?;
-    assert_eq!(
-        delegated_balance, balance_a,
-        "Delegated balance should be equal to balance from user A"
-    );
-
-    // Undelegate
-    let outcome = user_a
-        .call(v.venear.id(), "undelegate")
-        .args_json(json!({}))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(100))
-        .transact()
-        .await?;
-    assert!(
-        outcome.is_success(),
-        "Failed to undelegate NEAR: {:#?}",
-        outcome.outcomes()
-    );
-
-    let account_info_a = v.account_info(user_a.id()).await?;
-    assert!(
-        account_info_a["account"]["delegation"].is_null(),
-        "Delegation should be null"
-    );
-    let account_info_b = v.account_info(user_b.id()).await?;
-    let delegated_balance: NearToken = serde_json::from_value(
-        account_info_b["account"]["delegated_balance"]["near_balance"].clone(),
-    )?;
-    assert_eq!(
-        delegated_balance,
-        NearToken::from_yoctonear(0),
-        "Delegated balance should be zero"
-    );
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_delegate_rounding() -> Result<(), Box<dyn std::error::Error>> {
-    let v = VenearTestWorkspaceBuilder::default().build().await?;
-    let user_a = v.create_account_with_lockup().await?;
-    let user_b = v.create_account_with_lockup().await?;
-
-    let outcome = user_a
-        .call(v.venear.id(), "delegate_all")
-        .args_json(json!({
-            "receiver_id": user_b.id()
-        }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(100))
-        .transact()
-        .await?;
-
-    assert!(
-        outcome.is_success(),
-        "Failed to delegate NEAR: {:#?}",
-        outcome.outcomes()
-    );
-
-    // Now we are affecting the growth calculation of user_b multiple times. This may introduce
-    // rounding errors while calculating extra venear in delegated balance.
-
-    let lockup_id_b = v.get_lockup_account_id(user_b.id()).await?;
-
-    for i in 1..=10 {
-        let outcome = user_b
-            .call(&lockup_id_b, "lock_near")
-            .args_json(json!({
-                "amount": NearToken::from_millinear(i)
-            }))
-            .deposit(NearToken::from_yoctonear(1))
-            .gas(Gas::from_tgas(100))
-            .transact()
-            .await?;
-
-        assert!(
-            outcome.is_success(),
-            "Failed to lock NEAR: {:#?}",
-            outcome.outcomes()
-        );
-    }
-
-    // Undelegate
-    let outcome = user_a
-        .call(v.venear.id(), "undelegate")
-        .args_json(json!({}))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(100))
-        .transact()
-        .await?;
-    assert!(
-        outcome.is_success(),
-        "Failed to undelegate NEAR: {:#?}",
-        outcome.outcomes()
-    );
-
-    let account_info_a = v.account_info(user_a.id()).await?;
-    assert!(
-        account_info_a["account"]["delegation"].is_null(),
-        "Delegation should be null"
-    );
-    let account_info_b = v.account_info(user_b.id()).await?;
-    let delegated_balance: NearToken = serde_json::from_value(
-        account_info_b["account"]["delegated_balance"]["near_balance"].clone(),
-    )?;
-    assert_eq!(
-        delegated_balance,
-        NearToken::from_yoctonear(0),
-        "Delegated balance should be zero"
     );
 
     Ok(())
@@ -455,11 +271,11 @@ async fn test_ft_events() -> Result<(), Box<dyn std::error::Error>> {
     let balance_b = v.ft_balance(user_b.id()).await?;
     // Delegate all from user B to user A
     let outcome = user_b
-        .call(v.venear.id(), "delegate_all")
+        .call(v.venear.id(), "set_delegations")
         .args_json(json!({
-            "receiver_id": user_a.id()
+            "entries": [{"account_id": user_a.id(), "bps": 10_000}]
         }))
-        .deposit(NearToken::from_yoctonear(1))
+        .deposit(NearToken::from_millinear(10))
         .gas(Gas::from_tgas(100))
         .transact()
         .await?;
@@ -753,6 +569,61 @@ async fn test_venear_governance() -> Result<(), Box<dyn std::error::Error>> {
     let config: serde_json::Value = v.sandbox.view(v.venear.id(), "get_config").await?.json()?;
     let guardians: Vec<AccountId> = serde_json::from_value(config["guardians"].clone())?;
     assert_eq!(guardians, new_guardians);
+
+    // max_delegations
+    let original_max_delegations: u32 =
+        serde_json::from_value(original_config["max_delegations"].clone())?;
+    let new_max_delegations: u32 = 2;
+    assert_ne!(original_max_delegations, new_max_delegations);
+
+    // Non-owner cannot change the cap.
+    let outcome = user
+        .call(v.venear.id(), "set_max_delegations")
+        .args_json(json!({ "max_delegations": new_max_delegations }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_failure(),
+        "User should not be able to set max_delegations",
+    );
+    let config: serde_json::Value = v.sandbox.view(v.venear.id(), "get_config").await?.json()?;
+    let max_delegations: u32 = serde_json::from_value(config["max_delegations"].clone())?;
+    assert_eq!(max_delegations, original_max_delegations);
+
+    // Owner lowers the cap.
+    let outcome = venear_owner
+        .call(v.venear.id(), "set_max_delegations")
+        .args_json(json!({ "max_delegations": new_max_delegations }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_success(),
+        "Owner should be able to set max_delegations",
+    );
+    let config: serde_json::Value = v.sandbox.view(v.venear.id(), "get_config").await?.json()?;
+    let max_delegations: u32 = serde_json::from_value(config["max_delegations"].clone())?;
+    assert_eq!(max_delegations, new_max_delegations);
+
+    // With cap=2, a 3-entry delegation set is rejected.
+    let outcome = user
+        .call(v.venear.id(), "set_delegations")
+        .args_json(json!({ "entries": [
+            {"account_id": "delegate01.near", "bps": 1000u32},
+            {"account_id": "delegate02.near", "bps": 1000u32},
+            {"account_id": "delegate03.near", "bps": 1000u32},
+        ] }))
+        .deposit(NearToken::from_millinear(10))
+        .gas(Gas::from_tgas(200))
+        .transact()
+        .await?;
+    assert!(
+        outcome.is_failure(),
+        "set_delegations with 3 entries must fail when max_delegations is 2",
+    );
 
     // propose_new_owner_account_id
     let new_owner_account = v.sandbox.dev_create_account().await?;
@@ -1070,19 +941,19 @@ async fn test_venear_pause() -> Result<(), Box<dyn std::error::Error>> {
     let account_info = v.account_info(user_2.id()).await?;
     assert!(!account_info.is_null(), "Account should be registered");
 
-    // delegate_all to user_2
+    // delegate to user_2
     let outcome = user
-        .call(v.venear.id(), "delegate_all")
+        .call(v.venear.id(), "set_delegations")
         .args_json(json!({
-            "receiver_id": user_2.id()
+            "entries": [{"account_id": user_2.id(), "bps": 10_000}]
         }))
-        .deposit(NearToken::from_yoctonear(1))
+        .deposit(NearToken::from_millinear(10))
         .gas(Gas::from_tgas(100))
         .transact()
         .await?;
     assert!(
         outcome.is_success(),
-        "Failed to delegate_all: {:#?}",
+        "Failed to set_delegations: {:#?}",
         outcome.outcomes()
     );
 
@@ -1210,10 +1081,10 @@ async fn test_venear_pause() -> Result<(), Box<dyn std::error::Error>> {
         "User should not be able to create an account when the contract is paused",
     );
 
-    // Attempt to undelegate_all
+    // Attempt to clear delegations
     let outcome = user_2
-        .call(v.venear.id(), "undelegate")
-        .args_json(json!({}))
+        .call(v.venear.id(), "set_delegations")
+        .args_json(json!({"entries": []}))
         .deposit(NearToken::from_yoctonear(1))
         .gas(Gas::from_tgas(100))
         .transact()
@@ -1223,13 +1094,13 @@ async fn test_venear_pause() -> Result<(), Box<dyn std::error::Error>> {
         "User should not be able to undelegate when the contract is paused",
     );
 
-    // Attempt to delegate_all
+    // Attempt to set new delegations
     let outcome = user_2
-        .call(v.venear.id(), "delegate_all")
+        .call(v.venear.id(), "set_delegations")
         .args_json(json!({
-            "receiver_id": user.id()
+            "entries": [{"account_id": user.id(), "bps": 10_000}]
         }))
-        .deposit(NearToken::from_yoctonear(1))
+        .deposit(NearToken::from_millinear(10))
         .gas(Gas::from_tgas(100))
         .transact()
         .await?;
@@ -1273,6 +1144,130 @@ async fn test_venear_pause() -> Result<(), Box<dyn std::error::Error>> {
             .await
             .is_err(),
         "The contract should not be able to get proof when paused"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_set_delegations_rejects() -> Result<(), Box<dyn std::error::Error>> {
+    let v = VenearTestWorkspaceBuilder::default().build().await?;
+    let alice = v.create_account_with_lockup().await?;
+    let bob = v.create_account_with_lockup().await?;
+    let carol = v.create_account_with_lockup().await?;
+    let unregistered = v.sandbox.dev_create_account().await?;
+
+    let (low, high) = if bob.id() < carol.id() {
+        (bob.id().clone(), carol.id().clone())
+    } else {
+        (carol.id().clone(), bob.id().clone())
+    };
+
+    let too_many: Vec<serde_json::Value> = (1u32..=9)
+        .map(|i| json!({"account_id": format!("delegate{:02}.near", i), "bps": 100u32}))
+        .collect();
+
+    let cases: Vec<(&str, serde_json::Value)> = vec![
+        ("self", json!([{"account_id": alice.id(), "bps": 5000}])),
+        (
+            "unsorted",
+            json!([
+                {"account_id": high, "bps": 3000},
+                {"account_id": low, "bps": 2000},
+            ]),
+        ),
+        ("too_many", serde_json::Value::Array(too_many)),
+        ("zero_bps", json!([{"account_id": bob.id(), "bps": 0}])),
+        (
+            "sum_over_10000",
+            json!([
+                {"account_id": low, "bps": 6000},
+                {"account_id": high, "bps": 5000},
+            ]),
+        ),
+        (
+            "unregistered",
+            json!([{"account_id": unregistered.id(), "bps": 5000}]),
+        ),
+    ];
+
+    for (label, entries) in cases {
+        let outcome = alice
+            .call(v.venear.id(), "set_delegations")
+            .args_json(json!({ "entries": entries }))
+            .deposit(NearToken::from_millinear(10))
+            .gas(Gas::from_tgas(200))
+            .transact()
+            .await?;
+        assert!(
+            outcome.is_failure(),
+            "Expected failure for case '{}': {:#?}",
+            label,
+            outcome.outcomes()
+        );
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_set_delegations_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
+    let v = VenearTestWorkspaceBuilder::default().build().await?;
+    let alice = v.create_account_with_lockup().await?;
+    let bob = v.create_account_with_lockup().await?;
+    let carol = v.create_account_with_lockup().await?;
+    let dave = v.create_account_with_lockup().await?;
+
+    let delta = NearToken::from_millinear(200);
+
+    v.transfer_and_lock(&alice, NearToken::from_near(100))
+        .await?;
+
+    // 1. Initial 50/50 split between bob and carol
+    set_delegations_sorted(
+        &v,
+        &alice,
+        vec![(bob.id().clone(), 5000), (carol.id().clone(), 5000)],
+    )
+    .await?;
+
+    // 2. Locking more NEAR propagates proportionally to delegates
+    v.transfer_and_lock(&alice, NearToken::from_near(100))
+        .await?;
+    assert_almost_eq(
+        v.delegated_near(bob.id()).await?,
+        NearToken::from_near(100),
+        delta,
+    );
+    assert_almost_eq(
+        v.delegated_near(carol.id()).await?,
+        NearToken::from_near(100),
+        delta,
+    );
+
+    // 3. Replacing the set zeroes old delegates and credits the new one atomically
+    set_delegations_sorted(&v, &alice, vec![(dave.id().clone(), 10_000)]).await?;
+    assert!(v.delegated_near(bob.id()).await?.is_zero());
+    assert!(v.delegated_near(carol.id()).await?.is_zero());
+    assert_almost_eq(
+        v.delegated_near(dave.id()).await?,
+        NearToken::from_near(200),
+        delta,
+    );
+
+    // 4. Empty vec clears all delegations and restores alice's own ft_balance
+    set_delegations_sorted(&v, &alice, vec![]).await?;
+    let alice_info = v.account_info(alice.id()).await?;
+    assert!(
+        alice_info["account"]["delegations"]
+            .as_array()
+            .is_some_and(Vec::is_empty),
+    );
+    assert!(v.delegated_near(dave.id()).await?.is_zero());
+    assert_almost_eq(
+        v.ft_balance(alice.id()).await?,
+        NearToken::from_near(200),
+        delta,
     );
 
     Ok(())

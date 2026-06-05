@@ -1,9 +1,10 @@
+pub mod venear_helpers;
 pub mod voting_helpers;
 
-#[allow(dead_code)]
-use common::voting::ProposalStatus;
 use common::Fraction;
 use common::TimestampNs;
+#[allow(dead_code)]
+use common::voting::ProposalStatus;
 use near_sdk::json_types::{Base58CryptoHash, U64};
 use near_sdk::{CryptoHash, Gas, NearToken, Timestamp};
 use near_workspaces::network::Sandbox;
@@ -15,14 +16,15 @@ use std::str::FromStr;
 
 pub const NS_IN_SECOND: u64 = 1_000_000_000;
 pub const UNLOCK_DURATION_SECONDS: u64 = 60;
-pub const VOTING_DURATION_SECONDS: u64 = 60;
-pub const TIMELOCK_DURATION_SECONDS: u64 = 60;
-pub const PROPOSAL_EXPIRATION_SECONDS: u64 = 60;
+pub const VOTING_DURATION_SECONDS: u64 = 250;
+pub const TIMELOCK_DURATION_SECONDS: u64 = 250;
+pub const PROPOSAL_EXPIRATION_SECONDS: u64 = 250;
+pub const SANDBOX_DURATION_SECONDS: u64 = 250;
+pub const DEFAULT_BOND_AMOUNT: NearToken = NearToken::from_millinear(100);
 
 pub const LOCKUP_WASM_FILEPATH: &str = "../res/local/lockup_contract.wasm";
 pub const VENEAR_WASM_FILEPATH: &str = "../res/local/venear_contract.wasm";
 pub const VOTING_WASM_FILEPATH: &str = "../res/local/voting_contract.wasm";
-pub const PREVIOUS_VOTING_WASM_FILEPATH: &str = "../res/release/1_0_2/voting_contract.wasm";
 pub const SANDBOX_CONTRACT_WASM_FILEPATH: &str =
     "../res/local/sandbox_staking_whitelist_contract.wasm";
 
@@ -47,6 +49,7 @@ pub struct VotingTestWorkspace {
     pub reviewer: Account,
     pub council: Account,
     pub guardian: Account,
+    pub treasury: Account,
 }
 
 #[derive(Clone, Debug)]
@@ -56,15 +59,23 @@ pub struct VenearTestWorkspaceBuilder {
     pub min_lockup_deposit: NearToken,
     pub annual_growth_rate_ns: Fraction,
     pub deploy_voting: bool,
-    pub use_previous_voting_wasm: bool,
-    pub voting_duration_ns: u64,
+    pub classic_voting_duration_ns: u64,
+    pub fast_track_voting_duration_ns: u64,
     pub timelock_duration_ns: u64,
     pub base_proposal_fee: NearToken,
+    pub bond_amount: NearToken,
     pub vote_storage_fee: NearToken,
-    pub proposal_expiration_ns: u64,
+    pub classic_proposal_expiration_ns: u64,
+    pub fast_track_proposal_expiration_ns: u64,
     pub quorum_threshold_bps: u16,
     pub quorum_floor: NearToken,
     pub approval_threshold_bps: u16,
+    pub simple_majority_threshold_bps: u16,
+    pub strong_majority_threshold_bps: u16,
+    pub sandbox_duration_ns: u64,
+    pub sandbox_threshold_bps: u16,
+    pub max_active_proposals: u32,
+    pub max_delegations: u32,
 }
 
 impl Default for VenearTestWorkspaceBuilder {
@@ -82,15 +93,23 @@ impl Default for VenearTestWorkspaceBuilder {
                 denominator: 10u128.pow(30).into(),
             },
             deploy_voting: false,
-            use_previous_voting_wasm: false,
-            voting_duration_ns: VOTING_DURATION_SECONDS * NS_IN_SECOND,
+            classic_voting_duration_ns: VOTING_DURATION_SECONDS * NS_IN_SECOND,
+            fast_track_voting_duration_ns: VOTING_DURATION_SECONDS * NS_IN_SECOND,
             timelock_duration_ns: TIMELOCK_DURATION_SECONDS * NS_IN_SECOND,
             base_proposal_fee: NearToken::from_millinear(100),
+            bond_amount: DEFAULT_BOND_AMOUNT,
             vote_storage_fee: NearToken::from_yoctonear(125 * 10u128.pow(19)),
-            proposal_expiration_ns: PROPOSAL_EXPIRATION_SECONDS * NS_IN_SECOND,
+            classic_proposal_expiration_ns: PROPOSAL_EXPIRATION_SECONDS * NS_IN_SECOND,
+            fast_track_proposal_expiration_ns: PROPOSAL_EXPIRATION_SECONDS * NS_IN_SECOND,
             quorum_threshold_bps: 3500,
             quorum_floor: NearToken::from_near(1000),
             approval_threshold_bps: 5000,
+            simple_majority_threshold_bps: 5000,
+            strong_majority_threshold_bps: 6667,
+            sandbox_duration_ns: SANDBOX_DURATION_SECONDS * NS_IN_SECOND,
+            sandbox_threshold_bps: 3000,
+            max_active_proposals: 3,
+            max_delegations: 8,
         }
     }
 }
@@ -181,6 +200,7 @@ impl VenearTestWorkspaceBuilder {
                 "min_lockup_deposit": self.min_lockup_deposit,
                 "owner_account_id": venear_owner.id(),
                 "guardians": &[guardian.id()],
+                "max_delegations": self.max_delegations,
             },
             "venear_growth_config": {
                 "annual_growth_rate_ns": self.annual_growth_rate_ns,
@@ -261,12 +281,7 @@ impl VenearTestWorkspaceBuilder {
         );
 
         let voting = if self.deploy_voting {
-            let voting_wasm_path = if self.use_previous_voting_wasm {
-                PREVIOUS_VOTING_WASM_FILEPATH
-            } else {
-                VOTING_WASM_FILEPATH
-            };
-            let voting_wasm = std::fs::read(voting_wasm_path)?;
+            let voting_wasm = std::fs::read(VOTING_WASM_FILEPATH)?;
 
             let contract = sandbox.dev_create_account().await?;
 
@@ -274,41 +289,34 @@ impl VenearTestWorkspaceBuilder {
             let council = sandbox.dev_create_account().await?;
             let owner = sandbox.dev_create_account().await?;
             let guardian = sandbox.dev_create_account().await?;
+            let treasury = sandbox.dev_create_account().await?;
 
-            let args = if self.use_previous_voting_wasm {
-                // Old WASM (v1.0.2) expects max_number_of_voting_options and lacks
-                // council_ids, timelock, expiration, quorum fields.
-                json!({
-                    "config": {
-                        "venear_account_id": venear.id(),
-                        "reviewer_ids": &[reviewer.id()],
-                        "owner_account_id": owner.id(),
-                        "voting_duration_ns": self.voting_duration_ns.to_string(),
-                        "max_number_of_voting_options": 16u8,
-                        "base_proposal_fee": self.base_proposal_fee,
-                        "vote_storage_fee": self.vote_storage_fee,
-                        "guardians": &[guardian.id()],
-                    },
-                })
-            } else {
-                json!({
-                    "config": {
-                        "venear_account_id": venear.id(),
-                        "reviewer_ids": &[reviewer.id()],
-                        "owner_account_id": owner.id(),
-                        "voting_duration_ns": self.voting_duration_ns.to_string(),
-                        "base_proposal_fee": self.base_proposal_fee,
-                        "vote_storage_fee": self.vote_storage_fee,
-                        "guardians": &[guardian.id()],
-                        "council_ids": &[council.id()],
-                        "timelock_duration_ns": self.timelock_duration_ns.to_string(),
-                        "proposal_expiration_ns": self.proposal_expiration_ns.to_string(),
-                        "quorum_threshold_bps": self.quorum_threshold_bps,
-                        "quorum_floor": self.quorum_floor,
-                        "approval_threshold_bps": self.approval_threshold_bps,
-                    },
-                })
-            };
+            let args = json!({
+                "config": {
+                    "venear_account_id": venear.id(),
+                    "reviewer_ids": &[reviewer.id()],
+                    "council_ids": &[council.id()],
+                    "owner_account_id": owner.id(),
+                    "classic_voting_duration_ns": self.classic_voting_duration_ns.to_string(),
+                    "fast_track_voting_duration_ns": self.fast_track_voting_duration_ns.to_string(),
+                    "timelock_duration_ns": self.timelock_duration_ns.to_string(),
+                    "base_proposal_fee": self.base_proposal_fee,
+                    "bond_amount": self.bond_amount,
+                    "treasury_account_id": treasury.id(),
+                    "vote_storage_fee": self.vote_storage_fee,
+                    "guardians": &[guardian.id()],
+                    "classic_proposal_expiration_ns": self.classic_proposal_expiration_ns.to_string(),
+                    "fast_track_proposal_expiration_ns": self.fast_track_proposal_expiration_ns.to_string(),
+                    "quorum_threshold_bps": self.quorum_threshold_bps,
+                    "quorum_floor": self.quorum_floor,
+                    "approval_threshold_bps": self.approval_threshold_bps,
+                    "simple_majority_threshold_bps": self.simple_majority_threshold_bps,
+                    "strong_majority_threshold_bps": self.strong_majority_threshold_bps,
+                    "sandbox_duration_ns": self.sandbox_duration_ns.to_string(),
+                    "sandbox_threshold_bps": self.sandbox_threshold_bps,
+                    "max_active_proposals": self.max_active_proposals,
+                },
+            });
 
             let outcome = contract
                 .batch(contract.id())
@@ -329,6 +337,7 @@ impl VenearTestWorkspaceBuilder {
                 reviewer,
                 council,
                 guardian,
+                treasury,
             })
         } else {
             None
@@ -369,9 +378,36 @@ impl VenearTestWorkspaceBuilder {
         self
     }
 
-    pub fn with_previous_voting(mut self) -> Self {
-        self.deploy_voting = true;
-        self.use_previous_voting_wasm = true;
+    pub fn bond_amount(mut self, bond_amount: NearToken) -> Self {
+        self.bond_amount = bond_amount;
+        self
+    }
+
+    pub fn max_active_proposals(mut self, max_active_proposals: u32) -> Self {
+        self.max_active_proposals = max_active_proposals;
+        self
+    }
+
+    pub fn classic_proposal_expiration_ns(mut self, classic_proposal_expiration_ns: u64) -> Self {
+        self.classic_proposal_expiration_ns = classic_proposal_expiration_ns;
+        self
+    }
+
+    pub fn fast_track_proposal_expiration_ns(
+        mut self,
+        fast_track_proposal_expiration_ns: u64,
+    ) -> Self {
+        self.fast_track_proposal_expiration_ns = fast_track_proposal_expiration_ns;
+        self
+    }
+
+    pub fn classic_voting_duration_ns(mut self, classic_voting_duration_ns: u64) -> Self {
+        self.classic_voting_duration_ns = classic_voting_duration_ns;
+        self
+    }
+
+    pub fn fast_track_voting_duration_ns(mut self, fast_track_voting_duration_ns: u64) -> Self {
+        self.fast_track_voting_duration_ns = fast_track_voting_duration_ns;
         self
     }
 }
@@ -400,6 +436,16 @@ impl VenearTestWorkspace {
             .args_json(json!({ "account_id": account_id }))
             .await?
             .json()?)
+    }
+
+    pub async fn delegated_near(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<NearToken, Box<dyn std::error::Error>> {
+        let info = self.account_info(account_id).await?;
+        Ok(serde_json::from_value(
+            info["account"]["delegated_balance"]["near_balance"].clone(),
+        )?)
     }
 
     pub async fn create_account_with_lockup(&self) -> Result<Account, Box<dyn std::error::Error>> {
@@ -636,28 +682,23 @@ impl VenearTestWorkspace {
 
         let (target_ns, num_blocks) = match target {
             ProposalStatus::Timelock
-            | ProposalStatus::Succeeded
             | ProposalStatus::Defeated
+            | ProposalStatus::Succeeded
             | ProposalStatus::Executable => {
-                let voting_start: u64 = proposal["voting_start_time_ns"]
-                    .as_str()
-                    .unwrap()
-                    .parse()?;
+                let voting_start: u64 =
+                    proposal["voting_start_time_ns"].as_str().unwrap().parse()?;
                 let voting_duration: u64 =
                     proposal["voting_duration_ns"].as_str().unwrap().parse()?;
                 let timelock_duration: u64 =
                     proposal["timelock_duration_ns"].as_str().unwrap().parse()?;
-                let voting_end = voting_start + voting_duration;
-                match target {
-                    ProposalStatus::Timelock => (voting_end, voting_duration / NS_IN_SECOND),
-                    _ => {
-                        let timelock_end = voting_end + timelock_duration;
-                        (
-                            timelock_end,
-                            (voting_duration + timelock_duration) / NS_IN_SECOND,
-                        )
-                    }
-                }
+                // Timelock and Defeated are both reached at voting_end. Succeeded/Executable
+                // need the additional timelock period to elapse.
+                let extra_ns = match target {
+                    ProposalStatus::Succeeded | ProposalStatus::Executable => timelock_duration,
+                    _ => 0,
+                };
+                let total_duration = voting_duration + extra_ns;
+                (voting_start + total_duration, total_duration / NS_IN_SECOND)
             }
             ProposalStatus::Expired => {
                 let expiration: u64 = proposal["expiration_ns"].as_str().unwrap().parse()?;
@@ -673,6 +714,45 @@ impl VenearTestWorkspace {
 
     pub fn voting_id(&self) -> &AccountId {
         self.voting.as_ref().unwrap().contract.id()
+    }
+
+    pub async fn fast_forward_to_proposal_status_fst(
+        &self,
+        proposal_id: u32,
+        target: common::voting::ProposalStatus,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let proposal = self.get_proposal(proposal_id).await?;
+        let current_status: ProposalStatus = serde_json::from_value(proposal["status"].clone())?;
+
+        let block = self.sandbox.view_block().await?;
+        let now = block.timestamp();
+
+        let target_ns: u64 = match target {
+            ProposalStatus::Voting => proposal["voting_start_time_ns"].as_str().unwrap().parse()?,
+            ProposalStatus::Succeeded | ProposalStatus::Defeated | ProposalStatus::Executable => {
+                if current_status == ProposalStatus::Sandbox {
+                    let sandbox_start: u64 = proposal["sandbox_start_time_ns"]
+                        .as_str()
+                        .unwrap()
+                        .parse()?;
+                    let sandbox_duration: u64 =
+                        proposal["sandbox_duration_ns"].as_str().unwrap().parse()?;
+                    sandbox_start + sandbox_duration
+                } else {
+                    let voting_start: u64 =
+                        proposal["voting_start_time_ns"].as_str().unwrap().parse()?;
+                    let voting_duration: u64 =
+                        proposal["voting_duration_ns"].as_str().unwrap().parse()?;
+                    voting_start + voting_duration
+                }
+            }
+            ProposalStatus::Expired => proposal["expiration_ns"].as_str().unwrap().parse()?,
+            _ => panic!("Unsupported target status: {target:?}"),
+        };
+
+        let num_blocks = target_ns.saturating_sub(now) / NS_IN_SECOND;
+
+        self.fast_forward(target_ns, num_blocks, 20).await
     }
 }
 

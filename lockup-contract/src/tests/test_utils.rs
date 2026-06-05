@@ -60,7 +60,7 @@ pub fn get_context(
         signer_account_id: predecessor_account_id.clone(),
         signer_account_pk: public_key(123),
         predecessor_account_id,
-        input: vec![],
+        input: vec![].into(),
         block_index: 1,
         block_timestamp,
         epoch_height: 1,

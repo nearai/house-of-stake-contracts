@@ -1,11 +1,13 @@
 use crate::account::AccountInternal;
 use crate::config::LockupContractConfig;
 use crate::*;
+use common::events;
 use common::lockup_update::{LockupUpdateV1, VLockupUpdate};
 use common::near_add;
-use common::{events, near_sub};
-use near_sdk::json_types::{Base58CryptoHash, U64};
-use near_sdk::{env, is_promise_success, Gas, IntoStorageKey, Promise};
+use near_sdk::json_types::U64;
+use near_sdk::{Gas, IntoStorageKey, Promise, env, is_promise_success};
+#[cfg(target_arch = "wasm32")]
+use {common::near_sub, near_sdk::json_types::Base58CryptoHash};
 
 const LOCKUP_DEPLOY_MIN_GAS: Gas = Gas::from_tgas(20);
 const ON_LOCKUP_DEPLOYED: Gas = Gas::from_tgas(15);
@@ -123,7 +125,7 @@ impl Contract {
             Some(self.get_lockup_account_id(&account_id))
         } else {
             // Refunding the deposit if the lockup contract deployment failed.
-            Promise::new(account_id).transfer(lockup_deposit);
+            Promise::new(account_id).transfer(lockup_deposit).detach();
             None
         }
     }
@@ -157,7 +159,7 @@ impl Contract {
         let mut global_state: GlobalState = self.internal_global_state_updated();
         // Decreasing the locked NEAR will result in dropped extra veNEAR rewards.
         if lockup_update.locked_near_balance < old_balance.near_balance {
-            account.balance.extra_venear_balance = NearToken::from_yoctonear(0);
+            account.balance.extra_venear_balance = NearToken::ZERO;
         }
         // Updating balance and also adding internal balance deposit.
         account.balance.near_balance =
@@ -167,13 +169,13 @@ impl Contract {
             .pooled_sub(&old_balance)
             .pooled_add(&account.balance);
 
-        if let Some(delegation) = &account.delegation {
+        for delegation in &account.delegations {
             let mut delegation_account =
                 self.internal_expect_account_updated(&delegation.account_id);
             delegation_account.delegated_balance = delegation_account
                 .delegated_balance
-                .pooled_sub(&old_balance)
-                .pooled_add(&account.balance);
+                .pooled_sub_scaled(&old_balance, delegation.bps)
+                .pooled_add_scaled(&account.balance, delegation.bps);
             self.internal_set_account(delegation.account_id.clone(), delegation_account);
         }
         self.internal_set_account_internal(account_id.clone(), account_internal);
@@ -257,7 +259,7 @@ impl Contract {
             version: lockup_contract_config.contract_version,
             owner_account_id: owner_account_id.clone(),
             venear_account_id: env::current_account_id(),
-            unlock_duration_ns: self.config.unlock_duration_ns.clone(),
+            unlock_duration_ns: self.config.unlock_duration_ns,
             staking_pool_whitelist_account_id: self
                 .config
                 .staking_pool_whitelist_account_id
@@ -358,7 +360,9 @@ pub extern "C" fn prepare_lockup_code() {
         "Not enough attached deposit"
     );
     if attached_deposit > storage_cost {
-        Promise::new(predecessor_id).transfer(near_sub(attached_deposit, storage_cost));
+        Promise::new(predecessor_id)
+            .transfer(near_sub(attached_deposit, storage_cost))
+            .detach();
     }
     let result = serde_json::to_vec(&Base58CryptoHash::from(contract_hash)).unwrap();
     unsafe {

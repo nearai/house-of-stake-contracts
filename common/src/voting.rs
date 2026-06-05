@@ -1,5 +1,7 @@
 use crate::*;
 
+pub type ProposalId = u32;
+
 /// The fixed voting options for proposals.
 #[derive(Clone, Copy, PartialEq)]
 #[near(serializers=[borsh, json])]
@@ -7,6 +9,34 @@ pub enum VoteOption {
     For,
     Against,
     Abstain,
+}
+
+impl From<VoteOption> for u8 {
+    fn from(v: VoteOption) -> u8 {
+        match v {
+            VoteOption::For => 0,
+            VoteOption::Against => 1,
+            VoteOption::Abstain => 2,
+        }
+    }
+}
+
+/// The majority type required for a FastTrack proposal to pass.
+#[derive(Clone, Copy, PartialEq)]
+#[near(serializers=[borsh, json])]
+pub enum MajorityType {
+    /// Simple majority (e.g. >50%).
+    Simple,
+    /// Strong majority (e.g. >66.67%).
+    Strong,
+}
+
+/// Snapshot of the proposal scheduler: currently-active proposals and the FIFO pending queue.
+#[derive(Debug, PartialEq, Eq)]
+#[near(serializers=[json])]
+pub struct QueueState {
+    pub active_proposals: Vec<ProposalId>,
+    pub pending_queue: Vec<ProposalId>,
 }
 
 /// The status of the proposal
@@ -39,4 +69,12 @@ pub enum ProposalStatus {
     InProgress,
     /// The proposal's on-chain execution failed.
     Failed,
+    /// The proposal was slashed by a reviewer; bond is forfeited to the treasury.
+    Slashed,
+    /// Graduates to Scheduled when the sandbox threshold is met.
+    Sandbox,
+    /// The proposal met the sandbox threshold and is scheduled to start voting.
+    Scheduled,
+    /// Approved by a reviewer but waiting for an active slot to open.
+    Queued,
 }

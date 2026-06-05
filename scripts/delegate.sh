@@ -19,7 +19,7 @@ fi
 : "${CHAIN_ID:=testnet}"
 export VENEAR_ACCOUNT_ID="v.$ROOT_ACCOUNT_ID"
 
-TMP=$(near --quiet contract call-function as-transaction $VENEAR_ACCOUNT_ID delegate_all json-args '{"receiver_id": "'$TO_ACCOUNT_ID'"}' prepaid-gas '20.0 Tgas' attached-deposit '1 yoctoNEAR' sign-as $FROM_ACCOUNT_ID network-config $CHAIN_ID sign-with-keychain send)
+TMP=$(near --quiet contract call-function as-transaction $VENEAR_ACCOUNT_ID set_delegations json-args '{"entries": [{"account_id": "'$TO_ACCOUNT_ID'", "bps": 10000}]}' prepaid-gas '20.0 Tgas' attached-deposit '0.01 NEAR' sign-as $FROM_ACCOUNT_ID network-config $CHAIN_ID sign-with-keychain send)
 
 . scripts/view_balance.sh $TO_ACCOUNT_ID
 TO_LOCKED_BALANCE_NEAR=$(echo "scale=3; $LOCKED_BALANCE / 1000000000000000000000000" | bc)
