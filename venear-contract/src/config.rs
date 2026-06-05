@@ -38,6 +38,9 @@ pub struct Config {
 
     /// Proposed new owner account ID. The account has to accept ownership.
     pub proposed_new_owner_account_id: Option<AccountId>,
+
+    /// Maximum number of partial delegation entries allowed per account.
+    pub max_delegations: u32,
 }
 
 #[near]

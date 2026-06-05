@@ -39,7 +39,9 @@ impl Contract {
         if self.internal_get_account_internal(&account_id).is_some() {
             env::log_str("The account is already registered, refunding the deposit");
             if amount > NearToken::from_near(0) {
-                Promise::new(env::predecessor_account_id()).transfer(amount);
+                Promise::new(env::predecessor_account_id())
+                    .transfer(amount)
+                    .detach();
             }
         } else {
             let min_balance = self.storage_balance_bounds().min;
@@ -50,7 +52,9 @@ impl Contract {
             self.internal_register_account(&account_id, min_balance);
             let refund = amount.saturating_sub(min_balance);
             if refund > NearToken::from_near(0) {
-                Promise::new(env::predecessor_account_id()).transfer(refund);
+                Promise::new(env::predecessor_account_id())
+                    .transfer(refund)
+                    .detach();
             }
         }
         self.internal_storage_balance_of(&account_id).unwrap()

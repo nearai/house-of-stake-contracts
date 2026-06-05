@@ -8,9 +8,12 @@ It contains the following contracts:
 - **lockup-contract**: A contract that locks NEAR tokens while being owned by the user. It's non-upgradable and doesn't
   depend on the venear-contract logic. This provides extra layer of security for the user. It allows to stake NEAR
   tokens to a validator (or towards a liquid staking as staking pools).
-- **voting-contract**: A voting contract. It allows anyone to create proposals. In the current version, one of the
-  reviewers has to approve the proposal, to start voting process. It uses end-of-the-block snapshots from the veNEAR
+- **voting-contract**: A voting contract supporting two flows. It allows anyone to create proposals. One of the
+  reviewers has to approve the proposal, to start the voting process. It uses end-of-the-block snapshots from the veNEAR
   contract to track veNEAR holders at the time of the proposal approving.
+  - **Classic flow**: standard approve → vote → timelock → execute lifecycle.
+  - **FastTrack flow**: extends Classic with a sandbox pre-voting period, scheduled Monday voting,
+    bond-based proposal fees, flexible majority types (simple/strong), proposal slashing, and council veto during voting.
 
 ## Design principles
 
@@ -57,12 +60,15 @@ All contracts are designed to be deployed without access keys, to make sure the 
   - The voting contract is controlled by the owner of the voting contract. The owner can be a multi-sig controlled by
     the HoS security team. Eventually, the owner should be changed to be the HoS DAO.
   - The voting contract allows anyone to create a proposal. The caller has to attach a deposit to cover the storage
-    deposit for the proposal and the base fee that prevents proposal spam.
+    deposit for the proposal and the base fee that deters low-quality proposals.
   - The base fee can be changed by the owner of the voting contract.
   - A proposal has to be approved by one of the reviewers. When the proposal is approved, the latest snapshot of the
-    veNEAR holders is requested from the veNEAR contract. The voting process starts immediately after the proposal
-    is approved.
-  - Council members can veto (reject) a proposal during the timelock period.
+    veNEAR holders is requested from the veNEAR contract. The voting process starts after the proposal is approved or
+    at the specified timestamp during the approval.
+  - A reviewer can reject an unapproved proposal while it is in `Created`, moving it to the
+    `Rejected` status.
+  - Council members can veto a proposal during the timelock period (Classic) or while it is
+    Scheduled/Voting (FastTrack), moving it to the `Vetoed` status.
   - On-chain quorum: proposals require a minimum participation threshold (`quorum_threshold_bps` or `quorum_floor`,
     whichever is higher) and an approval threshold (`approval_threshold_bps`) to pass.
   - Proposals that have not been approved by a reviewer expire after a configurable deadline.
@@ -72,6 +78,60 @@ All contracts are designed to be deployed without access keys, to make sure the 
     period, during which council members can veto. After the timelock expires, signaling-only proposals (without
     actions) are finalized as `Succeeded`. Proposals with actions enter an `Executable` status, and anyone can
     trigger on-chain execution (function calls, transfers) by calling `execute_proposal`.
+- **FastTrack flow**
+  - Shares the same base design as Classic: independent of a particular veNEAR contract, controlled by an owner,
+    and allows anyone to create proposals.
+  - Key differences from Classic: bond-based proposal fees, sandbox pre-voting period, scheduled Monday voting,
+    flexible majority types (simple/strong), council veto without timelock, and reviewer slash action.
+  - See the proposal lifecycle below for the full status flow.
+
+### FastTrack — Proposal Lifecycle
+
+A FastTrack proposal moves through a series of statuses. Each transition is triggered by a specific action or condition:
+
+1. **Created** — Anyone creates a proposal by attaching a deposit (storage + base proposal fee + bond).
+   - The proposal sits in `Created` waiting for a reviewer to act.
+   - If no reviewer acts before the expiration period, the proposal becomes `Expired` and the bond is claimable via `claim_bond`.
+   - If a reviewer rejects the proposal, the bond is also claimable.
+
+2. **Sandbox** — A reviewer approves the proposal, choosing a majority type (simple or strong).
+   - The bond is forwarded to the configured `treasury_account_id` upon approval (no longer claimable by the proposer).
+   - A veNEAR snapshot is fetched to determine voting power.
+   - Only "For" votes are allowed during this period — no "Against" or "Abstain".
+   - If "For" votes reach the sandbox threshold (e.g. 30% of total veNEAR), the proposal graduates to `Scheduled`.
+   - If the sandbox duration expires without reaching the threshold, the proposal becomes `Defeated`.
+
+3. **Scheduled** — The proposal is queued to start full voting on the next Monday (00:00 CET).
+   - Up to `max_active_proposals` proposals can occupy active slots (Sandbox / Scheduled /
+     Voting / Timelock) simultaneously. If all slots are full, additional approved proposals
+     park in the FIFO pending queue with status `Queued` and are promoted as slots free up.
+   - No new votes are cast during this waiting period.
+
+4. **Voting** — Full voting begins on Monday. All vote types are allowed: "For", "Against", "Abstain".
+   - Users vote using their veNEAR balance from the snapshot taken at approval time.
+   - Voters can change their vote during this period.
+   - When the voting duration expires, the result is evaluated:
+     - **Quorum check**: total votes must meet the quorum threshold (% of supply) or the quorum floor (absolute minimum).
+     - **Approval check**: "For" / ("For" + "Against") must meet the majority threshold. "Abstain" votes count toward quorum but not toward approval.
+
+5. **Succeeded** / **Defeated** — Terminal voting outcomes.
+   - **Succeeded**: quorum and approval thresholds both met. If the proposal has no actions, it stays here (signaling-only).
+   - **Defeated**: quorum or approval threshold not met.
+
+6. **Executable** → **InProgress** → **Succeeded** / **Failed** — For proposals with on-chain actions.
+   - **Executable**: voting succeeded and actions are ready. Anyone can call `execute_proposal`.
+   - **InProgress**: actions have been dispatched, awaiting callback results.
+   - **Succeeded**: all actions completed successfully.
+   - **Failed**: one or more actions failed on-chain.
+
+7. **Slashed** — A reviewer marks a `Created` proposal as malicious/spam.
+   - The proposer's bond is forfeited to the `treasury_account_id`. Not claimable.
+
+8. **Rejected** — A reviewer rejects a proposal in `Created` status.
+   - The bond remains claimable by the proposer via `claim_bond`.
+
+9. **Vetoed** — A council member vetoes the proposal during `Scheduled` or `Voting`.
+   - The bond was already forwarded to the treasury at approval time and is not claimable.
 
 ### Implementation details
 
@@ -80,9 +140,10 @@ All contracts are designed to be deployed without access keys, to make sure the 
   merkle proof for the given account. Since RPC nodes return execution at the end of the block, the snapshot has
   be taken at the end of the block.
 - The merkle tree is used to store the current state of the veNEAR holders. Each account stores the timestamp when
-  the account was last updated, the amount of locked NEAR, the amount of extra veNEAR that is accumulated during the
-  lockup period up the updated timestamp, the delegated NEAR, the delegated veNEAR, and whether this account delegates
-  to someone. This information is enough to calculate the current amount of veNEAR for the account.
+  the account was last updated, the amount of locked NEAR, the amount of extra veNEAR accumulated during the lockup
+  period up to the updated timestamp, the pooled NEAR and veNEAR delegated to this account by others, and the
+  account's outgoing partial delegations (a list of `(delegate, bps)` entries; the undelegated remainder implicitly
+  stays with the owner). This information is enough to calculate the current amount of veNEAR for the account.
 - The merkle tree also stores the global state, which includes the total amount of NEAR and veNEAR. During the snapshot,
   the global state is stored as well.
 - When user locks NEAR in the lockup, they immediately start to receive extra veNEAR for the new total locked NEAR
@@ -130,7 +191,7 @@ scripts/test_all.sh
 
 ```bash
 export ROOT_ACCOUNT_ID=hos01.testnet
-env CONTRACTS_SOURCE=release CHAIN_ID=testnet VOTING_DURATION_SEC=604800 scripts/deploy_all.sh $ROOT_ACCOUNT_ID
+env CONTRACTS_SOURCE=release CHAIN_ID=testnet CLASSIC_VOTING_DURATION_SEC=604800 scripts/deploy_all.sh $ROOT_ACCOUNT_ID
 ```
 
 ### Building release candidate

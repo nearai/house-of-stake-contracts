@@ -39,16 +39,24 @@ UNLOCK_DURATION_NS="${UNLOCK_DURATION_SEC}000000000"
 # 2 NEAR
 : ${MIN_LOCKUP_DEPOSIT:="2000000000000000000000000"}
 # 10 minutes for testing
-: "${VOTING_DURATION_SEC:=600}"
-VOTING_DURATION_NS="${VOTING_DURATION_SEC}000000000"
+: "${CLASSIC_VOTING_DURATION_SEC:=600}"
+CLASSIC_VOTING_DURATION_NS="${CLASSIC_VOTING_DURATION_SEC}000000000"
+# 10 minutes for testing
+: "${FST_VOTING_DURATION_SEC:=600}"
+FST_VOTING_DURATION_NS="${FST_VOTING_DURATION_SEC}000000000"
 # 10 minutes for testing
 : "${TIMELOCK_DURATION_SEC:=600}"
 TIMELOCK_DURATION_NS="${TIMELOCK_DURATION_SEC}000000000"
-# 7 days for proposal expiration
+# 10 minutes for testing
 : "${PROPOSAL_EXPIRATION_SEC:=600}"
 PROPOSAL_EXPIRATION_NS="${PROPOSAL_EXPIRATION_SEC}000000000"
+# 10 minutes for testing
+: "${FST_PROPOSAL_EXPIRATION_SEC:=600}"
+FST_PROPOSAL_EXPIRATION_NS="${FST_PROPOSAL_EXPIRATION_SEC}000000000"
 # 0.1 NEAR
 : ${BASE_PROPOSAL_FEE:="100000000000000000000000"}
+# 0.1 NEAR (bond for FastTrack)
+: ${BOND_AMOUNT:="100000000000000000000000"}
 # 0.00125 NEAR (we probably need less)
 : ${VOTE_STORAGE_FEE:="1250000000000000000000"}
 # 35% quorum threshold
@@ -57,6 +65,17 @@ PROPOSAL_EXPIRATION_NS="${PROPOSAL_EXPIRATION_SEC}000000000"
 : ${QUORUM_FLOOR:="1000000000000000000000000000"}
 # 50% approval threshold
 : "${APPROVAL_THRESHOLD_BPS:=5000}"
+# 50% simple majority
+: "${SIMPLE_MAJORITY_THRESHOLD_BPS:=5000}"
+# 66.67% strong majority
+: "${STRONG_MAJORITY_THRESHOLD_BPS:=6667}"
+# 10 minutes sandbox for testing
+: "${SANDBOX_DURATION_SEC:=600}"
+SANDBOX_DURATION_NS="${SANDBOX_DURATION_SEC}000000000"
+# 30% sandbox threshold
+: "${SANDBOX_THRESHOLD_BPS:=3000}"
+# Maximum number of partial delegation entries per account
+: "${MAX_DELEGATIONS:=8}"
 
 # Shorter name, so we can fit more
 export ROOT_ACCOUNT_ID="$ROOT_ACCOUNT_ID"
@@ -64,6 +83,7 @@ export VENEAR_ACCOUNT_ID="v.$ROOT_ACCOUNT_ID"
 export REVIEWER_ACCOUNT_ID="reviewer.$ROOT_ACCOUNT_ID"
 export VOTING_ACCOUNT_ID="vote.$ROOT_ACCOUNT_ID"
 export OWNER_ACCOUNT_ID="owner.$ROOT_ACCOUNT_ID"
+export TREASURY_ACCOUNT_ID="${TREASURY_ACCOUNT_ID:-$OWNER_ACCOUNT_ID}"
 export GUARDIAN_ACCOUNT_ID="guardian.$ROOT_ACCOUNT_ID"
 export VOTING_GUARDIAN_ACCOUNT_ID="voting-guardian.$ROOT_ACCOUNT_ID"
 export LOCKUP_DEPLOYER_ACCOUNT_ID="lockup-deployer.$ROOT_ACCOUNT_ID"
@@ -73,7 +93,7 @@ echo "Creating account $VENEAR_ACCOUNT_ID"
 near --quiet account create-account fund-myself $VENEAR_ACCOUNT_ID '2.4 NEAR' autogenerate-new-keypair save-to-keychain sign-as $ROOT_ACCOUNT_ID network-config $CHAIN_ID sign-with-keychain send
 
 echo "Creating account $VOTING_ACCOUNT_ID"
-near --quiet account create-account fund-myself $VOTING_ACCOUNT_ID '3.6 NEAR' autogenerate-new-keypair save-to-keychain sign-as $ROOT_ACCOUNT_ID network-config $CHAIN_ID sign-with-keychain send
+near --quiet account create-account fund-myself $VOTING_ACCOUNT_ID '4.0 NEAR' autogenerate-new-keypair save-to-keychain sign-as $ROOT_ACCOUNT_ID network-config $CHAIN_ID sign-with-keychain send
 
 echo "Creating account $OWNER_ACCOUNT_ID"
 near --quiet account create-account fund-myself $OWNER_ACCOUNT_ID '0.1 NEAR' autogenerate-new-keypair save-to-keychain sign-as $ROOT_ACCOUNT_ID network-config $CHAIN_ID sign-with-keychain send
@@ -93,7 +113,8 @@ near --quiet contract deploy $VENEAR_ACCOUNT_ID use-file res/$CONTRACTS_SOURCE/v
     "local_deposit": "'$LOCAL_DEPOSIT'",
     "min_lockup_deposit": "'$MIN_LOCKUP_DEPOSIT'",
     "owner_account_id": "'$OWNER_ACCOUNT_ID'",
-    "guardians": ["'$GUARDIAN_ACCOUNT_ID'"]
+    "guardians": ["'$GUARDIAN_ACCOUNT_ID'"],
+    "max_delegations": '$MAX_DELEGATIONS'
   },
   "venear_growth_config": {
     "annual_growth_rate_ns": {
@@ -113,22 +134,30 @@ echo "Creating account $VOTING_GUARDIAN_ACCOUNT_ID"
 near --quiet account create-account fund-myself $VOTING_GUARDIAN_ACCOUNT_ID '0.1 NEAR' autogenerate-new-keypair save-to-keychain sign-as $ROOT_ACCOUNT_ID network-config $CHAIN_ID sign-with-keychain send
 
 
-echo "Deploying and initializing voting contract"
+echo "Deploying and initializing voting contract (merged Classic + FastTrack flows)"
 near --quiet contract deploy $VOTING_ACCOUNT_ID use-file res/$CONTRACTS_SOURCE/voting_contract.wasm with-init-call new json-args '{
   "config": {
     "venear_account_id": "'$VENEAR_ACCOUNT_ID'",
     "reviewer_ids": ["'$REVIEWER_ACCOUNT_ID'"],
+    "council_ids": ["'$COUNCIL_ACCOUNT_ID'"],
     "owner_account_id": "'$OWNER_ACCOUNT_ID'",
-    "voting_duration_ns": "'$VOTING_DURATION_NS'",
+    "classic_voting_duration_ns": "'$CLASSIC_VOTING_DURATION_NS'",
+    "fast_track_voting_duration_ns": "'$FST_VOTING_DURATION_NS'",
+    "timelock_duration_ns": "'$TIMELOCK_DURATION_NS'",
     "base_proposal_fee": "'$BASE_PROPOSAL_FEE'",
+    "bond_amount": "'$BOND_AMOUNT'",
+    "treasury_account_id": "'$TREASURY_ACCOUNT_ID'",
     "vote_storage_fee": "'$VOTE_STORAGE_FEE'",
     "guardians": ["'$GUARDIAN_ACCOUNT_ID'"],
-    "council_ids": ["'$COUNCIL_ACCOUNT_ID'"],
-    "timelock_duration_ns": "'$TIMELOCK_DURATION_NS'",
     "proposal_expiration_ns": "'$PROPOSAL_EXPIRATION_NS'",
+    "fast_track_proposal_expiration_ns": "'$FST_PROPOSAL_EXPIRATION_NS'",
     "quorum_threshold_bps": '$QUORUM_THRESHOLD_BPS',
     "quorum_floor": "'$QUORUM_FLOOR'",
-    "approval_threshold_bps": '$APPROVAL_THRESHOLD_BPS'
+    "approval_threshold_bps": '$APPROVAL_THRESHOLD_BPS',
+    "simple_majority_threshold_bps": '$SIMPLE_MAJORITY_THRESHOLD_BPS',
+    "strong_majority_threshold_bps": '$STRONG_MAJORITY_THRESHOLD_BPS',
+    "sandbox_duration_ns": "'$SANDBOX_DURATION_NS'",
+    "sandbox_threshold_bps": '$SANDBOX_THRESHOLD_BPS'
   }
 }' prepaid-gas '10.0 Tgas' attached-deposit '0 NEAR' network-config $CHAIN_ID sign-with-keychain send
 

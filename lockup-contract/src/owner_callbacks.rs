@@ -1,5 +1,5 @@
 use crate::*;
-use near_sdk::{is_promise_success, near, PromiseOrValue};
+use near_sdk::{PromiseOrValue, is_promise_success, near};
 
 #[near]
 impl LockupContract {

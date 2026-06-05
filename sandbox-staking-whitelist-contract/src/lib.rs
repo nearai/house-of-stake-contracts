@@ -1,6 +1,6 @@
 use near_sdk::store::{LookupMap, LookupSet};
 use near_sdk::{
-    env, near, require, AccountId, BorshStorageKey, NearToken, PanicOnDefault, Promise,
+    AccountId, BorshStorageKey, NearToken, PanicOnDefault, Promise, env, near, require,
 };
 
 #[derive(BorshStorageKey)]
@@ -131,7 +131,7 @@ impl Contract {
         );
 
         account.unstaked_balance = account.unstaked_balance.checked_sub(amount).unwrap();
-        Promise::new(account_id.clone()).transfer(amount);
+        Promise::new(account_id.clone()).transfer(amount).detach();
         self.accounts.insert(account_id, account);
     }
 

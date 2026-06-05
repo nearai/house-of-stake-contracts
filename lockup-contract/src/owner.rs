@@ -1,6 +1,6 @@
 use crate::*;
 use common::events;
-use near_sdk::{assert_one_yocto, near, AccountId, NearToken, Promise};
+use near_sdk::{AccountId, NearToken, Promise, assert_one_yocto, near};
 
 #[near]
 impl LockupContract {

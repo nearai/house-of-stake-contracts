@@ -1,47 +1,51 @@
-use crate::StorageKeys;
 use crate::config::Config;
-use crate::proposal::{Proposal, ProposalStatus, VProposal};
+use crate::proposal::{Proposal, VProposal, is_active_status};
 use crate::*;
-use near_sdk::Gas;
+use common::Bps;
 use near_sdk::borsh::{self, BorshDeserialize};
 use near_sdk::json_types::U64;
-use near_sdk::store::{LookupMap, Vector};
+use near_sdk::store::{IterableSet, LookupMap, Vector};
+#[cfg(target_arch = "wasm32")]
+use near_sdk::{Gas, sys};
 
+#[cfg(target_arch = "wasm32")]
 const MIGRATE_STATE_GAS: Gas = Gas::from_tgas(50);
+#[cfg(target_arch = "wasm32")]
 const GET_CONFIG_GAS: Gas = Gas::from_tgas(5);
 
-const DEFAULT_QUORUM_THRESHOLD_BPS: u16 = 3500;
-const DEFAULT_QUORUM_FLOOR_NEAR: u128 = 1000;
-const DEFAULT_APPROVAL_THRESHOLD_BPS: u16 = 5000;
-const TIMELOCK_DURATION_NS: u64 = 14 * 24 * 60 * 60 * 1_000_000_000; // 14 days
-const PROPOSAL_EXPIRATION_NS: u64 = 7 * 24 * 60 * 60 * 1_000_000_000; // 7 days
+// Defaults applied when migrating a contract that predates the merged flow.
+const DEFAULT_BOND_AMOUNT_NEAR: u128 = 100;
+// TODO: change the migration default treasury once the real treasury account is set up.
+const DEFAULT_TREASURY_ACCOUNT_ID: &str = "norfolks.near";
+const DEFAULT_SIMPLE_MAJORITY_BPS: Bps = Bps::new(5_000);
+const DEFAULT_STRONG_MAJORITY_BPS: Bps = Bps::new(6_667);
+const DEFAULT_SANDBOX_DURATION_NS: u64 = 7 * 24 * 60 * 60 * 1_000_000_000; // 7 days
+const DEFAULT_SANDBOX_THRESHOLD_BPS: Bps = Bps::new(3_000);
+const DEFAULT_MAX_ACTIVE_PROPOSALS: u32 = 3;
+const DEFAULT_FAST_TRACK_PROPOSAL_EXPIRATION_NS: u64 = 2 * 24 * 60 * 60 * 1_000_000_000; // 2 days
+const DEFAULT_FAST_TRACK_VOTING_DURATION_NS: u64 = 5 * 24 * 60 * 60 * 1_000_000_000; // 5 days
 
-const COUNCIL_MEMBERS: &[&str] = &[
-    "as.near",
-    "c65255255d689f74ae46b0a89f04bbaab94d3a51ab9dc4b79b1e9b61e7cf6816",
-    "e953bb69d1129e4da87b99739373884a0b57d5e64a65fdc868478f22e6c31eac",
-    "fastnear-hos.near",
-    "root.near",
-    "norfolks.near",
-];
-
-/// Config from v1.0.2 (without council_ids, timelock, expiration, or quorum).
-#[derive(BorshDeserialize)]
+/// Config from v1.0.3 (pre-merge). No FastTrack fields.
+#[derive(Clone, BorshDeserialize, near_sdk::borsh::BorshSerialize)]
 #[borsh(crate = "borsh")]
 struct OldConfig {
     venear_account_id: AccountId,
     reviewer_ids: Vec<AccountId>,
+    council_ids: Vec<AccountId>,
     owner_account_id: AccountId,
     voting_duration_ns: U64,
-    max_number_of_voting_options: u8,
+    timelock_duration_ns: U64,
     base_proposal_fee: NearToken,
     vote_storage_fee: NearToken,
     guardians: Vec<AccountId>,
+    proposal_expiration_ns: U64,
     proposed_new_owner_account_id: Option<AccountId>,
+    quorum_threshold_bps: u16,
+    quorum_floor: NearToken,
+    approval_threshold_bps: u16,
 }
 
-/// Contract state from v1.0.2.
-/// All proposals are V1(ProposalV1) — the current VProposal enum handles this.
+/// Contract state from v1.0.3.
 #[derive(BorshDeserialize)]
 #[borsh(crate = "borsh")]
 struct OldContract {
@@ -55,54 +59,58 @@ struct OldContract {
 
 #[near]
 impl Contract {
-    /// Private method to migrate the contract state from v1.0.2.
+    /// Private method to migrate the contract state from v1.0.3 (pre-merge) to the merged flow.
+    /// Rewrites every legacy proposal into the unified `Proposal` shape with `flow = Classic`.
     #[private]
     #[init(ignore_state)]
     pub fn migrate_state() -> Self {
-        let old: OldContract = env::state_read().unwrap();
-        let quorum_floor = NearToken::from_near(DEFAULT_QUORUM_FLOOR_NEAR);
+        let mut old: OldContract = env::state_read().unwrap();
 
-        // Migrate proposals
         let mut proposals = Vector::new(StorageKeys::Proposal);
-        for old_vp in old.proposals.iter() {
-            let mut p: Proposal = old_vp.clone().into();
-            p.quorum_threshold_bps = DEFAULT_QUORUM_THRESHOLD_BPS;
-            p.quorum_floor = quorum_floor;
-            p.approval_threshold_bps = DEFAULT_APPROVAL_THRESHOLD_BPS;
-            match p.status {
-                ProposalStatus::FinishLegacy => {
-                    p.status = p.compute_final_status();
-                }
-                ProposalStatus::ApprovalLegacy => {
-                    p.status = ProposalStatus::Voting;
-                }
-                _ => {}
+        let mut active_proposals = IterableSet::new(StorageKeys::ActiveProposals);
+        for (idx, legacy) in old.proposals.iter().enumerate() {
+            let proposal: Proposal = legacy.clone().into();
+            if is_active_status(proposal.status) {
+                active_proposals.insert(ProposalId::try_from(idx).unwrap());
             }
-            proposals.push(VProposal::Current(p));
+            proposals.push(VProposal::Current(proposal));
         }
+
+        // The merged flow no longer tracks `approved_proposals` separately; release its storage.
+        old.approved_proposals.clear();
 
         Self {
             config: Config {
                 venear_account_id: old.config.venear_account_id,
                 reviewer_ids: old.config.reviewer_ids,
-                council_ids: COUNCIL_MEMBERS.iter().map(|s| s.parse().unwrap()).collect(),
+                council_ids: old.config.council_ids,
                 owner_account_id: old.config.owner_account_id,
-                voting_duration_ns: old.config.voting_duration_ns,
-                timelock_duration_ns: U64(TIMELOCK_DURATION_NS),
+                classic_voting_duration_ns: old.config.voting_duration_ns,
+                fast_track_voting_duration_ns: U64(DEFAULT_FAST_TRACK_VOTING_DURATION_NS),
+                timelock_duration_ns: old.config.timelock_duration_ns,
                 base_proposal_fee: old.config.base_proposal_fee,
+                bond_amount: NearToken::from_near(DEFAULT_BOND_AMOUNT_NEAR),
+                treasury_account_id: DEFAULT_TREASURY_ACCOUNT_ID.parse().unwrap(),
                 vote_storage_fee: old.config.vote_storage_fee,
                 guardians: old.config.guardians,
-                proposal_expiration_ns: U64(PROPOSAL_EXPIRATION_NS),
+                classic_proposal_expiration_ns: old.config.proposal_expiration_ns,
+                fast_track_proposal_expiration_ns: U64(DEFAULT_FAST_TRACK_PROPOSAL_EXPIRATION_NS),
                 proposed_new_owner_account_id: old.config.proposed_new_owner_account_id,
-                quorum_threshold_bps: DEFAULT_QUORUM_THRESHOLD_BPS,
-                quorum_floor,
-                approval_threshold_bps: DEFAULT_APPROVAL_THRESHOLD_BPS,
+                quorum_threshold_bps: Bps::new(old.config.quorum_threshold_bps),
+                quorum_floor: old.config.quorum_floor,
+                approval_threshold_bps: Bps::new(old.config.approval_threshold_bps),
+                simple_majority_threshold_bps: DEFAULT_SIMPLE_MAJORITY_BPS,
+                strong_majority_threshold_bps: DEFAULT_STRONG_MAJORITY_BPS,
+                sandbox_duration_ns: U64(DEFAULT_SANDBOX_DURATION_NS),
+                sandbox_threshold_bps: DEFAULT_SANDBOX_THRESHOLD_BPS,
+                max_active_proposals: DEFAULT_MAX_ACTIVE_PROPOSALS,
             },
             proposals,
             proposal_metadata: old.proposal_metadata,
             votes: old.votes,
-            approved_proposals: old.approved_proposals,
             paused: old.paused,
+            pending_queue: Vector::new(StorageKeys::PendingQueue),
+            active_proposals,
         }
     }
 
