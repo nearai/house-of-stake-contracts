@@ -16,7 +16,7 @@ const GET_CONFIG_GAS: Gas = Gas::from_tgas(5);
 // Defaults applied when migrating a contract that predates the merged flow.
 const DEFAULT_BOND_AMOUNT_NEAR: u128 = 100;
 // TODO: change the migration default treasury once the real treasury account is set up.
-const DEFAULT_TREASURY_ACCOUNT_ID: &str = "norfolks.near";
+const DEFAULT_TREASURY_ACCOUNT_ID: &str = "hos-deposits.sputnik-dao.near";
 const DEFAULT_SIMPLE_MAJORITY_BPS: Bps = Bps::new(5_000);
 const DEFAULT_STRONG_MAJORITY_BPS: Bps = Bps::new(6_667);
 const DEFAULT_SANDBOX_DURATION_NS: u64 = 7 * 24 * 60 * 60 * 1_000_000_000; // 7 days
