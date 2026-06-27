@@ -181,6 +181,19 @@ impl Contract {
                 .get(account_id)
                 .map(|subscription_ids| !subscription_ids.is_empty())
                 .unwrap_or(false)
+            || self
+                .farm_position_products_by_account
+                .get(account_id)
+                .map(|product_ids| {
+                    product_ids.iter().any(|product_id| {
+                        self.internal_get_farm_position(account_id, product_id)
+                            .map(|position| {
+                                position.status == FarmStatus::Active && position.shares.0 > 0
+                            })
+                            .unwrap_or(false)
+                    })
+                })
+                .unwrap_or(false)
     }
 
     fn require_registered_account(&self, account_id: &AccountId) -> Account {

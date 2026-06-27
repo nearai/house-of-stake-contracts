@@ -64,6 +64,15 @@ pub trait ExtSelfEpoch {
         price_id: PriceId,
         validator_id: ValidatorId,
     ) -> PromiseOrValue<LockId>;
+    /// **[Pipeline 5e]** Farm stake after pre-user settlement (`farm.rs`).
+    fn resolve_farm_stake(
+        &mut self,
+        account_id: AccountId,
+        deposit: NearToken,
+        product_id: ProductId,
+        price_id: PriceId,
+        validator_id: ValidatorId,
+    ) -> PromiseOrValue<FarmPosition>;
     /// **[Pipeline 5d]** Subscription update after pre-user settlement (`subscriptions.rs`).
     fn on_subscription_update_after_settle(
         &mut self,
@@ -82,6 +91,14 @@ pub trait ExtSelfEpoch {
         validator_id: ValidatorId,
         shares_remove: u128,
     );
+    /// **[Pipeline 5f]** Farm share exit after pre-user settlement (`farm.rs`).
+    fn resolve_farm_unstake(
+        &mut self,
+        account_id: AccountId,
+        product_id: ProductId,
+        validator_id: ValidatorId,
+        shares_remove: u128,
+    );
     /// **[Pipeline 5c]** User withdraw transfer after pre-user settlement (`withdraw.rs`).
     fn on_withdraw_user_transfer_after_settle(
         &mut self,
@@ -97,6 +114,13 @@ pub trait ExtSelfEpoch {
         validator_id: ValidatorId,
         cont: UserAction,
     ) -> PromiseOrValue<LockId>;
+    /// **[Pipeline 6]** Release **`Busy`** and return farm position from stake tail; refund on tail failure.
+    fn on_epoch_pipeline_release_with_farm_position(
+        &mut self,
+        #[callback_result] position_result: Result<FarmPosition, PromiseError>,
+        validator_id: ValidatorId,
+        cont: UserAction,
+    ) -> PromiseOrValue<FarmPosition>;
     /// **[Pipeline 6]** Release **`Busy`** and return subscription update outcome; refund on tail failure.
     fn on_epoch_pipeline_release_with_subscription_update_outcome(
         &mut self,
@@ -516,6 +540,7 @@ impl Contract {
             Terminal,
             WithLockId,
             WithSubscriptionUpdateOutcome,
+            WithFarmPosition,
         }
 
         let pipeline_validator_id = cont.validator_id().clone();
@@ -570,6 +595,29 @@ impl Contract {
                     ),
                 ReleaseKind::WithSubscriptionUpdateOutcome,
             ),
+            UserAction::CommitFarmStake {
+                validator_id,
+                account_id,
+                deposit,
+                product_id,
+                price_id,
+            } => (
+                ext_self_epoch::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_FARM_STAKE_AFTER_SETTLE)
+                    .resolve_farm_stake(account_id, deposit, product_id, price_id, validator_id),
+                ReleaseKind::WithFarmPosition,
+            ),
+            UserAction::FarmUnstakeQueue {
+                validator_id,
+                account_id,
+                product_id,
+                shares_remove,
+            } => (
+                ext_self_epoch::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_FARM_UNSTAKE_AFTER_SETTLE)
+                    .resolve_farm_unstake(account_id, product_id, validator_id, shares_remove),
+                ReleaseKind::Terminal,
+            ),
             // Share exit: burn shares and queue `pending_to_unstake` (pool `unstake` on a later settlement).
             UserAction::UnlockQueueUnstake {
                 lock_id,
@@ -619,6 +667,14 @@ impl Contract {
                         callbacks::ON_EPOCH_PIPELINE_RELEASE_WITH_SUBSCRIPTION_UPDATE_OUTCOME,
                     )
                     .on_epoch_pipeline_release_with_subscription_update_outcome(
+                        pipeline_validator_id,
+                        cont_for_release,
+                    ),
+            ),
+            ReleaseKind::WithFarmPosition => tail.then(
+                ext_self_epoch::ext(env::current_account_id())
+                    .with_static_gas(callbacks::ON_EPOCH_PIPELINE_RELEASE_WITH_FARM_POSITION)
+                    .on_epoch_pipeline_release_with_farm_position(
                         pipeline_validator_id,
                         cont_for_release,
                     ),
@@ -675,6 +731,30 @@ impl Contract {
                 let (buyer, amount) = cont
                     .payable_refund()
                     .expect("WithLockId continuation must be payable");
+                self.refund_payable_pipeline(&validator_id, buyer, amount)
+                    .into()
+            }
+        }
+    }
+
+    /// **[Pipeline 6]** Release pipeline and return farm position from stake tail; refund payable entry on tail failure.
+    #[private]
+    pub fn on_epoch_pipeline_release_with_farm_position(
+        &mut self,
+        #[callback_result] position_result: Result<FarmPosition, PromiseError>,
+        validator_id: ValidatorId,
+        cont: UserAction,
+    ) -> PromiseOrValue<FarmPosition> {
+        match position_result {
+            Ok(position) => {
+                self.release_validator_pool_pipeline(&validator_id);
+                PromiseOrValue::Value(position)
+            }
+            Err(_) => {
+                events::log_epoch_operation("epoch_farm_stake_pipeline_tail_failed", &validator_id);
+                let (buyer, amount) = cont
+                    .payable_refund()
+                    .expect("farm stake continuation must be payable");
                 self.refund_payable_pipeline(&validator_id, buyer, amount)
                     .into()
             }

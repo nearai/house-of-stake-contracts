@@ -91,6 +91,10 @@ pub fn ctx_ts(pred: AccountId, attached: NearToken, block_timestamp_ns: u64) -> 
 
 /// Context for `#[private]` catalog callbacks (`*_after_get_owner`): contract calls itself.
 fn ctx_catalog_callback() -> VMContext {
+    ctx_catalog_callback_ts(1_700_000_000_000_000_000)
+}
+
+fn ctx_catalog_callback_ts(block_timestamp_ns: u64) -> VMContext {
     let id = acct(STAKING);
     VMContextBuilder::new()
         .current_account_id(id.clone())
@@ -100,15 +104,19 @@ fn ctx_catalog_callback() -> VMContext {
         .account_balance(NearToken::from_near(500))
         .block_height(42)
         .epoch_height(100)
-        .block_timestamp(1_700_000_000_000_000_000)
+        .block_timestamp(block_timestamp_ns)
         .build()
 }
 
 /// Simulates `get_owner_id` resolving to `pool_owner` so `is_promise_success()` passes in callbacks.
 pub fn testing_env_catalog_callback(pool_owner: AccountId) {
+    testing_env_catalog_callback_at(pool_owner, 1_700_000_000_000_000_000);
+}
+
+pub fn testing_env_catalog_callback_at(pool_owner: AccountId, block_timestamp_ns: u64) {
     let payload = serde_json::to_vec(&pool_owner).expect("serialize pool owner AccountId");
     testing_env!(
-        ctx_catalog_callback(),
+        ctx_catalog_callback_ts(block_timestamp_ns),
         test_vm_config(),
         RuntimeFeesConfig::test(),
         HashMap::default(),
@@ -196,6 +204,42 @@ pub fn setup_catalog_near_subscription(contract: &mut Contract) -> (String, Stri
     add_validator_allowlisted(contract);
 
     add_subscription_product(contract, "Sub product", 1)
+}
+
+pub fn setup_catalog_farm(
+    contract: &mut Contract,
+    reward_rate: u128,
+    min_amount_yocto: u128,
+    max_amount_yocto: Option<u128>,
+) -> (String, String) {
+    add_validator_allowlisted(contract);
+
+    testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
+    let product_id = contract.create_product_after_get_owner(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        acct(POOL),
+        "Farm product".into(),
+        "Farm desc".into(),
+        acct(VALIDATOR_OWNER_ACCOUNT),
+    );
+
+    testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
+    let price_id = contract.create_price_after_get_owner(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        product_id.clone(),
+        "Farm".into(),
+        "".into(),
+        U128(min_amount_yocto),
+        PriceType::Farm,
+        None,
+        U128(0),
+        Some(PriceMetadata {
+            max_amount: max_amount_yocto.map(U128),
+            farm_reward_rate: Some(U128(reward_rate)),
+        }),
+        acct(VALIDATOR_OWNER_ACCOUNT),
+    );
+    (product_id, price_id)
 }
 
 pub fn add_subscription_product(

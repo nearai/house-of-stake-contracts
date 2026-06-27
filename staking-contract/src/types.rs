@@ -43,6 +43,7 @@ impl PoolAccountView {
 pub enum PriceType {
     OneOff,
     Recurring,
+    Farm,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -211,6 +212,13 @@ pub enum LockStatus {
     Withdrawn,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
+pub enum FarmStatus {
+    Active,
+    Closed,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[near(serializers = [borsh, json])]
 pub enum OrderRef {
@@ -245,8 +253,11 @@ pub struct Product {
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
 pub struct PriceMetadata {
-    /// Optional inclusive upper bound for variable subscription stake amounts.
+    /// Optional inclusive upper bound for variable subscription stake amounts and active farm stake.
     pub max_amount: Option<U128>,
+    /// Farm-only reward rate. Unit: micro-USD reward units per 1 NEAR-second,
+    /// scaled by [`crate::farm::FARM_REWARD_RATE_DENOM`].
+    pub farm_reward_rate: Option<U128>,
 }
 
 #[derive(Clone)]
@@ -339,6 +350,51 @@ pub struct Purchase {
     pub created_ns: U64,
 }
 
+#[derive(Clone)]
+#[near(serializers = [borsh, json])]
+pub struct FarmPool {
+    pub price_id: PriceId,
+    pub product_id: ProductId,
+    pub validator_id: ValidatorId,
+    pub reward_rate: U128,
+    pub total_farm_shares: U128,
+    pub acc_reward_per_share: U128,
+    pub last_reward_settle_ns: U64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
+pub struct FarmPosition {
+    pub account_id: AccountId,
+    pub product_id: ProductId,
+    pub price_id: PriceId,
+    pub validator_id: ValidatorId,
+    pub shares: U128,
+    pub reward_debt: U128,
+    pub accrued_reward_units: U128,
+    pub status: FarmStatus,
+    pub created_ns: U64,
+    pub updated_ns: U64,
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh, json])]
+pub struct FarmAccount {
+    pub account_id: AccountId,
+    pub accumulated_reward_units: U128,
+    pub last_update_ns: U64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [json])]
+pub struct FarmAccountView {
+    pub account_id: AccountId,
+    pub accumulated_reward_units: U128,
+    pub unclaimed_reward_units: U128,
+    pub total_earned_reward_units: U128,
+    pub active_positions: Vec<FarmPosition>,
+}
+
 /// User-facing tail chained after [`Contract::promise_validator_per_epoch_settlement_then`]:
 /// either the full pre-user pipeline ran (balance sync → withdraw-if-ready →
 /// [`crate::epoch::Contract::try_epoch_stake_or_unstake`]), or the pool had **already** settled this NEAR epoch and
@@ -384,6 +440,19 @@ pub enum UserAction {
         target_amount: U128,
         subscription_id: SubscriptionId,
     },
+    CommitFarmStake {
+        validator_id: ValidatorId,
+        account_id: AccountId,
+        deposit: NearToken,
+        product_id: ProductId,
+        price_id: PriceId,
+    },
+    FarmUnstakeQueue {
+        validator_id: ValidatorId,
+        account_id: AccountId,
+        product_id: ProductId,
+        shares_remove: u128,
+    },
 }
 
 impl UserAction {
@@ -394,7 +463,9 @@ impl UserAction {
             | Self::UnlockQueueUnstake { validator_id, .. }
             | Self::WithdrawUserTransfer { validator_id, .. }
             | Self::SettleOnly { validator_id }
-            | Self::SubscriptionUpdate { validator_id, .. } => validator_id,
+            | Self::SubscriptionUpdate { validator_id, .. }
+            | Self::CommitFarmStake { validator_id, .. }
+            | Self::FarmUnstakeQueue { validator_id, .. } => validator_id,
         }
     }
 
@@ -407,6 +478,11 @@ impl UserAction {
                 Some((buyer.clone(), *locked))
             }
             Self::SubscriptionUpdate { buyer, deposit, .. } => Some((buyer.clone(), *deposit)),
+            Self::CommitFarmStake {
+                account_id,
+                deposit,
+                ..
+            } => Some((account_id.clone(), *deposit)),
             _ => None,
         }
     }
@@ -582,6 +658,66 @@ impl From<VLock> for Lock {
 #[near(serializers = [borsh])]
 pub enum VPurchase {
     V0(Purchase),
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh])]
+pub enum VFarmPool {
+    V0(FarmPool),
+}
+
+impl From<FarmPool> for VFarmPool {
+    fn from(value: FarmPool) -> Self {
+        Self::V0(value)
+    }
+}
+
+impl From<VFarmPool> for FarmPool {
+    fn from(value: VFarmPool) -> Self {
+        match value {
+            VFarmPool::V0(inner) => inner,
+        }
+    }
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh])]
+pub enum VFarmPosition {
+    V0(FarmPosition),
+}
+
+impl From<FarmPosition> for VFarmPosition {
+    fn from(value: FarmPosition) -> Self {
+        Self::V0(value)
+    }
+}
+
+impl From<VFarmPosition> for FarmPosition {
+    fn from(value: VFarmPosition) -> Self {
+        match value {
+            VFarmPosition::V0(inner) => inner,
+        }
+    }
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh])]
+pub enum VFarmAccount {
+    V0(FarmAccount),
+}
+
+impl From<FarmAccount> for VFarmAccount {
+    fn from(value: FarmAccount) -> Self {
+        Self::V0(value)
+    }
+}
+
+impl From<VFarmAccount> for FarmAccount {
+    fn from(value: VFarmAccount) -> Self {
+        match value {
+            VFarmAccount::V0(inner) => inner,
+        }
+    }
 }
 
 impl From<Purchase> for VPurchase {

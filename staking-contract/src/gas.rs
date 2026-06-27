@@ -78,12 +78,19 @@ pub mod callbacks {
     pub const ON_WITHDRAW_TAIL_AFTER_PRE_USER: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// Subscription update after pre-user settlement.
     pub const ON_SUBSCRIPTION_UPDATE_AFTER_SETTLE: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
+    /// Farm stake after pre-user settlement.
+    pub const ON_FARM_STAKE_AFTER_SETTLE: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
+    /// Farm unstake after pre-user settlement.
+    pub const ON_FARM_UNSTAKE_AFTER_SETTLE: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// After user-flow tail promise completes: release pipeline `Busy`.
     pub const ON_EPOCH_PIPELINE_TERMINAL_RELEASE: Gas = BASE_GAS;
     /// Release pipeline `Busy`, return lock id, or refund payable entry on tail failure (transfer).
     pub const ON_EPOCH_PIPELINE_RELEASE_WITH_LOCK_ID: Gas = Gas::from_gas(BASE_GAS.as_gas() * 2);
     /// Release pipeline `Busy`, return subscription update outcome, or refund payable entry on tail failure.
     pub const ON_EPOCH_PIPELINE_RELEASE_WITH_SUBSCRIPTION_UPDATE_OUTCOME: Gas =
+        Gas::from_gas(BASE_GAS.as_gas() * 2);
+    /// Release pipeline `Busy`, return farm position, or refund payable entry on tail failure.
+    pub const ON_EPOCH_PIPELINE_RELEASE_WITH_FARM_POSITION: Gas =
         Gas::from_gas(BASE_GAS.as_gas() * 2);
 }
 

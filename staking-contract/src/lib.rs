@@ -4,6 +4,7 @@ pub mod accounts;
 pub mod config;
 pub mod epoch;
 pub mod events;
+pub mod farm;
 pub mod gas;
 pub mod governance;
 pub mod ids;
@@ -51,6 +52,10 @@ enum StorageKeys {
     PurchasesByProduct,
     UserPurchaseCount,
     RevenueByValidator,
+    FarmPools,
+    FarmPositions,
+    FarmPositionProductsByAccount,
+    FarmAccounts,
 }
 
 #[derive(PanicOnDefault)]
@@ -97,6 +102,14 @@ pub struct Contract {
     pub user_purchase_count: LookupMap<AccountId, u32>,
     /// Withdrawable direct-payment revenue aggregated by validator pool account.
     pub revenue_by_validator: LookupMap<ValidatorId, NearToken>,
+    /// Farm reward accumulator per Farm price id.
+    pub farm_pools: LookupMap<PriceId, VFarmPool>,
+    /// One farm position per `(account_id, product_id)`.
+    pub farm_positions: LookupMap<(AccountId, ProductId), VFarmPosition>,
+    /// Secondary index: farm owner account -> product ids with current or historical farm positions.
+    pub farm_position_products_by_account: LookupMap<AccountId, Vec<ProductId>>,
+    /// Per-account rolled-up farm reward totals from closed positions.
+    pub farm_accounts: LookupMap<AccountId, VFarmAccount>,
     /// Secondary index: `(subscriber, product_id)` → `subscription_id` for at-most-one subscription per product per account.
     pub subscription_by_account_product: LookupMap<(AccountId, ProductId), SubscriptionId>,
     /// Secondary index: `subscriber` → owned subscription ids. Used for account-level listing and
@@ -137,6 +150,12 @@ impl Contract {
             purchases_by_product: LookupMap::new(StorageKeys::PurchasesByProduct),
             user_purchase_count: LookupMap::new(StorageKeys::UserPurchaseCount),
             revenue_by_validator: LookupMap::new(StorageKeys::RevenueByValidator),
+            farm_pools: LookupMap::new(StorageKeys::FarmPools),
+            farm_positions: LookupMap::new(StorageKeys::FarmPositions),
+            farm_position_products_by_account: LookupMap::new(
+                StorageKeys::FarmPositionProductsByAccount,
+            ),
+            farm_accounts: LookupMap::new(StorageKeys::FarmAccounts),
             subscription_by_account_product: LookupMap::new(
                 StorageKeys::SubscriptionByAccountProduct,
             ),

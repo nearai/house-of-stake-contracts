@@ -54,6 +54,7 @@ impl Contract {
                 );
                 self.lock_recurring_subscription_with_catalog(buyer, locked, price, product)
             }
+            PriceType::Farm => env::panic_str("Use stake for farm prices"),
         }
     }
 
