@@ -45,6 +45,8 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 | `get_purchases_for_account` | `account_id`, `from_index: u64`, `limit: u64` | `Purchase[]` | Paginated direct payment purchases by buyer account. |
 | `get_purchases_for_product` | `product_id`, `from_index: u64`, `limit: u64` | `Purchase[]` | Paginated direct payment purchases by product. |
 | `get_revenue_balance_for_validator` | `validator_id: AccountId` | `NearToken` | Current withdrawable direct-payment revenue for the validator. |
+| `get_validator_reward_config` | `validator_id: AccountId` | `ValidatorRewardConfig` | Projected staking-farm reward config and cumulative index for a validator. Missing configs project as zero-rate / disabled. |
+| `get_lock_reward` | `lock_id: string` | `LockRewardView \| null` | Projected reward accounting for a lock, including unclaimed and claimed rewards. |
 
 ---
 
@@ -111,6 +113,22 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 | `get_purchases_for_product` | Anyone | 0 | `Purchase[]` | `product_id`, `from_index`, `limit`. Lists direct payment purchases by product. |
 
 Revenue withdrawal uses the same pool-owner callback pattern as catalog mutations: `withdraw_revenue` calls the pool `get_owner_id()`, then private `withdraw_revenue_after_get_owner` verifies the original caller, clears the validator revenue balance, and transfers the full balance.
+
+---
+
+## Rewards (`rewards.rs`)
+
+Rewards use staking-farm style accounting with a validator-level cumulative reward index. The contract owner configures a rate per validator; each lock stores its last paid index, unclaimed rewards, and claimed rewards. A zero rate is the default and disables future accrual without changing existing staking behavior.
+
+Reward claims are **accounting-only**: `claim_lock_rewards` moves a lock's unclaimed rewards into `claimed_rewards`, emits an event, and returns the amount. This contract does not custody or transfer a separate reward token.
+
+| Method | Access | Deposit | Returns | Description |
+|--------|--------|---------|---------|-------------|
+| `set_validator_reward_rate` | Contract owner | **1 yocto** | — | `validator_id`, `reward_rate_yocto_per_near_ns`. Advances the validator reward index through the current block timestamp, then sets the future emission rate. The rate is reward yocto-units per 1 NEAR of active lock principal per nanosecond. |
+| `update_lock_rewards` | Lock owner | **1 yocto** | `LockRewardState` | Persists accrued rewards for a lock without claiming them. |
+| `claim_lock_rewards` | Lock owner | **1 yocto** | `U128` | Persists accrued rewards, marks all unclaimed rewards as claimed, emits `reward_claim`, and returns the claimed amount. |
+| `get_validator_reward_config` | Anyone | 0 | `ValidatorRewardConfig` | View with projected `accumulated_reward_per_near` at the current block timestamp. |
+| `get_lock_reward` | Anyone | 0 | `LockRewardView \| null` | View with projected unclaimed rewards at the current block timestamp. |
 
 ---
 

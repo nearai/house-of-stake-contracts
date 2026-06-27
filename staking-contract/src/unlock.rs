@@ -73,6 +73,7 @@ impl Contract {
         require!(lock.validator_id == validator_id, "Lock validator mismatch");
         require!(lock.shares.0 == shares_remove, "Lock shares changed; retry");
 
+        self.settle_lock_rewards(&lock);
         self.internal_unstake(account_id.clone(), validator_id.clone(), shares_remove);
         lock.status = LockStatus::UnlockRequested;
         crate::events::log_unlock(

@@ -5,14 +5,19 @@
 mod mock_pool;
 
 use mock_pool::{
-    SETTLEMENT_PIPELINE_GAS_TGAS, add_validator_pair, buyer_withdraw_result, call_epoch_settle,
-    create_one_off_product_and_price, deploy_staking_and_mock_pool, eprintln_early_withdraw_stage,
-    fast_forward_until_epoch_delta, fast_forward_until_timestamp, fetch_validator,
-    json_near_token_yocto, json_u64_field, json_u64_field_any, mock_pool_wasm_bytes,
-    near_token_yocto_from_view, set_mock_epoch, staking_wasm_bytes_test,
+    SETTLEMENT_PIPELINE_GAS_TGAS, add_validator_pair, buyer_lock_one_off, buyer_storage_deposit,
+    buyer_withdraw_result, call_epoch_settle, create_one_off_product_and_price,
+    deploy_staking_and_mock_pool, eprintln_early_withdraw_stage, fast_forward_until_epoch_delta,
+    fast_forward_until_timestamp, fetch_validator, json_near_token_yocto, json_u64_field,
+    json_u64_field_any, mock_pool_wasm_bytes, near_token_yocto_from_view, set_mock_epoch,
+    set_mock_timestamp, staking_wasm_bytes_test,
 };
 use near_workspaces::types::{Gas as WsGas, NearToken};
 use serde_json::json;
+
+fn json_string_u128(v: &serde_json::Value) -> Option<u128> {
+    v.as_str()?.parse().ok()
+}
 
 #[tokio::test]
 async fn staking_get_validators_includes_allowlisted_pool() -> Result<(), Box<dyn std::error::Error>>
@@ -102,6 +107,90 @@ async fn staking_epoch_settle_fast_path_succeeds_after_lock_consumed_slot()
     call_epoch_settle(&buyer, staking.id(), pool.id())
         .await?
         .into_result()?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn staking_rewards_accrue_and_claim_in_sandbox() -> Result<(), Box<dyn std::error::Error>> {
+    const T0: u64 = 1_700_000_000_000_000_000;
+
+    let staking_wasm = staking_wasm_bytes_test().map_err(|e| format!("staking wasm: {e}"))?;
+    let pool_wasm = mock_pool_wasm_bytes().map_err(|e| format!("mock pool wasm: {e}"))?;
+
+    let worker = near_workspaces::sandbox().await?;
+    let staking = worker.dev_create_account().await?;
+    let pool = worker.dev_create_account().await?;
+    let validator_owner = worker.dev_create_account().await?;
+    let buyer = worker.dev_create_account().await?;
+
+    deploy_staking_and_mock_pool(
+        &staking,
+        &pool,
+        validator_owner.id(),
+        &staking_wasm,
+        &pool_wasm,
+    )
+    .await?;
+    add_validator_pair(&staking, &pool).await?;
+
+    let (_product_id, price_id) =
+        create_one_off_product_and_price(&staking, &pool, &validator_owner).await?;
+
+    set_mock_timestamp(&staking, staking.id(), T0).await?;
+    staking
+        .call(staking.id(), "set_validator_reward_rate")
+        .args_json(json!({
+            "validator_id": pool.id(),
+            "reward_rate_yocto_per_near_ns": "10",
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(WsGas::from_tgas(50))
+        .transact()
+        .await?
+        .into_result()?;
+
+    buyer_storage_deposit(&buyer, staking.id()).await?;
+    let lock_id =
+        buyer_lock_one_off(&buyer, staking.id(), &price_id, "1000000000000000", 50).await?;
+
+    set_mock_timestamp(&staking, staking.id(), T0 + 100).await?;
+    let reward: serde_json::Value = worker
+        .view(staking.id(), "get_lock_reward")
+        .args_json(json!({ "lock_id": lock_id }))
+        .await?
+        .json()?;
+    assert_eq!(
+        json_string_u128(&reward["unclaimed_rewards"]).unwrap_or(0),
+        50_000,
+        "50 NEAR at rate 10 for 100 ns should accrue 50,000 reward yocto-units"
+    );
+    assert_eq!(json_string_u128(&reward["claimed_rewards"]).unwrap_or(0), 0);
+
+    let claimed: String = buyer
+        .call(staking.id(), "claim_lock_rewards")
+        .args_json(json!({ "lock_id": lock_id }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(WsGas::from_tgas(50))
+        .transact()
+        .await?
+        .into_result()?
+        .json()?;
+    assert_eq!(claimed.parse::<u128>()?, 50_000);
+
+    let reward_after: serde_json::Value = worker
+        .view(staking.id(), "get_lock_reward")
+        .args_json(json!({ "lock_id": lock_id }))
+        .await?
+        .json()?;
+    assert_eq!(
+        json_string_u128(&reward_after["unclaimed_rewards"]).unwrap_or(0),
+        0
+    );
+    assert_eq!(
+        json_string_u128(&reward_after["claimed_rewards"]).unwrap_or(0),
+        50_000
+    );
 
     Ok(())
 }

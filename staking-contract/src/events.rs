@@ -157,3 +157,29 @@ pub fn log_validator_withdraw_in(amount_yocto: u128, validator_id: &ValidatorId)
         }),
     );
 }
+
+pub fn log_reward_config_update(
+    validator_id: &ValidatorId,
+    reward_rate_yocto_per_near_ns: u128,
+    accumulated_reward_per_near: u128,
+) {
+    emit(
+        "reward_config_update",
+        serde_json::json!({
+            "validator_id": validator_id.to_string(),
+            "reward_rate_yocto_per_near_ns": reward_rate_yocto_per_near_ns.to_string(),
+            "accumulated_reward_per_near": accumulated_reward_per_near.to_string(),
+        }),
+    );
+}
+
+pub fn log_reward_claim(lock_id: &str, account: &AccountId, amount_yocto: u128) {
+    emit(
+        "reward_claim",
+        serde_json::json!({
+            "lock_id": lock_id,
+            "account_id": account.to_string(),
+            "amount_yocto": amount_yocto.to_string(),
+        }),
+    );
+}

@@ -407,7 +407,8 @@ impl Contract {
             order: order.clone(),
             status: LockStatus::Active,
         };
-        self.internal_set_lock(lock_id.clone(), lock);
+        self.internal_set_lock(lock_id.clone(), lock.clone());
+        self.initialize_lock_rewards(&lock);
 
         // Catalog usage counters + persist updated price, product, and validator state.
         price.usage_count = price.usage_count.saturating_add(1);

@@ -11,6 +11,9 @@ pub type SubscriptionId = String;
 pub type LockId = String;
 pub type PurchaseId = String;
 
+/// Reward accounting scale: one NEAR in yoctoNEAR.
+pub const REWARD_NEAR_DENOMINATOR: u128 = 1_000_000_000_000_000_000_000_000;
+
 /// Staking pool contract account id (allowlist key, catalog scope, lock pool).
 pub type ValidatorId = AccountId;
 
@@ -339,6 +342,44 @@ pub struct Purchase {
     pub created_ns: U64,
 }
 
+/// Per-validator reward-farm parameters and cumulative reward index.
+///
+/// `reward_rate_yocto_per_near_ns` is the number of reward yocto-units emitted per one NEAR
+/// of active lock principal per nanosecond. A zero rate disables new accrual.
+#[derive(Clone)]
+#[near(serializers = [borsh, json])]
+pub struct ValidatorRewardConfig {
+    pub validator_id: ValidatorId,
+    pub reward_rate_yocto_per_near_ns: U128,
+    pub accumulated_reward_per_near: U128,
+    pub last_update_ns: U64,
+}
+
+/// Per-lock reward checkpoint. Rewards are accounting-only: claiming moves `unclaimed` into
+/// `claimed_rewards` and returns the amount for external reward settlement.
+#[derive(Clone)]
+#[near(serializers = [borsh, json])]
+pub struct LockRewardState {
+    pub lock_id: LockId,
+    pub accumulated_reward_per_near_paid: U128,
+    pub unclaimed_rewards: U128,
+    pub claimed_rewards: U128,
+    pub last_update_ns: U64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [json])]
+pub struct LockRewardView {
+    pub lock_id: LockId,
+    pub validator_id: ValidatorId,
+    pub account_id: AccountId,
+    pub reward_rate_yocto_per_near_ns: U128,
+    pub accumulated_reward_per_near: U128,
+    pub unclaimed_rewards: U128,
+    pub claimed_rewards: U128,
+    pub last_update_ns: U64,
+}
+
 /// User-facing tail chained after [`Contract::promise_validator_per_epoch_settlement_then`]:
 /// either the full pre-user pipeline ran (balance sync → withdraw-if-ready →
 /// [`crate::epoch::Contract::try_epoch_stake_or_unstake`]), or the pool had **already** settled this NEAR epoch and
@@ -587,6 +628,46 @@ pub enum VPurchase {
 impl From<Purchase> for VPurchase {
     fn from(value: Purchase) -> Self {
         Self::V0(value)
+    }
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh])]
+pub enum VValidatorRewardConfig {
+    V0(ValidatorRewardConfig),
+}
+
+impl From<ValidatorRewardConfig> for VValidatorRewardConfig {
+    fn from(value: ValidatorRewardConfig) -> Self {
+        Self::V0(value)
+    }
+}
+
+impl From<VValidatorRewardConfig> for ValidatorRewardConfig {
+    fn from(value: VValidatorRewardConfig) -> Self {
+        match value {
+            VValidatorRewardConfig::V0(inner) => inner,
+        }
+    }
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh])]
+pub enum VLockRewardState {
+    V0(LockRewardState),
+}
+
+impl From<LockRewardState> for VLockRewardState {
+    fn from(value: LockRewardState) -> Self {
+        Self::V0(value)
+    }
+}
+
+impl From<VLockRewardState> for LockRewardState {
+    fn from(value: VLockRewardState) -> Self {
+        match value {
+            VLockRewardState::V0(inner) => inner,
+        }
     }
 }
 
