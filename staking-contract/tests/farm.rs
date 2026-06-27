@@ -114,7 +114,7 @@ fn update_non_farm_price_rejects_farm_reward_rate() {
     let (_product_id, price_id) = setup_catalog_near_oneoff(&mut c);
 
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
-    c.update_price_after_get_owner(
+    c.edit_price_after_get_owner(
         acct(VALIDATOR_OWNER_ACCOUNT),
         price_id,
         None,
@@ -312,7 +312,7 @@ fn update_farm_reward_rate_settles_old_rate_first() {
     let _ = unwrap_sync_position(c.stake(product_id, None));
 
     testing_env_catalog_callback_at(acct(VALIDATOR_OWNER_ACCOUNT), BASE_TS + SIX_DAYS_NS);
-    c.update_price_after_get_owner(
+    c.edit_price_after_get_owner(
         acct(VALIDATOR_OWNER_ACCOUNT),
         price_id.clone(),
         None,

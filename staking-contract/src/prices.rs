@@ -38,14 +38,6 @@ pub trait ExtSelfPrices {
         &mut self,
         #[callback] pool_owner: AccountId,
         price_id: PriceId,
-        name: String,
-        description: String,
-        expected_caller: AccountId,
-    );
-    fn update_price_after_get_owner(
-        &mut self,
-        #[callback] pool_owner: AccountId,
-        price_id: PriceId,
         name: Option<String>,
         description: Option<String>,
         metadata: Option<PriceMetadata>,
@@ -107,20 +99,10 @@ impl Contract {
         })
     }
 
-    /// Update display fields only; `amount`, `price_type`, and billing metadata are fixed after create.
-    #[payable]
-    pub fn edit_price(&mut self, price_id: PriceId, name: String, description: String) -> Promise {
-        self.promise_catalog_admin_on_price(price_id, |expected_caller, price_id| {
-            ext_self_prices::ext(env::current_account_id())
-                .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
-                .edit_price_after_get_owner(price_id, name, description, expected_caller)
-        })
-    }
-
     /// Update display fields and mutable metadata. Farm reward-rate changes are applied prospectively
     /// by settling the farm pool before the rate is changed.
     #[payable]
-    pub fn update_price(
+    pub fn edit_price(
         &mut self,
         price_id: PriceId,
         name: Option<String>,
@@ -130,13 +112,7 @@ impl Contract {
         self.promise_catalog_admin_on_price(price_id, |expected_caller, price_id| {
             ext_self_prices::ext(env::current_account_id())
                 .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
-                .update_price_after_get_owner(
-                    price_id,
-                    name,
-                    description,
-                    metadata,
-                    expected_caller,
-                )
+                .edit_price_after_get_owner(price_id, name, description, metadata, expected_caller)
         })
     }
 
@@ -240,22 +216,6 @@ impl Contract {
 
     #[private]
     pub fn edit_price_after_get_owner(
-        &mut self,
-        #[callback] pool_owner: AccountId,
-        price_id: PriceId,
-        name: String,
-        description: String,
-        expected_caller: AccountId,
-    ) {
-        self.assert_validator_owner(pool_owner, &expected_caller);
-        let mut price = self.require_price(&price_id);
-        price.name = name;
-        price.description = description;
-        self.internal_set_price(price_id, price);
-    }
-
-    #[private]
-    pub fn update_price_after_get_owner(
         &mut self,
         #[callback] pool_owner: AccountId,
         price_id: PriceId,

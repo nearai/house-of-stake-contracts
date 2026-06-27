@@ -88,8 +88,7 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 | `unarchive_product` | `product_id` — restore **`CatalogStatus::Active`** (must currently be archived). |
 | `delete_product` | `product_id` (invariants: no attached prices in use — see contract). |
 | `create_price` | `product_id`, `name`, `description`, `amount` (`U128` yocto), `price_type`, `billing_period`, `lock_factor_near_months`, `metadata`. `PriceType::Farm` requires no billing period, `lock_factor_near_months == 0`, `metadata.farm_reward_rate`, and creates a linked `FarmPool`. At most one active Farm price may exist per product. For recurring variable-stake and farm prices, `metadata.max_amount` is an optional inclusive upper bound and must be `>= amount`. |
-| `edit_price` | `price_id`, `name`, `description`. |
-| `update_price` | `price_id`, optional `name`, optional `description`, optional `metadata`. Farm prices may update `metadata.farm_reward_rate`; the farm pool is settled with the old rate first, then the new rate applies prospectively. |
+| `edit_price` | `price_id`, optional `name`, optional `description`, optional `metadata`. Farm prices may update `metadata.farm_reward_rate`; the farm pool is settled with the old rate first, then the new rate applies prospectively. |
 | `archive_price` | `price_id`. |
 | `unarchive_price` | `price_id` — restore **`CatalogStatus::Active`** (must currently be archived). |
 | `delete_price` | `price_id`. |
