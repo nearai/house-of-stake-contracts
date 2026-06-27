@@ -415,6 +415,48 @@ pub async fn buyer_lock_subscription(
     Ok(lock_id)
 }
 
+pub async fn buyer_stake_farm(
+    buyer: &near_workspaces::Account,
+    staking_id: &near_workspaces::AccountId,
+    product_id: &str,
+    price_id: Option<&str>,
+    deposit_near: u128,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let position: serde_json::Value = buyer
+        .call(staking_id, "stake")
+        .args_json(json!({
+            "product_id": product_id,
+            "price_id": price_id,
+        }))
+        .deposit(NearToken::from_near(deposit_near))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
+        .transact()
+        .await?
+        .into_result()?
+        .json()?;
+    Ok(position)
+}
+
+pub async fn buyer_unstake_farm(
+    buyer: &near_workspaces::Account,
+    staking_id: &near_workspaces::AccountId,
+    product_id: &str,
+    amount_yocto: Option<u128>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    buyer
+        .call(staking_id, "unstake")
+        .args_json(json!({
+            "product_id": product_id,
+            "amount": amount_yocto.map(|amount| amount.to_string()),
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(WsGas::from_tgas(SETTLEMENT_PIPELINE_GAS_TGAS))
+        .transact()
+        .await?
+        .into_result()?;
+    Ok(())
+}
+
 pub async fn buyer_cancel_subscription(
     buyer: &near_workspaces::Account,
     staking_id: &near_workspaces::AccountId,
@@ -751,6 +793,53 @@ pub async fn create_subscription_product_and_price(
             "billing_period": "Monthly",
             "lock_factor_near_months": LOCK_FACTOR_DENOM,
             "metadata": null,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(WsGas::from_tgas(200))
+        .transact()
+        .await?;
+    assert!(cpr.is_success(), "create_price: {:#?}", cpr.outcomes());
+    let price_id: String = cpr.into_result()?.json()?;
+    Ok((product_id, price_id))
+}
+
+/// Validator owner: create an active farm product + price.
+pub async fn create_farm_product_and_price(
+    staking: &near_workspaces::Account,
+    pool: &near_workspaces::Account,
+    validator_owner: &near_workspaces::Account,
+    reward_rate: &str,
+    amount_yocto: &str,
+    max_amount_yocto: Option<&str>,
+) -> Result<(String, String), Box<dyn std::error::Error>> {
+    let cp = validator_owner
+        .call(staking.id(), "create_product")
+        .args_json(json!({
+            "validator_id": pool.id(),
+            "name": "Fixture Farm Product",
+            "description": "sandbox-farm",
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(WsGas::from_tgas(200))
+        .transact()
+        .await?;
+    assert!(cp.is_success(), "create_product: {:#?}", cp.outcomes());
+    let product_id: String = cp.into_result()?.json()?;
+
+    let cpr = validator_owner
+        .call(staking.id(), "create_price")
+        .args_json(json!({
+            "product_id": product_id,
+            "name": "Farm",
+            "description": "",
+            "amount": amount_yocto,
+            "price_type": "Farm",
+            "billing_period": null,
+            "lock_factor_near_months": "0",
+            "metadata": {
+                "max_amount": max_amount_yocto,
+                "farm_reward_rate": reward_rate,
+            },
         }))
         .deposit(NearToken::from_yoctonear(1))
         .gas(WsGas::from_tgas(200))
