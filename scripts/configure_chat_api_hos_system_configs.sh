@@ -11,6 +11,12 @@ set -euo pipefail
 #   DRY_RUN=1
 #   HOS_CREDITS_PER_STAKED_NEAR_NANO_USD=500000000  # 2 NEAR per $1 credit
 #
+# Optional staking-contract default-price sync:
+#   STAKING_ACCOUNT_ID=hos-e2e-0601144939.testnet
+#   OWNER_ACCOUNT_ID=hos-e2e-0601144939.testnet
+#   CHAIN_ID=testnet
+#   SYNC_HOS_CONTRACT_DEFAULTS=1
+#
 # Optional Stripe preservation/addition:
 #   STRIPE_STARTER_PRICE_ID=price_...
 #   STRIPE_BASIC_PRICE_ID=price_...
@@ -25,8 +31,14 @@ HOS_AGENT_BASIC_PRICE_ID="${HOS_AGENT_BASIC_PRICE_ID:-price_h577VYQUEynPA3uQt1u1
 HOS_AGENT_PRO_PRICE_ID="${HOS_AGENT_PRO_PRICE_ID:-price_7EAls0E844ULR06EEl53fQoI}"
 HOS_CREDIT_PRICE_ID="${HOS_CREDIT_PRICE_ID:-price_z2EbTifr7Nyqwt6v5kFqSiUb}"
 HOS_CREDITS_PER_STAKED_NEAR_NANO_USD="${HOS_CREDITS_PER_STAKED_NEAR_NANO_USD:-500000000}"
+HOS_AGENT_SUBSCRIPTION_PRODUCT_ID="${HOS_AGENT_SUBSCRIPTION_PRODUCT_ID:-prod_5lklj46roIwKZK}"
+HOS_CREDIT_PRODUCT_ID="${HOS_CREDIT_PRODUCT_ID:-prod_37o5G0rr2wMJ5C}"
 
 DEFAULT_CREDITS_PROVIDER="${DEFAULT_CREDITS_PROVIDER:-stripe}"
+STAKING_ACCOUNT_ID="${STAKING_ACCOUNT_ID:-}"
+OWNER_ACCOUNT_ID="${OWNER_ACCOUNT_ID:-$STAKING_ACCOUNT_ID}"
+CHAIN_ID="${CHAIN_ID:-testnet}"
+SYNC_HOS_CONTRACT_DEFAULTS="${SYNC_HOS_CONTRACT_DEFAULTS:-0}"
 DRY_RUN="${DRY_RUN:-0}"
 
 if [[ -z "$ADMIN_SESSION_TOKEN" ]]; then
@@ -169,3 +181,50 @@ updated = request_json("PATCH", "/v1/admin/configs", payload)
 print("Updated /v1/admin/configs")
 print(json.dumps(updated, indent=2, sort_keys=True))
 PY
+
+if [[ "$SYNC_HOS_CONTRACT_DEFAULTS" == "1" ]]; then
+  if [[ -z "$STAKING_ACCOUNT_ID" ]]; then
+    echo "STAKING_ACCOUNT_ID is required when SYNC_HOS_CONTRACT_DEFAULTS=1" >&2
+    exit 1
+  fi
+  if [[ -z "$OWNER_ACCOUNT_ID" ]]; then
+    echo "OWNER_ACCOUNT_ID is required when SYNC_HOS_CONTRACT_DEFAULTS=1" >&2
+    exit 1
+  fi
+  if ! command -v near >/dev/null 2>&1; then
+    echo "near not found in PATH." >&2
+    exit 1
+  fi
+
+  json_args() {
+    python3 - "$1" "$2" <<'PY'
+import json
+import sys
+
+print(json.dumps({"product_id": sys.argv[1], "price_id": sys.argv[2]}))
+PY
+  }
+
+  run_near_tx() {
+    local method_name="$1"
+    local args_json="$2"
+
+    printf '+'
+    printf ' %q' near --quiet contract call-function as-transaction "$STAKING_ACCOUNT_ID" "$method_name" \
+      json-args "$args_json" \
+      prepaid-gas '200.0 Tgas' attached-deposit '1 yoctoNEAR' \
+      sign-as "$OWNER_ACCOUNT_ID" network-config "$CHAIN_ID" sign-with-keychain send
+    printf '\n'
+
+    if [[ "$DRY_RUN" != "1" ]]; then
+      near --quiet contract call-function as-transaction "$STAKING_ACCOUNT_ID" "$method_name" \
+        json-args "$args_json" \
+        prepaid-gas '200.0 Tgas' attached-deposit '1 yoctoNEAR' \
+        sign-as "$OWNER_ACCOUNT_ID" network-config "$CHAIN_ID" sign-with-keychain send
+    fi
+  }
+
+  echo "Syncing staking-contract product default prices"
+  run_near_tx set_product_default_price "$(json_args "$HOS_AGENT_SUBSCRIPTION_PRODUCT_ID" "$HOS_AGENT_STARTER_PRICE_ID")"
+  run_near_tx set_product_default_price "$(json_args "$HOS_CREDIT_PRODUCT_ID" "$HOS_CREDIT_PRICE_ID")"
+fi
