@@ -1,0 +1,93 @@
+name: Claude Code Review
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+concurrency:
+  group: claude-review-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: Claude Code Review
+    if: >
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@claude review') &&
+      contains(fromJSON('["MEMBER","OWNER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    env:
+      PR_NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - name: Check PR trust boundary
+        id: pr_metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          is_cross_repository="$(
+            gh pr view "$PR_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json isCrossRepository \
+              --jq .isCrossRepository
+          )"
+          echo "is_cross_repository=${is_cross_repository}" >> "$GITHUB_OUTPUT"
+          if [ "${is_cross_repository}" = "true" ]; then
+            echo "Skipping Claude review for forked pull request #${PR_NUMBER}."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.pr_metadata.outputs.is_cross_repository != 'true'
+        with:
+          ref: refs/pull/${{ env.PR_NUMBER }}/merge
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run Claude Code Review
+        if: steps.pr_metadata.outputs.is_cross_repository != 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: "--max-turns 50 --allowedTools 'Read,Glob,Grep,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*),Bash(git diff:*),Bash(git log:*),Bash(git blame:*)'"
+          prompt: |
+            Code review pull request #${{ env.PR_NUMBER }} for the House-of-Stake NEAR smart contracts.
+
+            Follow these steps:
+            1. Read the root CLAUDE.md. If changed files are under directories with their own CLAUDE.md,
+               read those too.
+            2. Get the PR diff with `gh pr diff ${{ env.PR_NUMBER }}` and inspect the changed source files.
+            3. Review only issues introduced by this PR. Ignore pre-existing issues and issues that
+               rustfmt, clippy, or the compiler would catch.
+            4. Post exactly one top-level PR comment with `gh pr comment ${{ env.PR_NUMBER }}`.
+
+            Focus on high-signal contract risks:
+            - access control and owner/admin checks
+            - attached deposits, one-yocto guards, and storage accounting
+            - promise callback trust boundaries and cross-contract call ordering
+            - user-fund safety, staking/unstaking state transitions, and accounting invariants
+            - integer precision, overflow, yoctoNEAR units, and timestamp/duration math
+            - gas usage, unbounded collections, pagination, and storage growth
+            - upgrade or migration compatibility for persisted state
+            - tests missing for changed behavior that can affect contract safety
+
+            Output format:
+            ### Code review
+
+            Found N issues:
+
+            1. [SEVERITY:CONFIDENCE] Brief description
+               File/line permalink or exact path and line.
+               Why this matters.
+               Suggested fix.
+
+            If no issues were found, post exactly:
+            ### Code review
+
+            No issues found.
+
+            Do not build or test the code. CI handles that.
