@@ -7,7 +7,9 @@ use common::{
 };
 use near_sdk::json_types::{U64, U128};
 use near_sdk::{NearToken, PromiseOrValue, testing_env};
-use staking_contract::stake::{FARM_REWARD_RATE_DENOM, NS_PER_SECOND, YOCTO_PER_NEAR};
+use staking_contract::stake::{
+    FARM_REWARD_RATE_DENOM, NS_PER_SECOND, YOCTO_PER_NEAR, farm_shares_for_amount_ceil,
+};
 use staking_contract::types::{FarmPosition, FarmStatus, PriceMetadata, PriceType};
 
 const BASE_TS: u64 = 1_700_000_000_000_000_000;
@@ -241,6 +243,62 @@ fn partial_unstake_keeps_position_active_and_preserves_unclaimed_rewards() {
 }
 
 #[test]
+fn partial_unstake_prices_amount_after_settlement() {
+    let mut c = deploy();
+    let (product_id, _price_id) = setup_catalog_farm(
+        &mut c,
+        SPEC_REWARD_RATE,
+        NearToken::from_near(1).as_yoctonear(),
+        None,
+    );
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(10), BASE_TS));
+    let position = unwrap_sync_position(c.stake(product_id.clone(), None));
+
+    testing_env!(ctx_ts(acct(BUYER), one_yocto(), BASE_TS + SIX_DAYS_NS));
+    let _ = c.unstake(
+        product_id.clone(),
+        Some(U128(NearToken::from_near(5).as_yoctonear())),
+    );
+
+    let mut validator = c.get_validator(acct(POOL)).expect("validator");
+    validator.total_staked_balance = NearToken::from_near(20);
+    let expected_shares_remove = farm_shares_for_amount_ceil(
+        NearToken::from_near(5).as_yoctonear(),
+        validator.total_shares.0,
+        validator.net_stake_yocto(),
+        position.shares.0,
+    );
+    c.validators.insert(acct(POOL), validator.into());
+
+    testing_env!(ctx_ts(
+        acct(STAKING),
+        NearToken::from_yoctonear(0),
+        BASE_TS + SIX_DAYS_NS
+    ));
+    c.resolve_farm_unstake(
+        acct(BUYER),
+        product_id.clone(),
+        acct(POOL),
+        Some(U128(NearToken::from_near(5).as_yoctonear())),
+    );
+
+    let remaining = c
+        .get_farm_position(acct(BUYER), product_id)
+        .expect("position");
+    assert_eq!(remaining.status, FarmStatus::Active);
+    assert_eq!(
+        remaining.shares.0,
+        position.shares.0 - expected_shares_remove
+    );
+    assert!(
+        expected_shares_remove < NearToken::from_near(5).as_yoctonear(),
+        "post-settlement pricing should not use the stale pre-settlement 1:1 share price"
+    );
+}
+
+#[test]
 fn full_unstake_closes_position_and_rolls_rewards_into_account() {
     let mut c = deploy();
     let (product_id, _price_id) = setup_catalog_farm(
@@ -379,6 +437,96 @@ fn edit_farm_metadata_preserves_reward_rate_when_omitted() {
 }
 
 #[test]
+fn edit_farm_metadata_sequence_keeps_price_and_pool_rates_consistent() {
+    let mut c = deploy();
+    let (_product_id, price_id) = setup_catalog_farm(
+        &mut c,
+        SPEC_REWARD_RATE,
+        NearToken::from_near(1).as_yoctonear(),
+        None,
+    );
+
+    testing_env_catalog_callback_at(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        BASE_TS + NS_PER_SECOND as u64,
+    );
+    c.edit_price_after_get_owner(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        price_id.clone(),
+        None,
+        None,
+        Some(PriceMetadata {
+            max_amount: Some(U128(NearToken::from_near(50).as_yoctonear())),
+            farm_reward_rate: None,
+        }),
+        acct(VALIDATOR_OWNER_ACCOUNT),
+    );
+    assert_farm_price_and_pool_metadata(
+        &c,
+        &price_id,
+        Some(U128(NearToken::from_near(50).as_yoctonear())),
+        U128(SPEC_REWARD_RATE),
+    );
+
+    testing_env_catalog_callback_at(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        BASE_TS + 2 * NS_PER_SECOND as u64,
+    );
+    c.edit_price_after_get_owner(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        price_id.clone(),
+        None,
+        None,
+        Some(PriceMetadata {
+            max_amount: None,
+            farm_reward_rate: Some(U128(SPEC_REWARD_RATE * 2)),
+        }),
+        acct(VALIDATOR_OWNER_ACCOUNT),
+    );
+    assert_farm_price_and_pool_metadata(&c, &price_id, None, U128(SPEC_REWARD_RATE * 2));
+
+    testing_env_catalog_callback_at(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        BASE_TS + 3 * NS_PER_SECOND as u64,
+    );
+    c.edit_price_after_get_owner(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        price_id.clone(),
+        None,
+        None,
+        Some(PriceMetadata {
+            max_amount: Some(U128(NearToken::from_near(25).as_yoctonear())),
+            farm_reward_rate: None,
+        }),
+        acct(VALIDATOR_OWNER_ACCOUNT),
+    );
+    assert_farm_price_and_pool_metadata(
+        &c,
+        &price_id,
+        Some(U128(NearToken::from_near(25).as_yoctonear())),
+        U128(SPEC_REWARD_RATE * 2),
+    );
+}
+
+fn assert_farm_price_and_pool_metadata(
+    c: &staking_contract::Contract,
+    price_id: &String,
+    expected_max_amount: Option<U128>,
+    expected_reward_rate: U128,
+) {
+    let price = c.get_price(price_id.clone()).expect("price");
+    let metadata = price.metadata.expect("metadata");
+    assert_eq!(metadata.max_amount, expected_max_amount);
+    assert_eq!(metadata.farm_reward_rate, Some(expected_reward_rate));
+    assert_eq!(
+        c.get_farm_pool(price_id.clone())
+            .expect("farm pool")
+            .reward_rate,
+        expected_reward_rate
+    );
+}
+
+#[test]
 fn storage_unregister_fails_with_active_farm_position() {
     let mut c = deploy();
     let (product_id, _price_id) = setup_catalog_farm(
@@ -393,6 +541,61 @@ fn storage_unregister_fails_with_active_farm_position() {
     let _ = unwrap_sync_position(c.stake(product_id, None));
     testing_env!(ctx(acct(BUYER), one_yocto()));
     assert!(!c.storage_unregister(None));
+}
+
+#[test]
+fn farm_active_position_count_tracks_close_and_reopen() {
+    let mut c = deploy();
+    let (product_id, _price_id) = setup_catalog_farm(
+        &mut c,
+        SPEC_REWARD_RATE,
+        NearToken::from_near(1).as_yoctonear(),
+        None,
+    );
+    register_buyer(&mut c);
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_near(10)));
+    let _ = unwrap_sync_position(c.stake(product_id.clone(), None));
+    testing_env!(ctx(acct(BUYER), one_yocto()));
+    assert!(!c.storage_unregister(None));
+
+    let _ = c.unstake(
+        product_id.clone(),
+        Some(U128(NearToken::from_near(4).as_yoctonear())),
+    );
+    testing_env!(ctx(acct(STAKING), NearToken::from_yoctonear(0)));
+    c.resolve_farm_unstake(
+        acct(BUYER),
+        product_id.clone(),
+        acct(POOL),
+        Some(U128(NearToken::from_near(4).as_yoctonear())),
+    );
+    c.on_epoch_pipeline_terminal_release(acct(POOL));
+    testing_env!(ctx(acct(BUYER), one_yocto()));
+    assert!(!c.storage_unregister(None));
+
+    testing_env!(ctx(acct(BUYER), one_yocto()));
+    let _ = c.unstake(product_id.clone(), None);
+    testing_env!(ctx(acct(STAKING), NearToken::from_yoctonear(0)));
+    c.resolve_farm_unstake(acct(BUYER), product_id.clone(), acct(POOL), None);
+    c.on_epoch_pipeline_terminal_release(acct(POOL));
+
+    testing_env!(ctx(acct(BUYER), one_yocto()));
+    assert!(c.storage_unregister(None));
+
+    register_buyer(&mut c);
+    testing_env!(ctx(acct(BUYER), NearToken::from_near(3)));
+    let reopened = unwrap_sync_position(c.stake(product_id.clone(), None));
+    assert_eq!(reopened.status, FarmStatus::Active);
+    testing_env!(ctx(acct(BUYER), one_yocto()));
+    assert!(!c.storage_unregister(None));
+
+    testing_env!(ctx(acct(BUYER), one_yocto()));
+    let _ = c.unstake(product_id.clone(), None);
+    testing_env!(ctx(acct(STAKING), NearToken::from_yoctonear(0)));
+    c.resolve_farm_unstake(acct(BUYER), product_id, acct(POOL), None);
+    testing_env!(ctx(acct(BUYER), one_yocto()));
+    assert!(c.storage_unregister(None));
 }
 
 #[test]
