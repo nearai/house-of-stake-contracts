@@ -45,7 +45,7 @@ fn farm_stake_accrues_rewards_in_account_view() {
     ));
     let account = c.get_farm_account(acct(BUYER));
     assert_eq!(
-        account.unclaimed_reward_units.0,
+        account.pending_reward_units.0,
         199_999_999_999_999_964_160_000
     );
     assert_eq!(
@@ -239,7 +239,7 @@ fn partial_unstake_keeps_position_active_and_preserves_unclaimed_rewards() {
         c.get_farm_account(acct(BUYER)).accumulated_reward_units.0,
         0
     );
-    assert!(c.get_farm_account(acct(BUYER)).unclaimed_reward_units.0 > 0);
+    assert!(c.get_farm_account(acct(BUYER)).pending_reward_units.0 > 0);
 }
 
 #[test]
@@ -331,7 +331,7 @@ fn full_unstake_closes_position_and_rolls_rewards_into_account() {
         account.accumulated_reward_units.0,
         199_999_999_999_999_964_160_000
     );
-    assert_eq!(account.unclaimed_reward_units.0, 0);
+    assert_eq!(account.pending_reward_units.0, 0);
     assert_eq!(
         account.total_earned_reward_units.0,
         199_999_999_999_999_964_160_000

@@ -412,8 +412,8 @@ pub struct FarmAccountView {
     /// Stored rewards from farm positions that have been fully closed.
     pub accumulated_reward_units: U128,
     /// Simulated pending rewards across currently active farm positions.
-    pub unclaimed_reward_units: U128,
-    /// `accumulated_reward_units + unclaimed_reward_units`.
+    pub pending_reward_units: U128,
+    /// `accumulated_reward_units + pending_reward_units`.
     pub total_earned_reward_units: U128,
     /// Active farm positions with non-zero shares at view time.
     pub active_positions: Vec<FarmPosition>,

@@ -130,7 +130,7 @@ async fn golden_path_farm_stake_unstake_withdraw_pays_buyer()
         .await?
         .json()?;
     assert!(
-        farm_account["unclaimed_reward_units"]
+        farm_account["pending_reward_units"]
             .as_str()
             .and_then(|v| v.parse::<u128>().ok())
             .unwrap_or(0)
@@ -252,7 +252,7 @@ async fn golden_path_farm_partial_unstake_keeps_position_active()
         0
     );
     assert!(
-        json_u128_string(&farm_account, "unclaimed_reward_units") > 0,
+        json_u128_string(&farm_account, "pending_reward_units") > 0,
         "remaining active stake should still have unclaimed rewards"
     );
 

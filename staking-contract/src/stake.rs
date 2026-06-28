@@ -152,7 +152,7 @@ impl Contract {
         FarmAccountView {
             account_id,
             accumulated_reward_units: account.accumulated_reward_units,
-            unclaimed_reward_units: U128(unclaimed),
+            pending_reward_units: U128(unclaimed),
             total_earned_reward_units: U128(
                 account.accumulated_reward_units.0.saturating_add(unclaimed),
             ),
