@@ -182,16 +182,11 @@ impl Contract {
                 .map(|subscription_ids| !subscription_ids.is_empty())
                 .unwrap_or(false)
             || self
-                .farm_position_products_by_account
+                .farm_accounts
                 .get(account_id)
-                .map(|product_ids| {
-                    product_ids.iter().any(|product_id| {
-                        self.internal_get_farm_position(account_id, product_id)
-                            .map(|position| {
-                                position.status == FarmStatus::Active && position.shares.0 > 0
-                            })
-                            .unwrap_or(false)
-                    })
+                .map(|account| {
+                    let account: FarmAccount = account.clone().into();
+                    account.active_position_count > 0
                 })
                 .unwrap_or(false)
     }

@@ -18,7 +18,7 @@ use near_workspaces::types::NearToken;
 use serde_json::json;
 
 const SHORT_LOCK_NS: &str = "1000000000";
-const FARM_REWARD_RATE: &str = "1000000000000";
+const FARM_REWARD_RATE: &str = "1000000000000000000000000";
 const ONE_NEAR_YOCTO: &str = "1000000000000000000000000";
 
 /// End-to-end exit path for a single one-off lock (see module docs).

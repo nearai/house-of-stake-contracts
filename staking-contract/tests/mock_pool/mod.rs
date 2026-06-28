@@ -834,6 +834,8 @@ pub async fn create_farm_product_and_price(
             "description": "",
             "amount": amount_yocto,
             "price_type": "Farm",
+            // TODO: consider moving billing_period and lock_factor_near_months into metadata
+            // in a future catalog cleanup.
             "billing_period": null,
             "lock_factor_near_months": "0",
             "metadata": {

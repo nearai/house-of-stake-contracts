@@ -7,12 +7,12 @@ use common::{
 };
 use near_sdk::json_types::{U64, U128};
 use near_sdk::{NearToken, PromiseOrValue, testing_env};
-use staking_contract::farm::{FARM_REWARD_RATE_DENOM, NS_PER_SECOND, YOCTO_PER_NEAR};
+use staking_contract::stake::{FARM_REWARD_RATE_DENOM, NS_PER_SECOND, YOCTO_PER_NEAR};
 use staking_contract::types::{FarmPosition, FarmStatus, PriceMetadata, PriceType};
 
 const BASE_TS: u64 = 1_700_000_000_000_000_000;
 const SIX_DAYS_NS: u64 = 6 * 86_400 * NS_PER_SECOND as u64;
-const SPEC_REWARD_RATE: u128 = 3_858_024_691;
+const SPEC_REWARD_RATE: u128 = 3_858_024_691_358_024;
 
 fn unwrap_sync_position(result: PromiseOrValue<FarmPosition>) -> FarmPosition {
     match result {
@@ -42,8 +42,14 @@ fn farm_stake_accrues_rewards_in_account_view() {
         BASE_TS + SIX_DAYS_NS
     ));
     let account = c.get_farm_account(acct(BUYER));
-    assert_eq!(account.unclaimed_reward_units.0, 199_900);
-    assert_eq!(account.total_earned_reward_units.0, 199_900);
+    assert_eq!(
+        account.unclaimed_reward_units.0,
+        199_999_999_999_999_964_160_000
+    );
+    assert_eq!(
+        account.total_earned_reward_units.0,
+        199_999_999_999_999_964_160_000
+    );
 }
 
 #[test]
@@ -109,7 +115,7 @@ fn create_farm_price_rejects_second_active_farm_price_for_product() {
 
 #[test]
 #[should_panic(expected = "farm_reward_rate is only valid for Farm prices")]
-fn update_non_farm_price_rejects_farm_reward_rate() {
+fn edit_non_farm_price_rejects_farm_reward_rate() {
     let mut c = deploy();
     let (_product_id, price_id) = setup_catalog_near_oneoff(&mut c);
 
@@ -211,7 +217,12 @@ fn partial_unstake_keeps_position_active_and_preserves_unclaimed_rewards() {
         NearToken::from_yoctonear(0),
         BASE_TS + SIX_DAYS_NS
     ));
-    c.resolve_farm_unstake(acct(BUYER), product_id.clone(), acct(POOL), shares_remove);
+    c.resolve_farm_unstake(
+        acct(BUYER),
+        product_id.clone(),
+        acct(POOL),
+        Some(U128(NearToken::from_near(5).as_yoctonear())),
+    );
 
     let remaining = c
         .get_farm_position(acct(BUYER), product_id.clone())
@@ -241,7 +252,7 @@ fn full_unstake_closes_position_and_rolls_rewards_into_account() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(100), BASE_TS));
-    let position = unwrap_sync_position(c.stake(product_id.clone(), None));
+    let _position = unwrap_sync_position(c.stake(product_id.clone(), None));
 
     testing_env!(ctx_ts(acct(BUYER), one_yocto(), BASE_TS + SIX_DAYS_NS));
     let _ = c.unstake(product_id.clone(), None);
@@ -250,12 +261,7 @@ fn full_unstake_closes_position_and_rolls_rewards_into_account() {
         NearToken::from_yoctonear(0),
         BASE_TS + SIX_DAYS_NS
     ));
-    c.resolve_farm_unstake(
-        acct(BUYER),
-        product_id.clone(),
-        acct(POOL),
-        position.shares.0,
-    );
+    c.resolve_farm_unstake(acct(BUYER), product_id.clone(), acct(POOL), None);
 
     let closed = c
         .get_farm_position(acct(BUYER), product_id)
@@ -263,8 +269,15 @@ fn full_unstake_closes_position_and_rolls_rewards_into_account() {
     assert_eq!(closed.status, FarmStatus::Closed);
     assert_eq!(closed.shares.0, 0);
     let account = c.get_farm_account(acct(BUYER));
-    assert_eq!(account.accumulated_reward_units.0, 199_900);
+    assert_eq!(
+        account.accumulated_reward_units.0,
+        199_999_999_999_999_964_160_000
+    );
     assert_eq!(account.unclaimed_reward_units.0, 0);
+    assert_eq!(
+        account.total_earned_reward_units.0,
+        199_999_999_999_999_964_160_000
+    );
 }
 
 #[test]
@@ -279,7 +292,7 @@ fn archive_farm_price_succeeds_after_full_unstake() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(10), BASE_TS));
-    let position = unwrap_sync_position(c.stake(product_id.clone(), None));
+    let _position = unwrap_sync_position(c.stake(product_id.clone(), None));
     testing_env!(ctx_ts(acct(BUYER), one_yocto(), BASE_TS + SIX_DAYS_NS));
     let _ = c.unstake(product_id.clone(), None);
     testing_env!(ctx_ts(
@@ -287,7 +300,7 @@ fn archive_farm_price_succeeds_after_full_unstake() {
         NearToken::from_yoctonear(0),
         BASE_TS + SIX_DAYS_NS
     ));
-    c.resolve_farm_unstake(acct(BUYER), product_id, acct(POOL), position.shares.0);
+    c.resolve_farm_unstake(acct(BUYER), product_id, acct(POOL), None);
 
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
     c.archive_price_after_get_owner(
@@ -298,7 +311,7 @@ fn archive_farm_price_succeeds_after_full_unstake() {
 }
 
 #[test]
-fn update_farm_reward_rate_settles_old_rate_first() {
+fn edit_farm_reward_rate_settles_old_rate_first() {
     let mut c = deploy();
     let (product_id, price_id) = setup_catalog_farm(
         &mut c,
@@ -327,6 +340,42 @@ fn update_farm_reward_rate_settles_old_rate_first() {
     let pool = c.get_farm_pool(price_id).expect("farm pool");
     assert!(pool.acc_reward_per_share.0 > 0);
     assert_eq!(pool.reward_rate.0, SPEC_REWARD_RATE * 2);
+}
+
+#[test]
+fn edit_farm_metadata_preserves_reward_rate_when_omitted() {
+    let mut c = deploy();
+    let (_product_id, price_id) = setup_catalog_farm(
+        &mut c,
+        SPEC_REWARD_RATE,
+        NearToken::from_near(1).as_yoctonear(),
+        None,
+    );
+
+    testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
+    c.edit_price_after_get_owner(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        price_id.clone(),
+        None,
+        None,
+        Some(PriceMetadata {
+            max_amount: Some(U128(NearToken::from_near(50).as_yoctonear())),
+            farm_reward_rate: None,
+        }),
+        acct(VALIDATOR_OWNER_ACCOUNT),
+    );
+
+    let price = c.get_price(price_id.clone()).expect("price");
+    let metadata = price.metadata.expect("metadata");
+    assert_eq!(
+        metadata.max_amount,
+        Some(U128(NearToken::from_near(50).as_yoctonear()))
+    );
+    assert_eq!(metadata.farm_reward_rate, Some(U128(SPEC_REWARD_RATE)));
+    assert_eq!(
+        c.get_farm_pool(price_id).expect("farm pool").reward_rate,
+        U128(SPEC_REWARD_RATE)
+    );
 }
 
 #[test]
@@ -371,6 +420,6 @@ fn archive_farm_price_fails_with_active_stake() {
 
 #[test]
 fn farm_reward_rate_denominator_is_stable() {
-    assert_eq!(FARM_REWARD_RATE_DENOM, 1_000_000_000_000);
+    assert_eq!(FARM_REWARD_RATE_DENOM, 1);
     assert_eq!(YOCTO_PER_NEAR, NearToken::from_near(1).as_yoctonear());
 }

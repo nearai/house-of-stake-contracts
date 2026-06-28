@@ -6,8 +6,8 @@ use near_sdk::{
     AccountId, NearToken, Promise, PromiseOrValue, assert_one_yocto, env, near, require,
 };
 
-pub const FARM_REWARD_UNIT_MICRO_USD: &str = "micro_usd";
-pub const FARM_REWARD_RATE_DENOM: u128 = 1_000_000_000_000;
+pub const FARM_REWARD_UNIT_24_DECIMAL: &str = "reward_unit_24";
+pub const FARM_REWARD_RATE_DENOM: u128 = 1;
 pub const FARM_ACC_REWARD_PER_SHARE_DENOM: u128 = 1_000_000_000_000_000_000_000_000;
 pub const YOCTO_PER_NEAR: u128 = 1_000_000_000_000_000_000_000_000;
 pub const NS_PER_SECOND: u128 = 1_000_000_000;
@@ -88,8 +88,7 @@ impl Contract {
         let account_id = env::predecessor_account_id();
         self.ensure_min_base_storage(&account_id);
         let position = self.require_active_farm_position(&account_id, &product_id);
-        let validator = self.require_validator_idle(&position.validator_id);
-        let shares_remove = self.farm_unstake_shares_for_amount(&position, &validator, amount);
+        let _validator = self.require_validator_idle(&position.validator_id);
 
         self.promise_validator_per_epoch_settlement_then(
             position.validator_id.clone(),
@@ -97,7 +96,7 @@ impl Contract {
                 validator_id: position.validator_id,
                 account_id,
                 product_id,
-                shares_remove,
+                amount,
             },
         )
     }
@@ -138,6 +137,7 @@ impl Contract {
             .unwrap_or(FarmAccount {
                 account_id: account_id.clone(),
                 accumulated_reward_units: U128(0),
+                active_position_count: 0,
                 last_update_ns: U64(0),
             });
         let mut unclaimed = 0u128;
@@ -191,12 +191,14 @@ impl Contract {
         account_id: AccountId,
         product_id: ProductId,
         validator_id: ValidatorId,
-        shares_remove: u128,
+        amount: Option<U128>,
     ) {
-        let _validator = self.require_validator_busy(
+        let validator = self.require_validator_busy(
             &validator_id,
             "Validator pool must be busy after per-epoch settlement",
         );
+        let position = self.require_active_farm_position(&account_id, &product_id);
+        let shares_remove = self.farm_unstake_shares_for_amount(&position, &validator, amount);
         self.commit_farm_unstake(account_id, product_id, validator_id, shares_remove);
     }
 }
@@ -272,7 +274,8 @@ impl Contract {
             return pool;
         }
 
-        let validator = self.require_validator(&pool.validator_id);
+        let product = self.require_product(&pool.product_id);
+        let validator = self.require_validator(&product.validator_id);
         let total_farm_near_yocto = near_from_shares(
             pool.total_farm_shares.0,
             validator.net_stake_yocto(),
@@ -364,6 +367,7 @@ impl Contract {
                 created_ns: U64(now),
                 updated_ns: U64(now),
             });
+        let was_inactive = position.status != FarmStatus::Active || position.shares.0 == 0;
         if position.status == FarmStatus::Closed {
             position.price_id = price_id.clone();
             position.validator_id = validator_id.clone();
@@ -380,6 +384,9 @@ impl Contract {
         ));
         position.updated_ns = U64(now);
         self.internal_set_farm_position(position.clone());
+        if was_inactive {
+            self.increment_active_farm_position_count(&account_id);
+        }
 
         self.add_farm_position_product_to_account(&account_id, &product_id);
         price.usage_count = price.usage_count.saturating_add(1);
@@ -436,10 +443,12 @@ impl Contract {
                 .unwrap_or(FarmAccount {
                     account_id: account_id.clone(),
                     accumulated_reward_units: U128(0),
+                    active_position_count: 0,
                     last_update_ns: U64(0),
                 });
             account.accumulated_reward_units =
                 U128(account.accumulated_reward_units.0.saturating_add(accrued));
+            account.active_position_count = account.active_position_count.saturating_sub(1);
             account.last_update_ns = U64(block_timestamp());
             self.internal_set_farm_account(account_id.clone(), account);
             position.accrued_reward_units = U128(0);
@@ -581,6 +590,21 @@ impl Contract {
                 .insert(account_id.clone(), product_ids);
         }
     }
+
+    fn increment_active_farm_position_count(&mut self, account_id: &AccountId) {
+        let now = block_timestamp();
+        let mut account = self
+            .internal_get_farm_account(account_id)
+            .unwrap_or(FarmAccount {
+                account_id: account_id.clone(),
+                accumulated_reward_units: U128(0),
+                active_position_count: 0,
+                last_update_ns: U64(now),
+            });
+        account.active_position_count = account.active_position_count.saturating_add(1);
+        account.last_update_ns = U64(now);
+        self.internal_set_farm_account(account_id.clone(), account);
+    }
 }
 
 pub fn farm_delta_reward_units(
@@ -625,9 +649,9 @@ mod tests {
         let reward = farm_delta_reward_units(
             100 * YOCTO_PER_NEAR,
             6 * 86_400 * NS_PER_SECOND,
-            3_858_024_691,
+            3_858_024_691_358_024,
         );
-        assert_eq!(reward, 199_999);
+        assert_eq!(reward, 199_999_999_999_999_964_160_000);
     }
 
     #[test]

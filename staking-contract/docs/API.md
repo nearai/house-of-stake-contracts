@@ -48,7 +48,7 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 | `get_farm_pool` | `price_id: string` | `FarmPool \| null` | Stored farm accumulator for a Farm price. |
 | `get_farm_position` | `account_id`, `product_id` | `FarmPosition \| null` | Stored farm position for one `(account, product)`. |
 | `get_farm_positions_for_account` | `account_id`, `from_index: u64`, `limit: u64` | `FarmPosition[]` | Paginated current and historical farm positions for an account. |
-| `get_farm_account` | `account_id` | `FarmAccountView` | Stored closed-position reward roll-up plus simulated unclaimed rewards for active positions. Reward units are micro-USD (`1 == $0.000001`). |
+| `get_farm_account` | `account_id` | `FarmAccountView` | Stored closed-position reward roll-up plus simulated unclaimed rewards for active positions. Reward units are 24-decimal fixed-point accounting units (`1e24 == 1 whole reward unit`). |
 
 ---
 
@@ -102,14 +102,14 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 |--------|--------|---------|---------|-------------|
 | `lock` | Buyer / subscriber | **Attach NEAR** | **`PromiseOrValue<LockId>`** | **`price_id`**, **`product_id`**, **`duration_ns`** — provide exactly one of **`price_id`** or **`product_id`**. One-off prices require **`duration_ns`** (`U64`). Recurring monthly subscription prices require **`duration_ns: null`** and derive the duration from the billing period. Default price from **`Product.default_price_id`** when only **`product_id`** is set. **WASM:** shared per-epoch pipeline (**0–3**) then mint (**5a**); see [features/lazy-epoch-pipeline.md](features/lazy-epoch-pipeline.md). **Host tests:** synchronous mint (no promise chain). |
 
-## Staking farm (`farm.rs`)
+## Staking farm (`stake.rs`)
 
-Farm rewards are non-transferable accounting units. `FarmPool.reward_rate` is micro-USD reward units per 1 NEAR-second, scaled by `FARM_REWARD_RATE_DENOM = 1_000_000_000_000`. Accumulators use `FARM_ACC_REWARD_PER_SHARE_DENOM = 1_000_000_000_000_000_000_000_000`.
+Farm rewards are non-transferable accounting units. `FarmPool.reward_rate` is 24-decimal reward units per second per staked NEAR, scaled by `FARM_REWARD_RATE_DENOM = 1`. Accumulators use `FARM_ACC_REWARD_PER_SHARE_DENOM = 1_000_000_000_000_000_000_000_000`.
 
 | Method | Access | Deposit | Returns | Description |
 |--------|--------|---------|---------|-------------|
 | `stake` | Registered account | **Attach NEAR** | **`PromiseOrValue<FarmPosition>`** | `product_id`, optional `price_id`. Resolves the active Farm price, validates amount/min/max, runs the shared validator settlement pipeline, mints validator shares, updates `FarmPool.total_farm_shares`, and creates or aggregates the account's one live farm position for the product. |
-| `unstake` | Position owner | **1 yocto** | **`Promise`** | `product_id`, optional `amount: U128`. Burns all shares when `amount` is `null`; otherwise converts requested NEAR to shares with ceiling division. Queues the same `user_pending_unstake` tranches as `unlock`; users later call `withdraw(validator_id)`. Full unstake closes the position and rolls accrued reward units into `FarmAccount`. |
+| `unstake` | Position owner | **1 yocto** | **`Promise`** | `product_id`, optional `amount: U128`. Burns all shares when `amount` is `null`; otherwise converts requested NEAR to shares with ceiling division after the validator settlement preamble. TODO: confirm that `amount: null` should remain the final full-exit API. Queues the same `user_pending_unstake` tranches as `unlock`; users later call `withdraw(validator_id)`. Full unstake closes the position and rolls accrued reward units into `FarmAccount`. |
 
 ## Direct payments (`payments.rs`)
 
@@ -195,8 +195,8 @@ Pipeline steps and callbacks: [features/lazy-epoch-pipeline.md](features/lazy-ep
 | `resolve_unlock` | **5b** | Share exit and lock status update (`unlock.rs`). |
 | `on_withdraw_user_transfer_after_settle` | **5c** | Claim from `pending_to_claim` and transfer to user (`withdraw.rs`). |
 | `on_subscription_update_after_settle` | **5d** | Subscription update after settlement (`subscriptions.rs`). |
-| `resolve_farm_stake` | **5e** | Farm stake mint and reward-accounting update (`farm.rs`). |
-| `resolve_farm_unstake` | **5f** | Farm share exit, reward settlement, and optional account roll-up (`farm.rs`). |
+| `resolve_farm_stake` | **5e** | Farm stake mint and reward-accounting update (`stake.rs`). |
+| `resolve_farm_unstake` | **5f** | Farm share exit, reward settlement, and optional account roll-up (`stake.rs`). |
 | `on_epoch_pipeline_terminal_release` | **6** | Set **`tx_status`** → **`Idle`** for no-value tails. |
 | `on_epoch_pipeline_release_with_lock_id` | **6** | Release **`Busy`** and return `LockId`; refunds payable lock deposit if the tail fails. |
 | `on_epoch_pipeline_release_with_subscription_update_outcome` | **6** | Release **`Busy`** and return `SubscriptionPlanChangeOutcome`; refunds attached update deposit if the tail fails. |

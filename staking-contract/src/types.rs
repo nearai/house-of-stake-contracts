@@ -255,8 +255,8 @@ pub struct Product {
 pub struct PriceMetadata {
     /// Optional inclusive upper bound for variable subscription stake amounts and active farm stake.
     pub max_amount: Option<U128>,
-    /// Farm-only reward rate. Unit: micro-USD reward units per 1 NEAR-second,
-    /// scaled by [`crate::farm::FARM_REWARD_RATE_DENOM`].
+    /// Farm-only reward rate. Unit: 24-decimal reward units per second per staked NEAR,
+    /// scaled by [`crate::stake::FARM_REWARD_RATE_DENOM`].
     pub farm_reward_rate: Option<U128>,
 }
 
@@ -353,45 +353,69 @@ pub struct Purchase {
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
 pub struct FarmPool {
+    /// Farm price that owns this accumulator.
     pub price_id: PriceId,
+    /// Product for deriving the validator and product-level catalog constraints.
     pub product_id: ProductId,
-    pub validator_id: ValidatorId,
+    /// 24-decimal reward units emitted per second per staked NEAR.
     pub reward_rate: U128,
+    /// Validator shares currently attributed to active farm positions for this price.
     pub total_farm_shares: U128,
+    /// Cumulative reward units per farm share, scaled by `FARM_ACC_REWARD_PER_SHARE_DENOM`.
     pub acc_reward_per_share: U128,
+    /// Last timestamp when this accumulator was settled.
     pub last_reward_settle_ns: U64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[near(serializers = [borsh, json])]
 pub struct FarmPosition {
+    /// Position owner.
     pub account_id: AccountId,
+    /// Product with one current or historical farm position for this account.
     pub product_id: ProductId,
+    /// Farm price whose accumulator this position follows.
     pub price_id: PriceId,
+    /// Denormalized validator used by immutable historical position views.
     pub validator_id: ValidatorId,
+    /// Validator shares currently active for this farm position.
     pub shares: U128,
+    /// Position's share of `FarmPool.acc_reward_per_share` already accounted for.
     pub reward_debt: U128,
+    /// Settled but not yet rolled up reward units for this position.
     pub accrued_reward_units: U128,
+    /// Active positions earn rewards; closed positions remain for historical views.
     pub status: FarmStatus,
+    /// Position creation or last reopen timestamp.
     pub created_ns: U64,
+    /// Last stake, unstake, or reward-settlement timestamp.
     pub updated_ns: U64,
 }
 
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
 pub struct FarmAccount {
+    /// Account that owns the closed-position reward roll-up.
     pub account_id: AccountId,
+    /// Closed-position reward roll-up already earned by this account.
     pub accumulated_reward_units: U128,
+    /// Number of active farm positions with non-zero shares.
+    pub active_position_count: u32,
     pub last_update_ns: U64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[near(serializers = [json])]
 pub struct FarmAccountView {
+    /// Account that owns this farm reward roll-up.
     pub account_id: AccountId,
+    /// Stored rewards from farm positions that have been fully closed.
     pub accumulated_reward_units: U128,
+    /// Simulated pending rewards across currently active farm positions.
     pub unclaimed_reward_units: U128,
+    /// `accumulated_reward_units + unclaimed_reward_units`.
     pub total_earned_reward_units: U128,
+    /// Active farm positions with non-zero shares at view time.
     pub active_positions: Vec<FarmPosition>,
 }
 
@@ -451,7 +475,7 @@ pub enum UserAction {
         validator_id: ValidatorId,
         account_id: AccountId,
         product_id: ProductId,
-        shares_remove: u128,
+        amount: Option<U128>,
     },
 }
 

@@ -64,7 +64,7 @@ pub trait ExtSelfEpoch {
         price_id: PriceId,
         validator_id: ValidatorId,
     ) -> PromiseOrValue<LockId>;
-    /// **[Pipeline 5e]** Farm stake after pre-user settlement (`farm.rs`).
+    /// **[Pipeline 5e]** Farm stake after pre-user settlement (`stake.rs`).
     fn resolve_farm_stake(
         &mut self,
         account_id: AccountId,
@@ -91,13 +91,13 @@ pub trait ExtSelfEpoch {
         validator_id: ValidatorId,
         shares_remove: u128,
     );
-    /// **[Pipeline 5f]** Farm share exit after pre-user settlement (`farm.rs`).
+    /// **[Pipeline 5f]** Farm share exit after pre-user settlement (`stake.rs`).
     fn resolve_farm_unstake(
         &mut self,
         account_id: AccountId,
         product_id: ProductId,
         validator_id: ValidatorId,
-        shares_remove: u128,
+        amount: Option<U128>,
     );
     /// **[Pipeline 5c]** User withdraw transfer after pre-user settlement (`withdraw.rs`).
     fn on_withdraw_user_transfer_after_settle(
@@ -611,11 +611,11 @@ impl Contract {
                 validator_id,
                 account_id,
                 product_id,
-                shares_remove,
+                amount,
             } => (
                 ext_self_epoch::ext(env::current_account_id())
                     .with_static_gas(callbacks::ON_FARM_UNSTAKE_AFTER_SETTLE)
-                    .resolve_farm_unstake(account_id, product_id, validator_id, shares_remove),
+                    .resolve_farm_unstake(account_id, product_id, validator_id, amount),
                 ReleaseKind::Terminal,
             ),
             // Share exit: burn shares and queue `pending_to_unstake` (pool `unstake` on a later settlement).

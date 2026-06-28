@@ -15,7 +15,7 @@ impl Contract {
     #[private]
     #[init(ignore_state)]
     pub fn migrate_state() -> Self {
-        let old: ContractV1_0_3 = env::state_read().unwrap();
+        let old: ContractV1_0_1 = env::state_read().unwrap();
         old.into()
     }
 
@@ -26,7 +26,7 @@ impl Contract {
 
 #[allow(non_camel_case_types)]
 #[near(serializers = [borsh])]
-struct ContractV1_0_3 {
+struct ContractV1_0_1 {
     pub config: VConfig,
     pub paused: bool,
     pub validators: LookupMap<ValidatorId, VValidator>,
@@ -54,8 +54,8 @@ struct ContractV1_0_3 {
     pub id_nonce: u64,
 }
 
-impl From<ContractV1_0_3> for Contract {
-    fn from(old: ContractV1_0_3) -> Self {
+impl From<ContractV1_0_1> for Contract {
+    fn from(old: ContractV1_0_1) -> Self {
         Self {
             config: old.config,
             paused: old.paused,

@@ -201,7 +201,6 @@ impl Contract {
             let pool = FarmPool {
                 price_id: price_id.clone(),
                 product_id: product_id.clone(),
-                validator_id: product.validator_id.clone(),
                 reward_rate,
                 total_farm_shares: U128(0),
                 acc_reward_per_share: U128(0),
@@ -254,7 +253,10 @@ impl Contract {
                         self.internal_set_farm_pool(price_id.clone(), pool);
                         crate::events::log_farm_reward_rate_update(&price_id, new_rate.0);
                     }
-                    price.metadata = Some(metadata);
+                    price.metadata = Some(PriceMetadata {
+                        max_amount: metadata.max_amount,
+                        farm_reward_rate: Some(new_rate),
+                    });
                 }
                 PriceType::OneOff | PriceType::Recurring => {
                     require!(
@@ -416,6 +418,7 @@ impl Contract {
                     lock_factor_near_months.0 == 0,
                     "Farm price lock_factor_near_months must be zero"
                 );
+                // TODO: split farm minimum stake from `min_lock_amount` once launch values are finalized.
                 require!(
                     amount.0 >= self.internal_get_config().min_lock_amount.as_yoctonear(),
                     "Farm price amount is below min_lock_amount"
