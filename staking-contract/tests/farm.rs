@@ -1,9 +1,9 @@
 mod common;
 
 use common::{
-    BUYER, POOL, STAKING, VALIDATOR_OWNER_ACCOUNT, acct, add_validator_allowlisted, ctx, ctx_ts,
-    deploy, one_yocto, register_buyer, setup_catalog_farm, setup_catalog_near_oneoff,
-    testing_env_catalog_callback, testing_env_catalog_callback_at,
+    BUYER, POOL, STAKING, VALIDATOR_OWNER_ACCOUNT, acct, add_validator_allowlisted, base_config,
+    ctx, ctx_ts, deploy, deploy_with_config, one_yocto, register_buyer, setup_catalog_farm,
+    setup_catalog_near_oneoff, testing_env_catalog_callback, testing_env_catalog_callback_at,
 };
 use near_sdk::json_types::{U64, U128};
 use near_sdk::{NearToken, PromiseOrValue, testing_env};
@@ -544,6 +544,60 @@ fn storage_unregister_fails_with_active_farm_position() {
 }
 
 #[test]
+#[should_panic(expected = "Top up storage for another farm position")]
+fn farm_stake_requires_storage_for_new_position_record() {
+    let mut cfg = base_config();
+    cfg.per_lock_storage_stake = NearToken::from_near(1);
+    let mut c = deploy_with_config(cfg);
+    let (product_id, _price_id) = setup_catalog_farm(
+        &mut c,
+        SPEC_REWARD_RATE,
+        NearToken::from_near(1).as_yoctonear(),
+        None,
+    );
+    register_buyer(&mut c);
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_near(1)));
+    let _ = c.stake(product_id, None);
+}
+
+#[test]
+fn farm_position_storage_count_is_charged_once_per_product_position() {
+    let mut cfg = base_config();
+    cfg.per_lock_storage_stake = NearToken::from_near(1);
+    let mut c = deploy_with_config(cfg);
+    let (product_id, _price_id) = setup_catalog_farm(
+        &mut c,
+        SPEC_REWARD_RATE,
+        NearToken::from_near(1).as_yoctonear(),
+        None,
+    );
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_near(2)));
+    c.storage_deposit(None, None);
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_near(2)));
+    let _ = unwrap_sync_position(c.stake(product_id.clone(), None));
+    assert_eq!(
+        c.user_farm_position_count.get(&acct(BUYER)).copied(),
+        Some(1)
+    );
+
+    testing_env!(ctx(acct(BUYER), one_yocto()));
+    let _ = c.unstake(product_id.clone(), None);
+    testing_env!(ctx(acct(STAKING), NearToken::from_yoctonear(0)));
+    c.resolve_farm_unstake(acct(BUYER), product_id.clone(), acct(POOL), None);
+    c.on_epoch_pipeline_terminal_release(acct(POOL));
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_near(2)));
+    let _ = unwrap_sync_position(c.stake(product_id, None));
+    assert_eq!(
+        c.user_farm_position_count.get(&acct(BUYER)).copied(),
+        Some(1)
+    );
+}
+
+#[test]
 fn farm_active_position_count_tracks_close_and_reopen() {
     let mut c = deploy();
     let (product_id, _price_id) = setup_catalog_farm(
@@ -581,9 +635,8 @@ fn farm_active_position_count_tracks_close_and_reopen() {
     c.on_epoch_pipeline_terminal_release(acct(POOL));
 
     testing_env!(ctx(acct(BUYER), one_yocto()));
-    assert!(c.storage_unregister(None));
+    assert!(!c.storage_unregister(None));
 
-    register_buyer(&mut c);
     testing_env!(ctx(acct(BUYER), NearToken::from_near(3)));
     let reopened = unwrap_sync_position(c.stake(product_id.clone(), None));
     assert_eq!(reopened.status, FarmStatus::Active);
@@ -595,7 +648,7 @@ fn farm_active_position_count_tracks_close_and_reopen() {
     testing_env!(ctx(acct(STAKING), NearToken::from_yoctonear(0)));
     c.resolve_farm_unstake(acct(BUYER), product_id, acct(POOL), None);
     testing_env!(ctx(acct(BUYER), one_yocto()));
-    assert!(c.storage_unregister(None));
+    assert!(!c.storage_unregister(None));
 }
 
 #[test]

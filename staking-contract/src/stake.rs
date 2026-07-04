@@ -47,6 +47,8 @@ impl Contract {
                     "Existing farm position uses a different price"
                 );
             }
+        } else {
+            self.ensure_min_storage_for_new_farm_position(&account_id);
         }
 
         let validator_id = product.validator_id.clone();
@@ -171,18 +173,12 @@ impl Contract {
         product_id: ProductId,
         price_id: PriceId,
         validator_id: ValidatorId,
-    ) -> PromiseOrValue<FarmPosition> {
+    ) -> FarmPosition {
         let _validator = self.require_validator_busy(
             &validator_id,
             "Validator pool must be busy after per-epoch settlement",
         );
-        PromiseOrValue::Value(self.commit_farm_stake(
-            account_id,
-            deposit,
-            product_id,
-            price_id,
-            validator_id,
-        ))
+        self.commit_farm_stake(account_id, deposit, product_id, price_id, validator_id)
     }
 
     #[private]
@@ -337,6 +333,13 @@ impl Contract {
         );
         self.validate_farm_max_amount(&account_id, &product_id, &price, deposit.as_yoctonear());
 
+        let is_new_position = self
+            .internal_get_farm_position(&account_id, &product_id)
+            .is_none();
+        if is_new_position {
+            self.ensure_min_storage_for_new_farm_position(&account_id);
+        }
+
         if let Some(existing) = self.internal_get_farm_position(&account_id, &product_id) {
             if existing.status == FarmStatus::Active {
                 let _ = self.settle_farm_position(&account_id, &product_id);
@@ -386,6 +389,9 @@ impl Contract {
         self.internal_set_farm_position(position.clone());
         if was_inactive {
             self.increment_active_farm_position_count(&account_id);
+        }
+        if is_new_position {
+            self.increment_farm_position_storage_count(&account_id);
         }
 
         self.add_farm_position_product_to_account(&account_id, &product_id);
@@ -604,6 +610,16 @@ impl Contract {
         account.active_position_count = account.active_position_count.saturating_add(1);
         account.last_update_ns = U64(now);
         self.internal_set_farm_account(account_id.clone(), account);
+    }
+
+    fn increment_farm_position_storage_count(&mut self, account_id: &AccountId) {
+        let count = self
+            .user_farm_position_count
+            .get(account_id)
+            .copied()
+            .unwrap_or(0);
+        self.user_farm_position_count
+            .insert(account_id.clone(), count.saturating_add(1));
     }
 }
 

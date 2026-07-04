@@ -70,6 +70,7 @@ impl From<ContractV1_0_1> for Contract {
             user_validator_shares: old.user_validator_shares,
             user_pending_unstake: old.user_pending_unstake,
             user_lock_count: old.user_lock_count,
+            user_farm_position_count: LookupMap::new(StorageKeys::UserFarmPositionCount),
             purchases: old.purchases,
             purchase_ids: old.purchase_ids,
             purchases_by_account: old.purchases_by_account,

@@ -3,9 +3,11 @@
 mod common;
 
 use common::{
-    BUYER, acct, base_config, ctx, deploy_with_config, register_buyer, setup_catalog_near_oneoff,
+    BUYER, POOL, acct, base_config, ctx, deploy_with_config, one_yocto, register_buyer,
+    setup_catalog_near_oneoff,
 };
 use near_sdk::{NearToken, testing_env};
+use staking_contract::PendingUnstakeTranche;
 
 #[test]
 fn storage_balance_of_returns_none_for_unregistered_account() {
@@ -189,6 +191,25 @@ fn storage_unregister_returns_false_when_retained_storage_exists() {
     let _ = c.pay(Some(price_id), None, near_sdk::json_types::U64(1));
 
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    assert!(!c.storage_unregister(None));
+    assert!(c.storage_balance_of(acct(BUYER)).is_some());
+}
+
+#[test]
+fn storage_unregister_returns_false_with_pending_unstake_tranches() {
+    let mut c = deploy_with_config(base_config());
+    common::add_validator_allowlisted(&mut c);
+    register_buyer(&mut c);
+
+    c.user_pending_unstake.insert(
+        (acct(BUYER), acct(POOL)),
+        vec![PendingUnstakeTranche {
+            amount: NearToken::from_near(1),
+            available_epoch_height: 0,
+        }],
+    );
+
+    testing_env!(ctx(acct(BUYER), one_yocto()));
     assert!(!c.storage_unregister(None));
     assert!(c.storage_balance_of(acct(BUYER)).is_some());
 }

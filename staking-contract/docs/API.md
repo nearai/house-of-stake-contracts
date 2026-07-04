@@ -56,9 +56,9 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 
 | Method | Access | Deposit | Description |
 |--------|--------|---------|-------------|
-| `storage_deposit` | Any | **Attach NEAR** | NEP-145 register/top-up: `account_id?: AccountId`, `registration_only?: bool`. With `registration_only=true`, only the amount needed to reach `min_storage_deposit` is retained and excess is refunded. Non-registration top-ups must satisfy retained storage for `min_storage_deposit + per_lock_storage_stake × user_lock_count + per_purchase_storage_stake × user_purchase_count`. |
+| `storage_deposit` | Any | **Attach NEAR** | NEP-145 register/top-up: `account_id?: AccountId`, `registration_only?: bool`. With `registration_only=true`, only the amount needed to reach `min_storage_deposit` is retained and excess is refunded. Non-registration top-ups must satisfy retained storage for `min_storage_deposit + per_lock_storage_stake × (user_lock_count + user_farm_position_count) + per_purchase_storage_stake × user_purchase_count`. |
 | `storage_withdraw` | Account owner | **1 yocto** + optional `amount: NearToken` | NEP-145 withdraw from `available`; omitting `amount` withdraws all available storage. |
-| `storage_unregister` | Account owner | **1 yocto** + optional `force: bool` | NEP-145 unregister/refund when the account has no retained per-lock, per-purchase, subscription, or active farm-position storage. `force=true` is rejected; without force the method returns `false` instead of deleting accounts that still own retained records. |
+| `storage_unregister` | Account owner | **1 yocto** + optional `force: bool` | NEP-145 unregister/refund when the account has no retained per-lock, per-purchase, subscription, farm-position, or pending-unstake storage. `force=true` is rejected; without force the method returns `false` instead of deleting accounts that still own retained records. |
 
 ---
 
@@ -223,7 +223,7 @@ Pipeline steps and callbacks: [features/lazy-epoch-pipeline.md](features/lazy-ep
 | `propose_new_owner_account_id` | `new_owner_account_id: AccountId \| null`. |
 | `accept_ownership` | **Proposed** account accepts (must match `proposed_new_owner_account_id`). |
 | `set_guardians` | Replace **`guardians`** list. |
-| `set_per_lock_storage_stake` | Per-lock storage surcharge config. |
+| `set_per_lock_storage_stake` | Per-lock and per-farm-position storage surcharge config. |
 | `set_per_purchase_storage_stake` | Per-direct-purchase storage surcharge config. |
 | `set_lock_bounds` | `min_lock_duration_ns`, `max_lock_duration_ns` (`U64`). |
 | `set_min_lock_amount` | Minimum attach for locks; must be **≥ 1 NEAR** (`PROTOCOL_MIN_LOCK_AMOUNT_YOCTO` in `config.rs`). |

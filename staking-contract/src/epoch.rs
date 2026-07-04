@@ -72,7 +72,7 @@ pub trait ExtSelfEpoch {
         product_id: ProductId,
         price_id: PriceId,
         validator_id: ValidatorId,
-    ) -> PromiseOrValue<FarmPosition>;
+    ) -> FarmPosition;
     /// **[Pipeline 5d]** Subscription update after pre-user settlement (`subscriptions.rs`).
     fn on_subscription_update_after_settle(
         &mut self,

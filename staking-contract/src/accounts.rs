@@ -16,8 +16,8 @@ impl Contract {
 
     /// NEP-145: attach NEAR to register or top up prepaid storage.
     ///
-    /// Storage is retained as the base registration deposit plus configured per-lock and
-    /// per-purchase surcharges for records created by the account.
+    /// Storage is retained as the base registration deposit plus configured per-lock,
+    /// per-farm-position, and per-purchase surcharges for records created by the account.
     #[payable]
     pub fn storage_deposit(
         &mut self,
@@ -165,13 +165,19 @@ impl Contract {
         account
             .storage_deposit
             .as_yoctonear()
-            .saturating_sub(self.required_storage_deposit_yocto(account_id, 0, 0))
+            .saturating_sub(self.required_storage_deposit_yocto(account_id, 0, 0, 0))
     }
 
     fn has_retained_record_storage(&self, account_id: &AccountId) -> bool {
         self.user_lock_count.get(account_id).copied().unwrap_or(0) > 0
             || self
                 .user_purchase_count
+                .get(account_id)
+                .copied()
+                .unwrap_or(0)
+                > 0
+            || self
+                .user_farm_position_count
                 .get(account_id)
                 .copied()
                 .unwrap_or(0)
@@ -189,6 +195,16 @@ impl Contract {
                     account.active_position_count > 0
                 })
                 .unwrap_or(false)
+            || self.has_pending_unstake_tranches(account_id)
+    }
+
+    fn has_pending_unstake_tranches(&self, account_id: &AccountId) -> bool {
+        self.validator_ids.iter().any(|validator_id| {
+            self.user_pending_unstake
+                .get(&(account_id.clone(), validator_id.clone()))
+                .map(|tranches| !tranches.is_empty())
+                .unwrap_or(false)
+        })
     }
 
     fn require_registered_account(&self, account_id: &AccountId) -> Account {
@@ -208,12 +224,13 @@ impl Contract {
         );
     }
 
-    /// `extra_locks` / `extra_purchases` = additional records we are about to add.
+    /// `extra_locks` / `extra_purchases` / `extra_farm_positions` = additional records we are about to add.
     pub(crate) fn required_storage_deposit_yocto(
         &self,
         account_id: &AccountId,
         extra_locks: u32,
         extra_purchases: u32,
+        extra_farm_positions: u32,
     ) -> u128 {
         let base = self
             .internal_get_config()
@@ -234,10 +251,18 @@ impl Contract {
             .get(account_id)
             .copied()
             .unwrap_or(0) as u128;
+        let recorded_farm_position_count = self
+            .user_farm_position_count
+            .get(account_id)
+            .copied()
+            .unwrap_or(0) as u128;
         let total_locks = recorded_lock_count.saturating_add(u128::from(extra_locks));
         let total_purchases = recorded_purchase_count.saturating_add(u128::from(extra_purchases));
+        let total_farm_positions =
+            recorded_farm_position_count.saturating_add(u128::from(extra_farm_positions));
         base.saturating_add(per_lock.saturating_mul(total_locks))
             .saturating_add(per_purchase.saturating_mul(total_purchases))
+            .saturating_add(per_lock.saturating_mul(total_farm_positions))
     }
 
     /// Account registered and still meets global [`crate::config::Config::min_storage_deposit`] only (no per-lock surcharge).
@@ -254,14 +279,25 @@ impl Contract {
     /// Before creating a lock: require prepaid storage for one more lock entry.
     pub(crate) fn ensure_min_storage_for_new_lock(&self, account_id: &AccountId) {
         let account = self.require_registered_account(account_id);
-        let need = self.required_storage_deposit_yocto(account_id, 1, 0);
+        let need = self.required_storage_deposit_yocto(account_id, 1, 0, 0);
         self.assert_storage_deposit_at_least(&account, need, "Top up storage for another lock");
     }
 
     /// Before creating a direct purchase: require prepaid storage for one more purchase entry.
     pub(crate) fn ensure_min_storage_for_new_purchase(&self, account_id: &AccountId) {
         let account = self.require_registered_account(account_id);
-        let need = self.required_storage_deposit_yocto(account_id, 0, 1);
+        let need = self.required_storage_deposit_yocto(account_id, 0, 1, 0);
         self.assert_storage_deposit_at_least(&account, need, "Top up storage for another purchase");
+    }
+
+    /// Before creating a farm position: require prepaid storage for one more retained position entry.
+    pub(crate) fn ensure_min_storage_for_new_farm_position(&self, account_id: &AccountId) {
+        let account = self.require_registered_account(account_id);
+        let need = self.required_storage_deposit_yocto(account_id, 0, 0, 1);
+        self.assert_storage_deposit_at_least(
+            &account,
+            need,
+            "Top up storage for another farm position",
+        );
     }
 }

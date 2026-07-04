@@ -56,6 +56,7 @@ enum StorageKeys {
     FarmPositions,
     FarmPositionProductsByAccount,
     FarmAccounts,
+    UserFarmPositionCount,
 }
 
 #[derive(PanicOnDefault)]
@@ -90,6 +91,8 @@ pub struct Contract {
     pub user_pending_unstake: LookupMap<(AccountId, ValidatorId), Vec<PendingUnstakeTranche>>,
     /// Monotonic count of locks created per account; multiplied by [`Config::per_lock_storage_stake`] for prepaid lock storage.
     pub user_lock_count: LookupMap<AccountId, u32>,
+    /// Monotonic count of farm positions created per account; multiplied by [`Config::per_lock_storage_stake`] for prepaid retained-position storage.
+    pub user_farm_position_count: LookupMap<AccountId, u32>,
     /// Direct one-off payment records keyed by [`Purchase::purchase_id`] (`pay_*`).
     pub purchases: LookupMap<PurchaseId, VPurchase>,
     /// Creation order of direct payment records; drives paginated purchase views.
@@ -144,6 +147,7 @@ impl Contract {
             user_validator_shares: LookupMap::new(StorageKeys::UserValidatorShares),
             user_pending_unstake: LookupMap::new(StorageKeys::UserPendingUnstake),
             user_lock_count: LookupMap::new(StorageKeys::UserLockCount),
+            user_farm_position_count: LookupMap::new(StorageKeys::UserFarmPositionCount),
             purchases: LookupMap::new(StorageKeys::Purchases),
             purchase_ids: Vector::new(StorageKeys::PurchaseIds),
             purchases_by_account: LookupMap::new(StorageKeys::PurchasesByAccount),
