@@ -24,10 +24,12 @@ pub struct Config {
     pub max_lock_duration_ns: U64,
     pub epoch_unstake_settle_epochs: u64,
     pub min_storage_deposit: NearToken,
-    /// Per retained stake-position record ever created: locks (see [`crate::Contract::user_lock_count`])
-    /// and farm positions (see [`crate::Contract::user_farm_position_count`]). Zero disables the
+    /// Per lock record ever created (see [`crate::Contract::user_lock_count`]). Zero disables the
     /// extra requirement beyond [`Self::min_storage_deposit`].
     pub per_lock_storage_stake: NearToken,
+    /// Per farm-position record ever created (see [`crate::Contract::user_farm_position_count`]).
+    /// Zero disables the extra requirement beyond [`Self::min_storage_deposit`].
+    pub per_farm_position_storage_stake: NearToken,
     /// Per **direct purchase ever created** (see [`crate::Contract::user_purchase_count`]); zero disables
     /// the extra requirement beyond [`Self::min_storage_deposit`].
     pub per_purchase_storage_stake: NearToken,

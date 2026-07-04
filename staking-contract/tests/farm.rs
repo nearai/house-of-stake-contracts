@@ -547,7 +547,7 @@ fn storage_unregister_fails_with_active_farm_position() {
 #[should_panic(expected = "Top up storage for another farm position")]
 fn farm_stake_requires_storage_for_new_position_record() {
     let mut cfg = base_config();
-    cfg.per_lock_storage_stake = NearToken::from_near(1);
+    cfg.per_farm_position_storage_stake = NearToken::from_near(1);
     let mut c = deploy_with_config(cfg);
     let (product_id, _price_id) = setup_catalog_farm(
         &mut c,
@@ -564,7 +564,8 @@ fn farm_stake_requires_storage_for_new_position_record() {
 #[test]
 fn farm_position_storage_count_is_charged_once_per_product_position() {
     let mut cfg = base_config();
-    cfg.per_lock_storage_stake = NearToken::from_near(1);
+    cfg.per_lock_storage_stake = NearToken::from_near(100);
+    cfg.per_farm_position_storage_stake = NearToken::from_near(1);
     let mut c = deploy_with_config(cfg);
     let (product_id, _price_id) = setup_catalog_farm(
         &mut c,

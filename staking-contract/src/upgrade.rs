@@ -57,7 +57,7 @@ struct ContractV1_0_1 {
 impl From<ContractV1_0_1> for Contract {
     fn from(old: ContractV1_0_1) -> Self {
         Self {
-            config: old.config,
+            config: Config::from(old.config).into(),
             paused: old.paused,
             validators: old.validators,
             validator_ids: old.validator_ids,

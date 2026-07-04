@@ -40,6 +40,16 @@ impl Contract {
     }
 
     #[payable]
+    pub fn set_per_farm_position_storage_stake(
+        &mut self,
+        per_farm_position_storage_stake: NearToken,
+    ) {
+        self.assert_owner_payable();
+        self.internal_get_config_mut()
+            .per_farm_position_storage_stake = per_farm_position_storage_stake;
+    }
+
+    #[payable]
     pub fn set_per_purchase_storage_stake(&mut self, per_purchase_storage_stake: NearToken) {
         self.assert_owner_payable();
         self.internal_get_config_mut().per_purchase_storage_stake = per_purchase_storage_stake;

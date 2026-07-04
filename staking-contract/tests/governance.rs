@@ -102,6 +102,14 @@ fn owner_sets_epoch_unstake_and_config_round_trips() {
     );
 
     testing_env!(ctx(acct(OWNER), one_yocto()));
+    c.set_per_farm_position_storage_stake(NearToken::from_millinear(3));
+
+    assert_eq!(
+        c.get_config().per_farm_position_storage_stake,
+        NearToken::from_millinear(3)
+    );
+
+    testing_env!(ctx(acct(OWNER), one_yocto()));
     c.set_per_purchase_storage_stake(NearToken::from_millinear(2));
 
     assert_eq!(

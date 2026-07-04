@@ -22,6 +22,7 @@ Last updated: 2026-06-01
   "epoch_unstake_settle_epochs": 1,
   "min_storage_deposit": "10000000000000000000000",
   "per_lock_storage_stake": "0",
+  "per_farm_position_storage_stake": "0",
   "per_purchase_storage_stake": "0",
   "min_lock_amount": "1000000000000000000000000"
 }

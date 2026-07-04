@@ -2,7 +2,7 @@
 
 use crate::config::Config;
 use near_sdk::json_types::{U64, U128};
-use near_sdk::{AccountId, NearToken, near};
+use near_sdk::{AccountId, NearToken, env, near};
 
 /// Stripe-style string IDs (generated in [`crate::ids`]).
 pub type ProductId = String;
@@ -524,20 +524,55 @@ impl UserAction {
 
 #[derive(Clone)]
 #[near(serializers = [borsh])]
+pub struct ConfigV0 {
+    pub owner_account_id: AccountId,
+    pub proposed_new_owner_account_id: Option<AccountId>,
+    pub guardians: Vec<AccountId>,
+    pub min_lock_duration_ns: U64,
+    pub max_lock_duration_ns: U64,
+    pub epoch_unstake_settle_epochs: u64,
+    pub min_storage_deposit: NearToken,
+    pub per_lock_storage_stake: NearToken,
+    pub per_purchase_storage_stake: NearToken,
+    pub min_lock_amount: NearToken,
+}
+
+impl From<ConfigV0> for Config {
+    fn from(value: ConfigV0) -> Self {
+        Self {
+            owner_account_id: value.owner_account_id,
+            proposed_new_owner_account_id: value.proposed_new_owner_account_id,
+            guardians: value.guardians,
+            min_lock_duration_ns: value.min_lock_duration_ns,
+            max_lock_duration_ns: value.max_lock_duration_ns,
+            epoch_unstake_settle_epochs: value.epoch_unstake_settle_epochs,
+            min_storage_deposit: value.min_storage_deposit,
+            per_lock_storage_stake: value.per_lock_storage_stake,
+            per_farm_position_storage_stake: NearToken::from_yoctonear(0),
+            per_purchase_storage_stake: value.per_purchase_storage_stake,
+            min_lock_amount: value.min_lock_amount,
+        }
+    }
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh])]
 pub enum VConfig {
-    V0(Config),
+    V0(ConfigV0),
+    V1(Config),
 }
 
 impl From<Config> for VConfig {
     fn from(value: Config) -> Self {
-        Self::V0(value)
+        Self::V1(value)
     }
 }
 
 impl From<VConfig> for Config {
     fn from(value: VConfig) -> Self {
         match value {
-            VConfig::V0(inner) => inner,
+            VConfig::V0(inner) => inner.into(),
+            VConfig::V1(inner) => inner,
         }
     }
 }
@@ -545,7 +580,8 @@ impl From<VConfig> for Config {
 impl AsRef<Config> for VConfig {
     fn as_ref(&self) -> &Config {
         match self {
-            VConfig::V0(c) => c,
+            VConfig::V0(_) => env::panic_str("ConfigV0 must be migrated before use"),
+            VConfig::V1(c) => c,
         }
     }
 }
@@ -553,7 +589,8 @@ impl AsRef<Config> for VConfig {
 impl AsMut<Config> for VConfig {
     fn as_mut(&mut self) -> &mut Config {
         match self {
-            VConfig::V0(c) => c,
+            VConfig::V0(_) => env::panic_str("ConfigV0 must be migrated before use"),
+            VConfig::V1(c) => c,
         }
     }
 }
@@ -775,6 +812,7 @@ mod versioned_tests {
             epoch_unstake_settle_epochs: 4,
             min_storage_deposit: NearToken::from_near(1),
             per_lock_storage_stake: NearToken::from_near(0),
+            per_farm_position_storage_stake: NearToken::from_near(0),
             per_purchase_storage_stake: NearToken::from_near(0),
             min_lock_amount: NearToken::from_near(1),
         };

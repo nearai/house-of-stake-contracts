@@ -63,7 +63,7 @@ enum StorageKeys {
 #[near(contract_state)]
 pub struct Contract {
     /// Protocol configuration: owner, guardians, pause-independent bounds (`min_lock_amount`,
-    /// lock duration range), epoch settle epochs, storage minimums, and per-lock storage stake.
+    /// lock duration range), epoch settle epochs, and storage economics.
     pub config: VConfig,
     /// When `true`, user-facing mutating methods reject until [`crate::pause::Contract::unpause`].
     pub paused: bool,
@@ -91,7 +91,7 @@ pub struct Contract {
     pub user_pending_unstake: LookupMap<(AccountId, ValidatorId), Vec<PendingUnstakeTranche>>,
     /// Monotonic count of locks created per account; multiplied by [`Config::per_lock_storage_stake`] for prepaid lock storage.
     pub user_lock_count: LookupMap<AccountId, u32>,
-    /// Monotonic count of farm positions created per account; multiplied by [`Config::per_lock_storage_stake`] for prepaid retained-position storage.
+    /// Monotonic count of farm positions created per account; multiplied by [`Config::per_farm_position_storage_stake`] for prepaid retained-position storage.
     pub user_farm_position_count: LookupMap<AccountId, u32>,
     /// Direct one-off payment records keyed by [`Purchase::purchase_id`] (`pay_*`).
     pub purchases: LookupMap<PurchaseId, VPurchase>,

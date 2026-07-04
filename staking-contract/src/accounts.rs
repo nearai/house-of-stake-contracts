@@ -240,6 +240,10 @@ impl Contract {
             .internal_get_config()
             .per_lock_storage_stake
             .as_yoctonear();
+        let per_farm_position = self
+            .internal_get_config()
+            .per_farm_position_storage_stake
+            .as_yoctonear();
         let per_purchase = self
             .internal_get_config()
             .per_purchase_storage_stake
@@ -262,7 +266,7 @@ impl Contract {
             recorded_farm_position_count.saturating_add(u128::from(extra_farm_positions));
         base.saturating_add(per_lock.saturating_mul(total_locks))
             .saturating_add(per_purchase.saturating_mul(total_purchases))
-            .saturating_add(per_lock.saturating_mul(total_farm_positions))
+            .saturating_add(per_farm_position.saturating_mul(total_farm_positions))
     }
 
     /// Account registered and still meets global [`crate::config::Config::min_storage_deposit`] only (no per-lock surcharge).
