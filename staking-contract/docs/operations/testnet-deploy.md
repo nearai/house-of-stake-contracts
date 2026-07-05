@@ -82,6 +82,30 @@ BUILD_WASM=1 \
 ./scripts/deploy_testnet_staking_contract.sh "$STAKING_ACCOUNT_ID"
 ```
 
+## Staking Farm Upgrade Script
+
+Use the focused farm upgrade script when you only want to build the latest
+staking contract WASM and call the owner-gated `upgrade()` method on the shared
+testnet contract.
+
+Preview without sending a transaction:
+
+```bash
+./scripts/upgrade_testnet_staking_farm.sh
+```
+
+Run the farm upgrade:
+
+```bash
+EXECUTE=1 ./scripts/upgrade_testnet_staking_farm.sh
+```
+
+Run staking contract tests first:
+
+```bash
+RUN_TESTS=1 EXECUTE=1 ./scripts/upgrade_testnet_staking_farm.sh
+```
+
 ## Validators And Catalog
 
 Use `ACTION=configure` to allowlist validators and create products/prices. The
