@@ -46,9 +46,9 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 | `get_purchases_for_product` | `product_id`, `from_index: u64`, `limit: u64` | `Purchase[]` | Paginated direct payment purchases by product. |
 | `get_revenue_balance_for_validator` | `validator_id: AccountId` | `NearToken` | Current withdrawable direct-payment revenue for the validator. |
 | `get_farm_pool` | `price_id: string` | `FarmPool \| null` | Stored farm accumulator for a Farm price. |
-| `get_farm_position` | `account_id`, `product_id` | `FarmPosition \| null` | Stored farm position for one `(account, product)`. |
-| `get_farm_positions_for_account` | `account_id`, `from_index: u64`, `limit: u64` | `FarmPosition[]` | Paginated current and historical farm positions for an account. |
-| `get_farm_account` | `account_id` | `FarmAccountView` | Stored closed-position reward roll-up plus simulated unclaimed rewards for active positions. Reward units are 24-decimal fixed-point accounting units (`1e24 == 1 whole reward unit`). |
+| `get_farm_position` | `account_id`, `product_id` | `FarmPositionView \| null` | Stored farm position plus view-time `staked_near_amount`, `pending_reward_units`, and `total_earned_reward_units` for one `(account, product)`. |
+| `get_farm_positions_for_account` | `account_id`, `from_index: u64`, `limit: u64` | `FarmPositionView[]` | Paginated current and historical farm positions for an account, including view-time staked NEAR and reward fields. |
+| `get_farm_account` | `account_id` | `FarmAccountView` | Stored closed-position reward roll-up plus simulated pending rewards for active positions. `active_positions` contains `FarmPositionView` rows. Reward units are 24-decimal fixed-point accounting units (`1e24 == 1 whole reward unit`). |
 
 ---
 
@@ -263,7 +263,7 @@ Pipeline steps and callbacks: [features/lazy-epoch-pipeline.md](features/lazy-ep
 
 - **`Config`** — [`../src/config.rs`](../src/config.rs): `owner_account_id`, `guardians`, lock/storage economics, `epoch_unstake_settle_epochs`, … **`min_lock_amount`** is the minimum attach for locks (including first delegation to an empty pool); governance may raise it but not below **`PROTOCOL_MIN_LOCK_AMOUNT_YOCTO`** (1 NEAR), enforced in `new` and `set_min_lock_amount`.
 - **`Validator`** — [`../src/validators.rs`](../src/validators.rs): **`validator_id`** (pool contract account), accounting fields, pending buckets, **`tx_status`** (`Idle` \| `Busy`).
-- **`Product`**, **`Price`**, **`PriceMetadata`**, **`Subscription`**, **`PendingSubscriptionUpdate`**, **`SubscriptionPlanChangeOutcome`**, **`Lock`**, **`Purchase`**, **`FarmPool`**, **`FarmPosition`**, **`FarmAccount`**, **`FarmAccountView`**, **`Account`**, **`StorageBalance`**, **`StorageBalanceBounds`** — [`../src/types.rs`](../src/types.rs), [`../src/accounts.rs`](../src/accounts.rs). **`Account`** is prepaid **`storage_deposit`** only (unlocked stake exits transfer directly to the user via **`withdraw`**).
+- **`Product`**, **`Price`**, **`PriceMetadata`**, **`Subscription`**, **`PendingSubscriptionUpdate`**, **`SubscriptionPlanChangeOutcome`**, **`Lock`**, **`Purchase`**, **`FarmPool`**, **`FarmPosition`**, **`FarmPositionView`**, **`FarmAccount`**, **`FarmAccountView`**, **`Account`**, **`StorageBalance`**, **`StorageBalanceBounds`** — [`../src/types.rs`](../src/types.rs), [`../src/accounts.rs`](../src/accounts.rs). **`Account`** is prepaid **`storage_deposit`** only (unlocked stake exits transfer directly to the user via **`withdraw`**).
 
 For EVENT_JSON shapes and naming, see [`../src/events.rs`](../src/events.rs).
 

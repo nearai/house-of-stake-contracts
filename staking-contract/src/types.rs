@@ -392,6 +392,37 @@ pub struct FarmPosition {
     pub updated_ns: U64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [json])]
+pub struct FarmPositionView {
+    /// Position owner.
+    pub account_id: AccountId,
+    /// Product with one current or historical farm position for this account.
+    pub product_id: ProductId,
+    /// Farm price whose accumulator this position follows.
+    pub price_id: PriceId,
+    /// Denormalized validator used by immutable historical position views.
+    pub validator_id: ValidatorId,
+    /// Validator shares currently active for this farm position.
+    pub shares: U128,
+    /// Active staked NEAR amount represented by `shares` at view time.
+    pub staked_near_amount: U128,
+    /// Position's share of `FarmPool.acc_reward_per_share` already accounted for.
+    pub reward_debt: U128,
+    /// Settled but not yet rolled up reward units for this position.
+    pub accrued_reward_units: U128,
+    /// Simulated pending rewards for this position, including settled-but-unrolled rewards.
+    pub pending_reward_units: U128,
+    /// Total position rewards not yet rolled into the farm account.
+    pub total_earned_reward_units: U128,
+    /// Active positions earn rewards; closed positions remain for historical views.
+    pub status: FarmStatus,
+    /// Position creation or last reopen timestamp.
+    pub created_ns: U64,
+    /// Last stake, unstake, or reward-settlement timestamp.
+    pub updated_ns: U64,
+}
+
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
 pub struct FarmAccount {
@@ -416,7 +447,7 @@ pub struct FarmAccountView {
     /// `accumulated_reward_units + pending_reward_units`.
     pub total_earned_reward_units: U128,
     /// Active farm positions with non-zero shares at view time.
-    pub active_positions: Vec<FarmPosition>,
+    pub active_positions: Vec<FarmPositionView>,
 }
 
 /// User-facing tail chained after [`Contract::promise_validator_per_epoch_settlement_then`]:

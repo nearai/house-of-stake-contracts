@@ -111,8 +111,9 @@ impl Contract {
         &self,
         account_id: AccountId,
         product_id: ProductId,
-    ) -> Option<FarmPosition> {
+    ) -> Option<FarmPositionView> {
         self.internal_get_farm_position(&account_id, &product_id)
+            .map(|position| self.farm_position_view(position))
     }
 
     pub fn get_farm_positions_for_account(
@@ -120,7 +121,7 @@ impl Contract {
         account_id: AccountId,
         from_index: u64,
         limit: u64,
-    ) -> Vec<FarmPosition> {
+    ) -> Vec<FarmPositionView> {
         let product_ids = self
             .farm_position_products_by_account
             .get(&account_id)
@@ -130,6 +131,7 @@ impl Contract {
             product_ids
                 .get(index as usize)
                 .and_then(|product_id| self.internal_get_farm_position(&account_id, product_id))
+                .map(|position| self.farm_position_view(position))
         })
     }
 
@@ -148,7 +150,7 @@ impl Contract {
             if position.status != FarmStatus::Active || position.shares.0 == 0 {
                 continue;
             }
-            unclaimed = unclaimed.saturating_add(self.preview_farm_position_pending(&position));
+            unclaimed = unclaimed.saturating_add(position.pending_reward_units.0);
             active_positions.push(position);
         }
         FarmAccountView {
@@ -315,6 +317,40 @@ impl Contract {
             .accrued_reward_units
             .0
             .saturating_add(accumulated.saturating_sub(position.reward_debt.0))
+    }
+
+    fn farm_position_view(&self, position: FarmPosition) -> FarmPositionView {
+        let staked_near_amount = if position.status == FarmStatus::Active && position.shares.0 > 0 {
+            let validator = self.require_validator(&position.validator_id);
+            near_from_shares(
+                position.shares.0,
+                validator.net_stake_yocto(),
+                validator.total_shares.0,
+            )
+        } else {
+            0
+        };
+        let pending_reward_units = if position.status == FarmStatus::Active && position.shares.0 > 0
+        {
+            self.preview_farm_position_pending(&position)
+        } else {
+            position.accrued_reward_units.0
+        };
+        FarmPositionView {
+            account_id: position.account_id,
+            product_id: position.product_id,
+            price_id: position.price_id,
+            validator_id: position.validator_id,
+            shares: position.shares,
+            staked_near_amount: U128(staked_near_amount),
+            reward_debt: position.reward_debt,
+            accrued_reward_units: position.accrued_reward_units,
+            pending_reward_units: U128(pending_reward_units),
+            total_earned_reward_units: U128(pending_reward_units),
+            status: position.status,
+            created_ns: position.created_ns,
+            updated_ns: position.updated_ns,
+        }
     }
 
     fn commit_farm_stake(

@@ -137,6 +137,19 @@ async fn golden_path_farm_stake_unstake_withdraw_pays_buyer()
             > 0,
         "farm account view should simulate unclaimed rewards"
     );
+    let account_position = &farm_account["active_positions"][0];
+    assert!(
+        json_u128_string(account_position, "staked_near_amount") > 0,
+        "farm account active position should include staked NEAR"
+    );
+    assert!(
+        json_u128_string(account_position, "pending_reward_units") > 0,
+        "farm account active position should include pending rewards"
+    );
+    assert_eq!(
+        json_u128_string(account_position, "total_earned_reward_units"),
+        json_u128_string(account_position, "pending_reward_units")
+    );
 
     buyer_unstake_farm(&buyer, staking.id(), &farm_product_id, None).await?;
     let closed_position: serde_json::Value = worker
@@ -149,6 +162,15 @@ async fn golden_path_farm_stake_unstake_withdraw_pays_buyer()
         .json()?;
     assert_eq!(closed_position["status"], json!("Closed"));
     assert_eq!(closed_position["shares"], json!("0"));
+    assert_eq!(json_u128_string(&closed_position, "staked_near_amount"), 0);
+    assert_eq!(
+        json_u128_string(&closed_position, "pending_reward_units"),
+        0
+    );
+    assert_eq!(
+        json_u128_string(&closed_position, "total_earned_reward_units"),
+        0
+    );
 
     let rolled_account: serde_json::Value = worker
         .view(staking.id(), "get_farm_account")
@@ -240,6 +262,15 @@ async fn golden_path_farm_partial_unstake_keeps_position_active()
     assert!(
         json_u128_string(&partial_position, "accrued_reward_units") > 0,
         "partial unstake should keep settled rewards on the active position"
+    );
+    assert!(json_u128_string(&partial_position, "staked_near_amount") > 0);
+    assert!(
+        json_u128_string(&partial_position, "pending_reward_units")
+            >= json_u128_string(&partial_position, "accrued_reward_units")
+    );
+    assert_eq!(
+        json_u128_string(&partial_position, "total_earned_reward_units"),
+        json_u128_string(&partial_position, "pending_reward_units")
     );
 
     let farm_account: serde_json::Value = worker

@@ -52,6 +52,35 @@ fn farm_stake_accrues_rewards_in_account_view() {
         account.total_earned_reward_units.0,
         199_999_999_999_999_964_160_000
     );
+    assert_eq!(account.active_positions.len(), 1);
+    assert_eq!(
+        account.active_positions[0].staked_near_amount.0,
+        NearToken::from_near(100).as_yoctonear()
+    );
+    assert_eq!(
+        account.active_positions[0].pending_reward_units.0,
+        account.pending_reward_units.0
+    );
+    assert_eq!(
+        account.active_positions[0].total_earned_reward_units.0,
+        account.pending_reward_units.0
+    );
+
+    let position_view = c
+        .get_farm_position(acct(BUYER), product_id)
+        .expect("position view");
+    assert_eq!(
+        position_view.staked_near_amount.0,
+        NearToken::from_near(100).as_yoctonear()
+    );
+    assert_eq!(
+        position_view.pending_reward_units.0,
+        199_999_999_999_999_964_160_000
+    );
+    assert_eq!(
+        position_view.total_earned_reward_units.0,
+        position_view.pending_reward_units.0
+    );
 }
 
 #[test]
@@ -235,6 +264,12 @@ fn partial_unstake_keeps_position_active_and_preserves_unclaimed_rewards() {
         remaining.accrued_reward_units.0 > 0,
         "partial unstake should retain settled rewards on the active position"
     );
+    assert!(remaining.staked_near_amount.0 > 0);
+    assert!(remaining.pending_reward_units.0 >= remaining.accrued_reward_units.0);
+    assert_eq!(
+        remaining.total_earned_reward_units.0,
+        remaining.pending_reward_units.0
+    );
     assert_eq!(
         c.get_farm_account(acct(BUYER)).accumulated_reward_units.0,
         0
@@ -326,6 +361,9 @@ fn full_unstake_closes_position_and_rolls_rewards_into_account() {
         .expect("position");
     assert_eq!(closed.status, FarmStatus::Closed);
     assert_eq!(closed.shares.0, 0);
+    assert_eq!(closed.staked_near_amount.0, 0);
+    assert_eq!(closed.pending_reward_units.0, 0);
+    assert_eq!(closed.total_earned_reward_units.0, 0);
     let account = c.get_farm_account(acct(BUYER));
     assert_eq!(
         account.accumulated_reward_units.0,
