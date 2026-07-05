@@ -91,8 +91,6 @@ pub struct Contract {
     pub user_pending_unstake: LookupMap<(AccountId, ValidatorId), Vec<PendingUnstakeTranche>>,
     /// Monotonic count of locks created per account; multiplied by [`Config::per_lock_storage_stake`] for prepaid lock storage.
     pub user_lock_count: LookupMap<AccountId, u32>,
-    /// Monotonic count of farm positions created per account; multiplied by [`Config::per_farm_position_storage_stake`] for prepaid retained-position storage.
-    pub user_farm_position_count: LookupMap<AccountId, u32>,
     /// Direct one-off payment records keyed by [`Purchase::purchase_id`] (`pay_*`).
     pub purchases: LookupMap<PurchaseId, VPurchase>,
     /// Creation order of direct payment records; drives paginated purchase views.
@@ -111,6 +109,8 @@ pub struct Contract {
     pub farm_positions: LookupMap<(AccountId, ProductId), VFarmPosition>,
     /// Secondary index: farm owner account -> product ids with current or historical farm positions.
     pub farm_position_products_by_account: LookupMap<AccountId, Vec<ProductId>>,
+    /// Monotonic count of farm positions created per account; multiplied by [`Config::per_farm_position_storage_stake`] for prepaid retained-position storage.
+    pub user_farm_position_count: LookupMap<AccountId, u32>,
     /// Per-account rolled-up farm reward totals from closed positions.
     pub farm_accounts: LookupMap<AccountId, VFarmAccount>,
     /// Secondary index: `(subscriber, product_id)` → `subscription_id` for at-most-one subscription per product per account.
@@ -147,7 +147,6 @@ impl Contract {
             user_validator_shares: LookupMap::new(StorageKeys::UserValidatorShares),
             user_pending_unstake: LookupMap::new(StorageKeys::UserPendingUnstake),
             user_lock_count: LookupMap::new(StorageKeys::UserLockCount),
-            user_farm_position_count: LookupMap::new(StorageKeys::UserFarmPositionCount),
             purchases: LookupMap::new(StorageKeys::Purchases),
             purchase_ids: Vector::new(StorageKeys::PurchaseIds),
             purchases_by_account: LookupMap::new(StorageKeys::PurchasesByAccount),
@@ -159,6 +158,7 @@ impl Contract {
             farm_position_products_by_account: LookupMap::new(
                 StorageKeys::FarmPositionProductsByAccount,
             ),
+            user_farm_position_count: LookupMap::new(StorageKeys::UserFarmPositionCount),
             farm_accounts: LookupMap::new(StorageKeys::FarmAccounts),
             subscription_by_account_product: LookupMap::new(
                 StorageKeys::SubscriptionByAccountProduct,
