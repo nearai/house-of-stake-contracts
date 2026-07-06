@@ -61,7 +61,7 @@ view_json() {
   local method_name="$2"
   local args_json="$3"
 
-  near --quiet contract call-function as-read-only "$contract_id" "$method_name" \
+  near contract call-function as-read-only "$contract_id" "$method_name" \
     json-args "$args_json" network-config "$CHAIN_ID" now
 }
 
@@ -111,7 +111,7 @@ echo "Network:          $CHAIN_ID"
 echo "Contract:         $STAKING_ACCOUNT_ID"
 echo "Current version:  $before_version"
 echo "On-chain owner:   $on_chain_owner"
-echo "Signer:           $OWNER_ACCOUNT_ID"
+echo "Keychain signer:  $STAKING_ACCOUNT_ID"
 echo "WASM:             $STAKING_WASM"
 echo "WASM sha256:      $(wasm_hash)"
 echo "Price IDs:        $PRICE_IDS"
@@ -139,10 +139,10 @@ if [[ "$EXECUTE" != "1" ]]; then
 fi
 
 echo "== Deploy contract code without init =="
-run near --quiet contract deploy "$STAKING_ACCOUNT_ID" \
+run near contract deploy "$STAKING_ACCOUNT_ID" \
   use-file "$STAKING_WASM" \
   without-init-call \
-  network-config "$CHAIN_ID" sign-as "$OWNER_ACCOUNT_ID" sign-with-keychain send
+  network-config "$CHAIN_ID" sign-with-keychain send
 
 if [[ "$EXECUTE" == "1" ]]; then
   echo
