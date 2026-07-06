@@ -1,6 +1,7 @@
 //! Catalog, lifecycle, and versioned on-chain storage types.
 
 use crate::config::Config;
+use near_sdk::borsh::{BorshDeserialize, BorshSerialize, io};
 use near_sdk::json_types::{U64, U128};
 use near_sdk::{AccountId, NearToken, env, near};
 
@@ -261,6 +262,21 @@ pub struct PriceMetadata {
 }
 
 #[derive(Clone)]
+#[near(serializers = [borsh])]
+struct PriceMetadataV0 {
+    max_amount: Option<U128>,
+}
+
+impl From<PriceMetadataV0> for PriceMetadata {
+    fn from(value: PriceMetadataV0) -> Self {
+        Self {
+            max_amount: value.max_amount,
+            farm_reward_rate: None,
+        }
+    }
+}
+
+#[derive(Clone)]
 #[near(serializers = [borsh, json])]
 pub struct Price {
     pub price_id: PriceId,
@@ -278,6 +294,40 @@ pub struct Price {
     pub metadata: Option<PriceMetadata>,
     pub status: CatalogStatus,
     pub usage_count: u64,
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh])]
+struct PriceV0 {
+    price_id: PriceId,
+    product_id: ProductId,
+    name: String,
+    description: String,
+    amount: U128,
+    price_type: PriceType,
+    billing_period: Option<BillingPeriod>,
+    lock_factor_near_months: U128,
+    metadata: Option<PriceMetadataV0>,
+    status: CatalogStatus,
+    usage_count: u64,
+}
+
+impl From<PriceV0> for Price {
+    fn from(value: PriceV0) -> Self {
+        Self {
+            price_id: value.price_id,
+            product_id: value.product_id,
+            name: value.name,
+            description: value.description,
+            amount: value.amount,
+            price_type: value.price_type,
+            billing_period: value.billing_period,
+            lock_factor_near_months: value.lock_factor_near_months,
+            metadata: value.metadata.map(Into::into),
+            status: value.status,
+            usage_count: value.usage_count,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -667,14 +717,14 @@ impl From<VProduct> for Product {
 }
 
 #[derive(Clone)]
-#[near(serializers = [borsh])]
 pub enum VPrice {
     V0(Price),
+    V1(Price),
 }
 
 impl From<Price> for VPrice {
     fn from(value: Price) -> Self {
-        Self::V0(value)
+        Self::V1(value)
     }
 }
 
@@ -682,6 +732,48 @@ impl From<VPrice> for Price {
     fn from(value: VPrice) -> Self {
         match value {
             VPrice::V0(inner) => inner,
+            VPrice::V1(inner) => inner,
+        }
+    }
+}
+
+impl BorshSerialize for VPrice {
+    fn serialize<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        match self {
+            // Kept for compatibility with farm-upgrade records that were already written as
+            // variant 0 with the two-field PriceMetadata layout.
+            VPrice::V0(inner) => {
+                0u8.serialize(writer)?;
+                inner.serialize(writer)
+            }
+            VPrice::V1(inner) => {
+                1u8.serialize(writer)?;
+                inner.serialize(writer)
+            }
+        }
+    }
+}
+
+impl BorshDeserialize for VPrice {
+    fn deserialize_reader<R: io::Read>(reader: &mut R) -> io::Result<Self> {
+        let variant = u8::deserialize_reader(reader)?;
+        match variant {
+            0 => {
+                let mut payload = Vec::new();
+                reader.read_to_end(&mut payload)?;
+                match Price::try_from_slice(&payload) {
+                    Ok(price) => Ok(VPrice::V0(price)),
+                    Err(price_err) => match PriceV0::try_from_slice(&payload) {
+                        Ok(price_v0) => Ok(VPrice::V0(price_v0.into())),
+                        Err(_) => Err(price_err),
+                    },
+                }
+            }
+            1 => Ok(VPrice::V1(Price::deserialize_reader(reader)?)),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Unexpected VPrice variant: {variant}"),
+            )),
         }
     }
 }
@@ -809,6 +901,89 @@ impl From<VFarmAccount> for FarmAccount {
         match value {
             VFarmAccount::V0(inner) => inner,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn price_v0_with_metadata() -> PriceV0 {
+        PriceV0 {
+            price_id: "price_v0".to_string(),
+            product_id: "product_v0".to_string(),
+            name: "Starter".to_string(),
+            description: "[1, 10] NEAR".to_string(),
+            amount: U128(1),
+            price_type: PriceType::Recurring,
+            billing_period: Some(BillingPeriod::Monthly),
+            lock_factor_near_months: U128(1),
+            metadata: Some(PriceMetadataV0 {
+                max_amount: Some(U128(10)),
+            }),
+            status: CatalogStatus::Active,
+            usage_count: 3,
+        }
+    }
+
+    fn farm_price() -> Price {
+        Price {
+            price_id: "price_farm".to_string(),
+            product_id: "product_farm".to_string(),
+            name: "Farm".to_string(),
+            description: "Farm price".to_string(),
+            amount: U128(1),
+            price_type: PriceType::Farm,
+            billing_period: None,
+            lock_factor_near_months: U128(0),
+            metadata: Some(PriceMetadata {
+                max_amount: Some(U128(100)),
+                farm_reward_rate: Some(U128(7)),
+            }),
+            status: CatalogStatus::Active,
+            usage_count: 1,
+        }
+    }
+
+    #[test]
+    fn vprice_reads_price_v0_metadata_as_farm_reward_none() {
+        let mut bytes = vec![0u8];
+        price_v0_with_metadata().serialize(&mut bytes).unwrap();
+
+        let price: Price = VPrice::try_from_slice(&bytes).unwrap().into();
+
+        assert_eq!(price.price_id, "price_v0");
+        assert_eq!(price.metadata.as_ref().unwrap().max_amount, Some(U128(10)));
+        assert_eq!(price.metadata.as_ref().unwrap().farm_reward_rate, None);
+    }
+
+    #[test]
+    fn vprice_reads_farm_upgrade_variant_zero_price_layout() {
+        let mut bytes = vec![0u8];
+        farm_price().serialize(&mut bytes).unwrap();
+
+        let price: Price = VPrice::try_from_slice(&bytes).unwrap().into();
+
+        assert_eq!(price.price_type, PriceType::Farm);
+        assert_eq!(
+            price.metadata.as_ref().unwrap().farm_reward_rate,
+            Some(U128(7))
+        );
+    }
+
+    #[test]
+    fn vprice_writes_new_prices_as_variant_one() {
+        let price = farm_price();
+        let mut bytes = Vec::new();
+        VPrice::from(price.clone()).serialize(&mut bytes).unwrap();
+
+        assert_eq!(bytes.first().copied(), Some(1));
+        let decoded: Price = VPrice::try_from_slice(&bytes).unwrap().into();
+        assert_eq!(decoded.price_id, price.price_id);
+        assert_eq!(
+            decoded.metadata.as_ref().unwrap().farm_reward_rate,
+            Some(U128(7))
+        );
     }
 }
 
