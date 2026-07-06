@@ -197,6 +197,7 @@ async fn sandbox_test_clock_fast_forwards_only_selected_subscription()
     let subscription_id = sub_a_before["subscription_id"]
         .as_str()
         .expect("subscription_id");
+    let attacker = worker.dev_create_account().await?;
 
     buyer_update_subscription_scheduled(
         &buyer,
@@ -217,10 +218,29 @@ async fn sandbox_test_clock_fast_forwards_only_selected_subscription()
         .json()?;
     let apply_ns =
         json_u64_field(&sub_a_scheduled["pending_update"]["apply_ns"]).expect("pending apply_ns");
+    let sub_a_stored_before_clock: serde_json::Value = worker
+        .view(staking.id(), "test_get_stored_subscription")
+        .args_json(json!({ "subscription_id": subscription_id }))
+        .await?
+        .json()?;
+
+    let unauthorized = attacker
+        .call(staking.id(), "test_fast_forward_subscription_to")
+        .args_json(json!({
+            "subscription_id": subscription_id,
+            "target_timestamp_ns": apply_ns.saturating_add(1).to_string(),
+        }))
+        .gas(near_workspaces::types::Gas::from_tgas(50))
+        .transact()
+        .await?;
+    assert!(
+        unauthorized.is_failure(),
+        "non-owner should not be allowed to modify a subscription test clock"
+    );
+
     fast_forward_subscription_for_product_to(
         &buyer,
         staking.id(),
-        buyer.id(),
         &product_a,
         apply_ns.saturating_add(1),
     )
@@ -242,6 +262,11 @@ async fn sandbox_test_clock_fast_forwards_only_selected_subscription()
         }))
         .await?
         .json()?;
+    let sub_a_stored_after_clock: serde_json::Value = worker
+        .view(staking.id(), "test_get_stored_subscription")
+        .args_json(json!({ "subscription_id": subscription_id }))
+        .await?
+        .json()?;
 
     assert_eq!(sub_a_after["price_id"].as_str(), Some(price_low_a.as_str()));
     assert!(sub_a_after["pending_update"].is_null());
@@ -249,6 +274,21 @@ async fn sandbox_test_clock_fast_forwards_only_selected_subscription()
         json_u64_field(&sub_a_after["end_ns"]).expect("sub_a end_ns"),
         json_u64_field(&sub_a_before["end_ns"]).expect("sub_a original end_ns"),
         "selected subscription should move to a later virtual billing window"
+    );
+    assert_eq!(
+        json_u64_field(&sub_a_stored_after_clock["start_ns"]).expect("stored sub_a start_ns"),
+        json_u64_field(&sub_a_stored_before_clock["start_ns"])
+            .expect("stored sub_a original start_ns"),
+        "test clock should not mutate stored subscription start"
+    );
+    assert_eq!(
+        json_u64_field(&sub_a_stored_after_clock["end_ns"]).expect("stored sub_a end_ns"),
+        json_u64_field(&sub_a_stored_before_clock["end_ns"]).expect("stored sub_a original end_ns"),
+        "test clock should not mutate stored subscription end"
+    );
+    assert!(
+        !sub_a_stored_after_clock["pending_update"].is_null(),
+        "test clock should not commit or remove the stored pending update"
     );
     assert_eq!(
         json_u64_field(&sub_b_after["start_ns"]).expect("sub_b start_ns"),

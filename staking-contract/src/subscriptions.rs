@@ -10,6 +10,9 @@ use near_sdk::json_types::{U64, U128};
 use near_sdk::store::LookupMap;
 use near_sdk::{AccountId, NearToken, PromiseOrValue, assert_one_yocto, env, near, require};
 
+#[cfg(feature = "test")]
+const TEST_SUBSCRIPTION_TIMESTAMP_PREFIX: &[u8] = b"_test_subscription_timestamp_";
+
 /// Extend `from_ns` by `months` × average Gregorian months (linear approximation).
 /// `anchor_day` is validated but not yet applied; see `docs/operations/production-readiness.md`.
 pub fn add_months_stripe_style(anchor_day: u8, months: u32, from_ns: u64) -> u64 {
@@ -25,6 +28,7 @@ struct SubscriptionUpdateInputs {
     target_price: Price,
     target_product: Product,
     lock: Lock,
+    now_ns: u64,
 }
 
 struct SubscriptionUpdateDecision {
@@ -90,7 +94,7 @@ impl Contract {
             "Subscription is not scheduled to cancel at period end"
         );
         require!(
-            block_timestamp() < sub.end_ns.0,
+            self.subscription_now(&sid) < sub.end_ns.0,
             "Current billing period has ended; subscribe again with lock instead"
         );
         sub.cancel_at_period_end = false;
@@ -553,8 +557,12 @@ impl Contract {
         sub.pending_update = None;
     }
 
-    fn projected_subscription_window_from(&self, anchor_day: u8, mut start: u64) -> (U64, U64) {
-        let now = block_timestamp();
+    fn projected_subscription_window_from(
+        &self,
+        anchor_day: u8,
+        mut start: u64,
+        now: u64,
+    ) -> (U64, U64) {
         let mut end = add_months_stripe_style(anchor_day, 1, start);
         while now >= end {
             start = end;
@@ -577,7 +585,8 @@ impl Contract {
             return false;
         };
         let apply_ns = pending.apply_ns;
-        if block_timestamp() < apply_ns.0 {
+        let now = self.subscription_now(subscription_id);
+        if now < apply_ns.0 {
             return false;
         }
 
@@ -610,7 +619,7 @@ impl Contract {
         }
 
         let (period_start_ns, period_end_ns) =
-            self.projected_subscription_window_from(stored.anchor_day, apply_ns.0);
+            self.projected_subscription_window_from(stored.anchor_day, apply_ns.0, now);
 
         let mut updated = stored;
         if let Some(target_price) = target_price.as_ref() {
@@ -725,7 +734,7 @@ impl Contract {
             );
         }
 
-        let now = block_timestamp();
+        let now = self.subscription_now(subscription_id);
         require!(
             now < sub.end_ns.0,
             "Current period already ended; renew instead"
@@ -736,6 +745,7 @@ impl Contract {
             target_price,
             target_product,
             lock,
+            now_ns: now,
         }
     }
 
@@ -754,7 +764,7 @@ impl Contract {
             .0
             .cmp(&inputs.current_price.amount.0);
         let stake_direction = target_amount.0.cmp(&current_amount);
-        let rem_ns = u128::from(inputs.sub.end_ns.0.saturating_sub(block_timestamp()));
+        let rem_ns = u128::from(inputs.sub.end_ns.0.saturating_sub(inputs.now_ns));
 
         // Plan and stake amount can move independently: e.g. upgrade the plan now
         // while scheduling a lower stake amount for the next billing period.
@@ -1079,19 +1089,43 @@ impl Contract {
             return sub;
         }
 
+        let now = self.subscription_now(&sub.subscription_id);
         let mut projection_start_ns = sub.start_ns.0;
         if let Some(pending) = sub.pending_update.clone() {
-            if block_timestamp() >= pending.apply_ns.0 {
+            if now >= pending.apply_ns.0 {
                 projection_start_ns = pending.apply_ns.0;
                 self.project_due_update_fields(&mut sub, &pending);
             }
         }
 
         let (start_ns, end_ns) =
-            self.projected_subscription_window_from(sub.anchor_day, projection_start_ns);
+            self.projected_subscription_window_from(sub.anchor_day, projection_start_ns, now);
         sub.start_ns = start_ns;
         sub.end_ns = end_ns;
         sub
+    }
+
+    #[cfg(not(feature = "test"))]
+    pub(crate) fn subscription_now(&self, _subscription_id: &SubscriptionId) -> u64 {
+        block_timestamp()
+    }
+
+    #[cfg(feature = "test")]
+    pub(crate) fn subscription_now(&self, subscription_id: &SubscriptionId) -> u64 {
+        match env::storage_read(&Self::test_subscription_timestamp_key(subscription_id)) {
+            Some(raw) if raw.len() == 8 => {
+                let bytes: [u8; 8] = raw.as_slice().try_into().unwrap_or([0u8; 8]);
+                u64::from_be_bytes(bytes)
+            }
+            _ => block_timestamp(),
+        }
+    }
+
+    #[cfg(feature = "test")]
+    fn test_subscription_timestamp_key(subscription_id: &SubscriptionId) -> Vec<u8> {
+        let mut key = TEST_SUBSCRIPTION_TIMESTAMP_PREFIX.to_vec();
+        key.extend_from_slice(subscription_id.as_bytes());
+        key
     }
 
     fn project_due_update_fields(
@@ -1118,13 +1152,13 @@ impl Contract {
         subscription_id: SubscriptionId,
         target_timestamp_ns: U64,
     ) {
-        let now = block_timestamp();
+        self.require_test_subscription_clock_owner(&subscription_id);
+        let now = self.subscription_now(&subscription_id);
         require!(
             target_timestamp_ns.0 >= now,
             "Test clock can only fast-forward subscriptions"
         );
-        let delta_ns = target_timestamp_ns.0.saturating_sub(now);
-        self.test_shift_subscription_back(subscription_id, delta_ns);
+        self.set_test_subscription_timestamp(&subscription_id, target_timestamp_ns.0);
     }
 
     /// Test-only helper: fast-forward one subscription by `delta_ns` relative to the current
@@ -1134,37 +1168,52 @@ impl Contract {
         subscription_id: SubscriptionId,
         delta_ns: U64,
     ) {
-        self.test_shift_subscription_back(subscription_id, delta_ns.0);
+        self.require_test_subscription_clock_owner(&subscription_id);
+        let now = self.subscription_now(&subscription_id);
+        self.set_test_subscription_timestamp(&subscription_id, now.saturating_add(delta_ns.0));
     }
 
     /// Test-only helper: account/product convenience wrapper for
     /// [`Contract::test_fast_forward_subscription_to`].
     pub fn test_fast_forward_subscription_for_product_to(
         &mut self,
-        account_id: AccountId,
         product_id: ProductId,
         target_timestamp_ns: U64,
     ) {
+        let account_id = env::predecessor_account_id();
         let (subscription_id, _) = self.require_subscription_owned_by(&account_id, &product_id);
         self.test_fast_forward_subscription_to(subscription_id, target_timestamp_ns);
+    }
+
+    /// Test-only raw storage view. Public subscription views apply virtual time projection.
+    pub fn test_get_stored_subscription(
+        &self,
+        subscription_id: SubscriptionId,
+    ) -> Option<Subscription> {
+        self.internal_get_subscription(&subscription_id)
     }
 }
 
 #[cfg(feature = "test")]
 impl Contract {
-    fn test_shift_subscription_back(&mut self, subscription_id: SubscriptionId, delta_ns: u64) {
-        if delta_ns == 0 {
-            return;
-        }
+    fn require_test_subscription_clock_owner(&self, subscription_id: &SubscriptionId) {
+        let sub = self.require_subscription_by_id(subscription_id);
+        require!(
+            sub.account_id == env::predecessor_account_id(),
+            "Only the subscription owner can modify its test clock"
+        );
+    }
 
-        let mut sub = self.require_subscription_by_id(&subscription_id);
-        sub.start_ns = U64(sub.start_ns.0.saturating_sub(delta_ns));
-        sub.end_ns = U64(sub.end_ns.0.saturating_sub(delta_ns));
-        if let Some(pending) = sub.pending_update.as_mut() {
-            pending.apply_ns = U64(pending.apply_ns.0.saturating_sub(delta_ns));
-        }
-        self.sync_subscription_lock_window(&sub);
-        self.internal_set_subscription(subscription_id, sub);
+    fn set_test_subscription_timestamp(
+        &mut self,
+        subscription_id: &SubscriptionId,
+        timestamp: u64,
+    ) {
+        let bytes = timestamp.to_be_bytes();
+        env::storage_write(
+            &Self::test_subscription_timestamp_key(subscription_id),
+            &bytes,
+        );
     }
 }
 
