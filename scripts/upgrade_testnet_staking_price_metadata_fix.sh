@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Upgrade the shared testnet staking contract with the PriceMetadata compatibility fix
-# and verify legacy subscription price records can be read after migration.
+# Deploy the shared testnet staking contract code with the PriceMetadata
+# compatibility fix and verify legacy subscription price records can be read.
 #
 # Preview:
 #   ./scripts/upgrade_testnet_staking_price_metadata_fix.sh
@@ -102,7 +102,7 @@ if [[ ! -f "$STAKING_WASM" ]]; then
   exit 1
 fi
 
-echo "== Pre-upgrade on-chain checks =="
+echo "== Pre-deploy on-chain checks =="
 before_version="$(view_json "$STAKING_ACCOUNT_ID" get_version '{}')"
 config_json="$(view_json "$STAKING_ACCOUNT_ID" get_config '{}')"
 on_chain_owner="$(jq -er '.owner_account_id' <<<"$config_json")"
@@ -118,7 +118,7 @@ echo "Price IDs:        $PRICE_IDS"
 echo
 
 if [[ "$OWNER_ACCOUNT_ID" != "$on_chain_owner" ]]; then
-  echo "OWNER_ACCOUNT_ID must match get_config.owner_account_id for upgrade()." >&2
+  echo "OWNER_ACCOUNT_ID must match get_config.owner_account_id." >&2
   exit 1
 fi
 
@@ -134,19 +134,19 @@ done
 echo
 
 if [[ "$EXECUTE" != "1" ]]; then
-  echo "Preview only. Re-run with EXECUTE=1 to send the upgrade transaction."
+  echo "Preview only. Re-run with EXECUTE=1 to deploy the contract code."
   echo
 fi
 
-echo "== Owner-gated upgrade() =="
-run near --quiet contract call-function as-transaction "$STAKING_ACCOUNT_ID" upgrade \
-  file-args "$STAKING_WASM" \
-  prepaid-gas '300.0 Tgas' attached-deposit '0 NEAR' \
-  sign-as "$OWNER_ACCOUNT_ID" network-config "$CHAIN_ID" sign-with-keychain send
+echo "== Deploy contract code without init =="
+run near --quiet contract deploy "$STAKING_ACCOUNT_ID" \
+  use-file "$STAKING_WASM" \
+  without-init-call \
+  network-config "$CHAIN_ID" sign-as "$OWNER_ACCOUNT_ID" sign-with-keychain send
 
 if [[ "$EXECUTE" == "1" ]]; then
   echo
-  echo "== Post-upgrade checks =="
+  echo "== Post-deploy checks =="
   view_json "$STAKING_ACCOUNT_ID" get_version '{}'
   for price_id in $PRICE_IDS; do
     echo "-- $price_id"
