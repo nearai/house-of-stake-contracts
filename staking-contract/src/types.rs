@@ -203,6 +203,47 @@ pub struct PendingUnstakeTranche {
     pub available_epoch_height: u64,
 }
 
+/// UI-ready pending unstake and withdraw status for one `(account, validator)` pair.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [json])]
+pub struct AccountPendingUnstakeView {
+    /// Account whose pending unstake tranches are being queried.
+    pub account_id: AccountId,
+    /// Validator pool account for this pending unstake view.
+    pub validator_id: ValidatorId,
+    /// Current NEAR epoch height used to evaluate tranche eligibility.
+    pub current_epoch_height: u64,
+    /// Configured epoch wait used by unstake scheduling and UI wait estimates.
+    pub epoch_unstake_settle_epochs: u64,
+    /// Sum of all pending unstake tranches for this account and validator, including future epochs.
+    pub total_pending_yocto: U128,
+    /// Sum of tranches whose epoch wait has completed (`current_epoch_height >= available_epoch_height`).
+    pub epoch_eligible_yocto: U128,
+    /// Amount the user can withdraw now; zero unless every epoch-eligible tranche can be paid.
+    pub withdrawable_yocto: U128,
+    /// Earliest future tranche availability epoch, or `None` when no future tranches exist.
+    pub next_available_epoch_height: Option<u64>,
+    /// Epochs until `next_available_epoch_height`, or `None` when no future tranches exist.
+    pub wait_epochs: Option<u64>,
+    /// Validator claim bucket currently available to pay user withdrawals from this contract.
+    pub pending_to_claim_yocto: U128,
+    /// True only when `withdraw` should be enabled for this account and validator.
+    pub can_withdraw_now: bool,
+    /// Per-tranche pending unstake details in storage order.
+    pub tranches: Vec<PendingUnstakeTrancheView>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [json])]
+pub struct PendingUnstakeTrancheView {
+    /// Tranche amount in yoctoNEAR.
+    pub amount_yocto: U128,
+    /// Earliest NEAR epoch height where this tranche can be claimed by `withdraw`.
+    pub available_epoch_height: u64,
+    /// Whether this tranche's epoch wait has completed at `AccountPendingUnstakeView::current_epoch_height`.
+    pub is_epoch_eligible: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[near(serializers = [borsh, json])]
 pub enum LockStatus {
