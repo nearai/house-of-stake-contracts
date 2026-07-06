@@ -1108,6 +1108,66 @@ impl Contract {
     }
 }
 
+#[cfg(feature = "test")]
+#[near]
+impl Contract {
+    /// Test-only helper: make one subscription behave as if `target_timestamp_ns` were the current
+    /// block timestamp without changing the global mocked clock or other subscriptions.
+    pub fn test_fast_forward_subscription_to(
+        &mut self,
+        subscription_id: SubscriptionId,
+        target_timestamp_ns: U64,
+    ) {
+        let now = block_timestamp();
+        require!(
+            target_timestamp_ns.0 >= now,
+            "Test clock can only fast-forward subscriptions"
+        );
+        let delta_ns = target_timestamp_ns.0.saturating_sub(now);
+        self.test_shift_subscription_back(subscription_id, delta_ns);
+    }
+
+    /// Test-only helper: fast-forward one subscription by `delta_ns` relative to the current
+    /// test clock without changing the global mocked clock or other subscriptions.
+    pub fn test_fast_forward_subscription_by(
+        &mut self,
+        subscription_id: SubscriptionId,
+        delta_ns: U64,
+    ) {
+        self.test_shift_subscription_back(subscription_id, delta_ns.0);
+    }
+
+    /// Test-only helper: account/product convenience wrapper for
+    /// [`Contract::test_fast_forward_subscription_to`].
+    pub fn test_fast_forward_subscription_for_product_to(
+        &mut self,
+        account_id: AccountId,
+        product_id: ProductId,
+        target_timestamp_ns: U64,
+    ) {
+        let (subscription_id, _) = self.require_subscription_owned_by(&account_id, &product_id);
+        self.test_fast_forward_subscription_to(subscription_id, target_timestamp_ns);
+    }
+}
+
+#[cfg(feature = "test")]
+impl Contract {
+    fn test_shift_subscription_back(&mut self, subscription_id: SubscriptionId, delta_ns: u64) {
+        if delta_ns == 0 {
+            return;
+        }
+
+        let mut sub = self.require_subscription_by_id(&subscription_id);
+        sub.start_ns = U64(sub.start_ns.0.saturating_sub(delta_ns));
+        sub.end_ns = U64(sub.end_ns.0.saturating_sub(delta_ns));
+        if let Some(pending) = sub.pending_update.as_mut() {
+            pending.apply_ns = U64(pending.apply_ns.0.saturating_sub(delta_ns));
+        }
+        self.sync_subscription_lock_window(&sub);
+        self.internal_set_subscription(subscription_id, sub);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

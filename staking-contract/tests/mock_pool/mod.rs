@@ -162,6 +162,29 @@ pub async fn set_mock_timestamp(
     Ok(())
 }
 
+/// Fast-forward one subscription's virtual clock using the contract's test-feature helper.
+/// Unlike `set_mock_timestamp`, this mutates only the selected subscription window.
+pub async fn fast_forward_subscription_for_product_to(
+    caller: &near_workspaces::Account,
+    staking_id: &near_workspaces::AccountId,
+    account_id: &near_workspaces::AccountId,
+    product_id: &str,
+    target_ns: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    caller
+        .call(staking_id, "test_fast_forward_subscription_for_product_to")
+        .args_json(json!({
+            "account_id": account_id,
+            "product_id": product_id,
+            "target_timestamp_ns": target_ns.to_string(),
+        }))
+        .gas(WsGas::from_tgas(50))
+        .transact()
+        .await?
+        .into_result()?;
+    Ok(())
+}
+
 /// Set mocked epoch height directly using contract's test-feature method.
 /// This is much faster than `fast_forward_until_epoch_delta` for large epoch jumps.
 /// Requires staking contract built with `test` feature (loads `staking_contract_test.wasm`).
