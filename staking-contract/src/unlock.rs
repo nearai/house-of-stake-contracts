@@ -136,7 +136,7 @@ impl Contract {
         }
         let projected = self.project_subscription_view_now(sub);
         require!(
-            block_timestamp() >= projected.end_ns.0,
+            self.subscription_now(subscription_id) >= projected.end_ns.0,
             "Active subscription lock cannot be unlocked; cancel the subscription first"
         );
     }
