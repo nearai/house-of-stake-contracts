@@ -1113,10 +1113,11 @@ impl Contract {
     #[cfg(feature = "test")]
     pub(crate) fn subscription_now(&self, subscription_id: &SubscriptionId) -> u64 {
         match env::storage_read(&Self::test_subscription_timestamp_key(subscription_id)) {
-            Some(raw) if raw.len() == 8 => {
-                let bytes: [u8; 8] = raw.as_slice().try_into().unwrap_or([0u8; 8]);
-                u64::from_be_bytes(bytes)
-            }
+            Some(raw) => raw
+                .as_slice()
+                .try_into()
+                .map(u64::from_be_bytes)
+                .unwrap_or_else(|_| block_timestamp()),
             _ => block_timestamp(),
         }
     }
