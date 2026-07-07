@@ -7,6 +7,7 @@
 
 use crate::utils::epoch_height;
 use crate::*;
+use near_sdk::json_types::U128;
 use near_sdk::{AccountId, NearToken, Promise, assert_one_yocto, env, near, require};
 
 // Public `withdraw` + private promise callback (WASM continuation).
@@ -77,6 +78,76 @@ impl Contract {
         validator_id: ValidatorId,
     ) -> Promise {
         self.payout_user_withdraw(account_id, validator_id)
+    }
+
+    /// Return UI-ready pending unstake and withdraw status for one account on one validator.
+    pub fn get_account_pending_unstake(
+        &self,
+        account_id: AccountId,
+        validator_id: ValidatorId,
+    ) -> AccountPendingUnstakeView {
+        let validator = self.require_validator(&validator_id);
+        let current_epoch_height = epoch_height();
+        let tranches = self
+            .user_pending_unstake
+            .get(&(account_id.clone(), validator_id.clone()))
+            .cloned()
+            .unwrap_or_default();
+
+        let mut total_pending_yocto = 0u128;
+        let mut epoch_eligible_yocto = 0u128;
+        let mut next_available_epoch_height = None;
+        let tranches = tranches
+            .into_iter()
+            .map(|tranche| {
+                let amount_yocto = tranche.amount.as_yoctonear();
+                let is_epoch_eligible = current_epoch_height >= tranche.available_epoch_height;
+                total_pending_yocto = total_pending_yocto.saturating_add(amount_yocto);
+                if is_epoch_eligible {
+                    epoch_eligible_yocto = epoch_eligible_yocto.saturating_add(amount_yocto);
+                } else {
+                    next_available_epoch_height = Some(
+                        next_available_epoch_height
+                            .map_or(tranche.available_epoch_height, |next: u64| {
+                                next.min(tranche.available_epoch_height)
+                            }),
+                    );
+                }
+                PendingUnstakeTrancheView {
+                    amount_yocto: U128(amount_yocto),
+                    available_epoch_height: tranche.available_epoch_height,
+                    is_epoch_eligible,
+                }
+            })
+            .collect();
+
+        let pending_to_claim_yocto = validator.pending_to_claim.as_yoctonear();
+        let can_withdraw_now = !self.paused
+            && validator.tx_status == TransactionStatus::Idle
+            && epoch_eligible_yocto > 0
+            && pending_to_claim_yocto >= epoch_eligible_yocto;
+        let withdrawable_yocto = if can_withdraw_now {
+            epoch_eligible_yocto
+        } else {
+            0
+        };
+        let wait_epochs = next_available_epoch_height
+            .map(|available_epoch| available_epoch.saturating_sub(current_epoch_height));
+
+        AccountPendingUnstakeView {
+            account_id,
+            validator_id,
+            current_epoch_height,
+            epoch_unstake_settle_epochs: self.internal_get_config().epoch_unstake_settle_epochs,
+            total_pending_yocto: U128(total_pending_yocto),
+            epoch_eligible_yocto: U128(epoch_eligible_yocto),
+            withdrawable_yocto: U128(withdrawable_yocto),
+            next_available_epoch_height,
+            wait_epochs,
+            pending_to_claim_yocto: U128(pending_to_claim_yocto),
+            can_withdraw_now,
+            tranches,
+        }
     }
 }
 

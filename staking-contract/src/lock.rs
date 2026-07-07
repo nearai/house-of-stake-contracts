@@ -194,14 +194,16 @@ impl Contract {
             self.assert_product_not_reserved_by_pending_update(&buyer, &product_id, None);
         }
 
+        let mut subscription_now = now;
         let (subscription, sub_id, is_new_index) = if let Some(sid) = existing_subscription_id {
             self.apply_due_subscription_update(&sid);
             let mut sub = self.require_subscription_by_id(&sid);
+            subscription_now = self.subscription_now(&sid);
             require!(
                 sub.account_id == buyer,
                 "Only the subscription owner can perform this action"
             );
-            if now < sub.end_ns.0 {
+            if subscription_now < sub.end_ns.0 {
                 if let Some(prev) = self.internal_get_lock(&sub.last_lock_id) {
                     require!(
                         prev.status != LockStatus::Active,
@@ -219,10 +221,11 @@ impl Contract {
                 self.internal_remove_subscription(&sid);
                 let (sid_new, sub_new) =
                     self.new_subscription_for_lock(&buyer, &product, &price_id, now);
+                subscription_now = now;
                 (sub_new, sid_new, true)
             } else {
                 // Renewal window: extend billing period for the current effective tier.
-                let start = sub.end_ns.0.max(now);
+                let start = sub.end_ns.0.max(subscription_now);
                 let end = crate::subscriptions::add_months_stripe_style(sub.anchor_day, 1, start);
                 sub.start_ns = U64(start);
                 sub.end_ns = U64(end);
@@ -250,10 +253,10 @@ impl Contract {
         }
 
         require!(
-            subscription.end_ns.0 > now,
+            subscription.end_ns.0 > subscription_now,
             "Subscription billing period has already ended"
         );
-        let duration_ns = u128::from(subscription.end_ns.0.saturating_sub(now));
+        let duration_ns = u128::from(subscription.end_ns.0.saturating_sub(subscription_now));
         require!(duration_ns > 0, "Lock duration must be positive");
 
         check_near_price_lock(&price, locked.as_yoctonear(), duration_ns)

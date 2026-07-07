@@ -209,6 +209,7 @@ Pipeline steps and callbacks: [features/lazy-epoch-pipeline.md](features/lazy-ep
 | Method | Access | Deposit | Returns | Description |
 |--------|--------|---------|---------|-------------|
 | `withdraw` | User | **1 yocto** | **`Promise`** | JSON **`{ "validator_id": <AccountId> }`** — after shared settlement, claim epoch-eligible pending-unstake tranches from **`pending_to_claim`** and transfer NEAR to the caller. Settlement may first pull pool funds into `pending_to_claim` through `pending_to_withdraw` when the pool has withdrawable funds (see [features/lazy-epoch-pipeline.md](features/lazy-epoch-pipeline.md)). |
+| `get_account_pending_unstake` | View | — | **`AccountPendingUnstakeView`** | JSON **`{ "account_id": <AccountId>, "validator_id": <AccountId> }`** — returns user pending-unstake tranches, total pending amount, epoch-eligible amount, validator claim bucket, and conservative withdrawable status for the UI withdraw flow. Missing user tranches return zero values instead of panicking. |
 
 > **Note:** An owner-only **`sweep_stranded_withdraw_bucket`**-style cleanup (when no user pending-unstake tranche liability remains for the validator but **`pending_to_withdraw > 0`**) is described in [DESIGN.md](DESIGN.md) but **not** exposed in the current ABI.
 
