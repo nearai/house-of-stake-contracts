@@ -200,7 +200,7 @@ fn create_farm_price_requires_reward_rate() {
 #[test]
 fn farm_stake_twice_aggregates_one_position() {
     let mut c = deploy();
-    let (product_id, _price_id) = setup_catalog_farm(
+    let (product_id, price_id) = setup_catalog_farm(
         &mut c,
         SPEC_REWARD_RATE,
         NearToken::from_near(1).as_yoctonear(),
@@ -221,6 +221,8 @@ fn farm_stake_twice_aggregates_one_position() {
     let positions = c.get_farm_positions_for_account(acct(BUYER), 0, 10);
     assert_eq!(positions.len(), 1);
     assert_eq!(positions[0].shares.0, second.shares.0);
+    assert_eq!(c.get_price(price_id).expect("price").usage_count, 2);
+    assert_eq!(c.get_product(product_id).expect("product").usage_count, 2);
 }
 
 #[test]

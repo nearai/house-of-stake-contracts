@@ -361,7 +361,7 @@ impl Contract {
         price_id: PriceId,
         validator_id: ValidatorId,
     ) -> FarmPosition {
-        let (mut price, product) = self.get_active_price_and_product(&price_id);
+        let (mut price, mut product) = self.get_active_price_and_product(&price_id);
         self.require_farm_price_for_product(&price, &product_id);
         require!(
             product.validator_id == validator_id,
@@ -432,7 +432,9 @@ impl Contract {
 
         self.add_farm_position_product_to_account(&account_id, &product_id);
         price.usage_count = price.usage_count.saturating_add(1);
+        product.usage_count = product.usage_count.saturating_add(1);
         self.internal_set_price(price_id.clone(), price);
+        self.internal_set_product(product_id.clone(), product);
         crate::events::log_farm_stake(
             &account_id,
             &product_id,
