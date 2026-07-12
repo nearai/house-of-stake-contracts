@@ -90,7 +90,7 @@ echo "WASM:           $STAKING_WASM"
 echo "Network:        $CHAIN_ID"
 echo
 
-run near --quiet contract deploy "$STAKING_ACCOUNT_ID" use-file "$STAKING_WASM" \
+run near contract deploy "$STAKING_ACCOUNT_ID" use-file "$STAKING_WASM" without-init-call \
   network-config "$CHAIN_ID" sign-with-keychain send
 
 echo
