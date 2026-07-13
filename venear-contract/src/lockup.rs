@@ -174,8 +174,8 @@ impl Contract {
                 self.internal_expect_account_updated(&delegation.account_id);
             delegation_account.delegated_balance = delegation_account
                 .delegated_balance
-                .pooled_sub_scaled(&old_balance, delegation.bps)
-                .pooled_add_scaled(&account.balance, delegation.bps);
+                .pooled_sub_delegation(&old_balance, delegation.bps)
+                .pooled_add_delegation(&account.balance, delegation.bps);
             self.internal_set_account(delegation.account_id.clone(), delegation_account);
         }
         self.internal_set_account_internal(account_id.clone(), account_internal);
