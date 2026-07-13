@@ -81,19 +81,6 @@ impl VenearBalance {
             extra_venear_balance: NearToken::from_yoctonear(extra.as_u128()),
         }
     }
-
-    pub fn scale_by_bps(&self, bps: Bps) -> Self {
-        if bps.is_zero() {
-            return Self::default();
-        }
-        if bps.is_full() {
-            return *self;
-        }
-        Self {
-            near_balance: bps * self.near_balance,
-            extra_venear_balance: bps * self.extra_venear_balance,
-        }
-    }
 }
 
 impl Add<Self> for VenearBalance {
@@ -130,10 +117,11 @@ impl SubAssign<Self> for VenearBalance {
     }
 }
 
-/// Represents balance of NEAR and veNEAR tokens that are pooled together. The `near_balance` is
-/// truncated to milliNEAR for every added `VenearBalance` to avoid rounding errors
-/// during `extra_venear_balance` growth calculations. The truncated `near_balance` is added to
-/// `extra_venear_balance` to ensure that the total balance remains consistent.
+/// Represents balance of NEAR and veNEAR tokens that are pooled together. The pool's
+/// `near_balance` holds only whole milliNEAR so extra veNEAR growth on it stays exact.
+/// `pooled_add`/`pooled_sub` (global totals) fold the sub-milliNEAR near remainder into
+/// `extra_venear_balance` to conserve the total; `pooled_add_delegation`/`pooled_sub_delegation`
+/// credit the exact `delegation_contribution` instead, leaving the remainder with the owner.
 #[derive(Copy, Clone, Default)]
 #[near(serializers=[borsh, json])]
 pub struct PooledVenearBalance(VenearBalance);
@@ -244,63 +232,7 @@ mod tests {
     }
 
     #[test]
-    fn scale_by_bps_zero_returns_zero() {
-        let balance = VenearBalance {
-            near_balance: NearToken::from_near(100),
-            extra_venear_balance: NearToken::from_near(50),
-        };
-        let scaled = balance.scale_by_bps(Bps::ZERO);
-        assert_eq!(scaled.near_balance.as_yoctonear(), 0);
-        assert_eq!(scaled.extra_venear_balance.as_yoctonear(), 0);
-    }
-
-    #[test]
-    fn scale_by_bps_full_returns_full() {
-        let balance = VenearBalance {
-            near_balance: NearToken::from_near(100),
-            extra_venear_balance: NearToken::from_near(50),
-        };
-        let scaled = balance.scale_by_bps(Bps::FULL);
-        assert_eq!(
-            scaled.near_balance.as_yoctonear(),
-            balance.near_balance.as_yoctonear()
-        );
-        assert_eq!(
-            scaled.extra_venear_balance.as_yoctonear(),
-            balance.extra_venear_balance.as_yoctonear()
-        );
-    }
-
-    #[test]
-    fn scale_by_bps_half_returns_half() {
-        let balance = VenearBalance {
-            near_balance: NearToken::from_near(100),
-            extra_venear_balance: NearToken::from_near(50),
-        };
-        let scaled = balance.scale_by_bps(Bps::new(5_000));
-        assert_eq!(
-            scaled.near_balance.as_yoctonear(),
-            NearToken::from_near(50).as_yoctonear()
-        );
-        assert_eq!(
-            scaled.extra_venear_balance.as_yoctonear(),
-            NearToken::from_near(25).as_yoctonear()
-        );
-    }
-
-    #[test]
-    fn scale_by_bps_99_near_3333bps() {
-        let balance = VenearBalance {
-            near_balance: NearToken::from_near(99),
-            extra_venear_balance: NearToken::from_near(0),
-        };
-        let scaled = balance.scale_by_bps(Bps::new(3_333));
-        let expected_yocto = (99_000_000_000_000_000_000_000_000u128 * 3_333) / 10_000;
-        assert_eq!(scaled.near_balance.as_yoctonear(), expected_yocto);
-    }
-
-    #[test]
-    fn pooled_add_delegation_then_sub_scaled_is_identity() {
+    fn pooled_add_delegation_then_sub_delegation_is_identity() {
         let initial = PooledVenearBalance(VenearBalance {
             near_balance: NearToken::from_near(1000),
             extra_venear_balance: NearToken::from_near(500),
@@ -324,7 +256,7 @@ mod tests {
     /// Mirrors mainnet tx HDtSFscvJQ7G6rA6Xy9XWdEnyLhaKJVPJbTDyyycChHX: a 2512 bps share of
     /// 4.1 NEAR is not milliNEAR-aligned, and after growth the old formula under-charged the pool.
     #[test]
-    fn pooled_scaled_sub_after_growth_is_exact() {
+    fn delegation_contribution_sub_after_growth_is_exact() {
         let mut balance = VenearBalance {
             near_balance: NearToken::from_millinear(4_100),
             extra_venear_balance: NearToken::from_yoctonear(50_000_000_000_000_000_000_000),
@@ -351,17 +283,49 @@ mod tests {
         );
     }
 
+    /// Sweeps misaligned balances, extras, bps and growth windows: the delegation credit grown
+    /// over the window must equal the debit recomputed from the grown owner balance, exactly.
     #[test]
-    fn scale_by_bps_extra_venear_scaled() {
-        let balance = VenearBalance {
-            near_balance: NearToken::from_near(0),
-            extra_venear_balance: NearToken::from_near(100),
-        };
-        let scaled = balance.scale_by_bps(Bps::new(2_500));
-        assert_eq!(scaled.near_balance.as_yoctonear(), 0);
-        assert_eq!(
-            scaled.extra_venear_balance.as_yoctonear(),
-            NearToken::from_near(25).as_yoctonear()
-        );
+    fn delegation_contribution_growth_exactness_grid() {
+        let day_ns: u64 = 86_400_000_000_000;
+        let near_values: [u128; 5] = [
+            10u128.pow(24),
+            4_100 * 10u128.pow(21),
+            4_100 * 10u128.pow(21) + 999_999,
+            9 * 10u128.pow(20),
+            777 * 10u128.pow(24) + 777,
+        ];
+        let extra_values: [u128; 4] = [
+            0,
+            5 * 10u128.pow(22),
+            1_234_567_890_123_456_789,
+            12 * 10u128.pow(25),
+        ];
+        let bps_values: [u16; 5] = [1, 777, 2_512, 9_999, 10_000];
+        let day_values: [u64; 4] = [1, 27, 365, 3_650];
+        for &near in &near_values {
+            for &extra in &extra_values {
+                for &bps_raw in &bps_values {
+                    for &days in &day_values {
+                        let mut balance = VenearBalance {
+                            near_balance: NearToken::from_yoctonear(near),
+                            extra_venear_balance: NearToken::from_yoctonear(extra),
+                        };
+                        let bps = Bps::new(bps_raw);
+                        let mut pool =
+                            PooledVenearBalance::default().pooled_add_delegation(&balance, bps);
+                        let end: TimestampNs = (days * day_ns).into();
+                        pool.update(0.into(), end, &growth_config());
+                        balance.update(0.into(), end, &growth_config());
+                        let after_sub = pool.pooled_sub_delegation(&balance, bps);
+                        assert_eq!(after_sub.0.near_balance, NearToken::from_yoctonear(0));
+                        assert_eq!(
+                            after_sub.0.extra_venear_balance,
+                            NearToken::from_yoctonear(0)
+                        );
+                    }
+                }
+            }
+        }
     }
 }

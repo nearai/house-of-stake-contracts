@@ -105,8 +105,7 @@ impl Contract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{entry, fresh_contract, set_ctx};
-    use common::lockup_update::LockupUpdateV1;
+    use crate::test_utils::{apply_lockup_update, entry, fresh_contract, set_ctx};
     use common::{near_add, Bps};
 
     /// Register `caller` with 1 NEAR and each delegate with zero, so set_delegations can scale onto them.
@@ -280,32 +279,17 @@ mod tests {
         let year_ns: u64 = 365 * 86_400_000_000_000;
 
         // Year 3: the lockup reports newly locked NEAR; pools rebase onto the larger balance.
-        let locked = NearToken::from_near(111);
-        set_ctx(caller.clone(), 0, 3 * year_ns);
-        let account_internal = contract.internal_get_account_internal(&caller).unwrap();
-        contract.internal_lockup_update(
-            caller.clone(),
-            account_internal,
-            LockupUpdateV1 {
-                locked_near_balance: locked,
-                timestamp: (3 * year_ns).into(),
-                lockup_update_nonce: 1.into(),
-            },
+        apply_lockup_update(
+            &mut contract,
+            &caller,
+            NearToken::from_near(111),
+            3 * year_ns,
+            1,
         );
 
         // Year 7: the locked NEAR is withdrawn, forfeiting all extra veNEAR; each pool must
         // hold exactly the near-only share of the remaining deposit again.
-        set_ctx(caller.clone(), 0, 7 * year_ns);
-        let account_internal = contract.internal_get_account_internal(&caller).unwrap();
-        contract.internal_lockup_update(
-            caller.clone(),
-            account_internal,
-            LockupUpdateV1 {
-                locked_near_balance: NearToken::ZERO,
-                timestamp: (7 * year_ns).into(),
-                lockup_update_nonce: 2.into(),
-            },
-        );
+        apply_lockup_update(&mut contract, &caller, NearToken::ZERO, 7 * year_ns, 2);
         for delegation in &entries {
             assert_eq!(
                 delegated_total(&contract, delegation.account_id.as_str()),

@@ -5,6 +5,7 @@ use crate::Contract;
 use crate::config::Config;
 use common::Bps;
 use common::account::DelegationEntry;
+use common::lockup_update::LockupUpdateV1;
 use common::test_utils::{acc, fixed_rate_growth_config};
 pub use common::test_utils::{owner, set_ctx};
 use near_sdk::json_types::U64;
@@ -15,6 +16,27 @@ pub fn entry(account_id: &str, bps: u16) -> DelegationEntry {
         account_id: acc(account_id),
         bps: Bps::new(bps),
     }
+}
+
+/// Applies a lockup update for `caller` at `timestamp_ns` reporting `locked` NEAR.
+pub fn apply_lockup_update(
+    contract: &mut Contract,
+    caller: &AccountId,
+    locked: NearToken,
+    timestamp_ns: u64,
+    nonce: u64,
+) {
+    set_ctx(caller.clone(), 0, timestamp_ns);
+    let account_internal = contract.internal_get_account_internal(caller).unwrap();
+    contract.internal_lockup_update(
+        caller.clone(),
+        account_internal,
+        LockupUpdateV1 {
+            locked_near_balance: locked,
+            timestamp: timestamp_ns.into(),
+            lockup_update_nonce: nonce.into(),
+        },
+    );
 }
 
 pub fn fresh_contract(predecessor: AccountId) -> Contract {

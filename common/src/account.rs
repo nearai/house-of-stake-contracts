@@ -100,36 +100,26 @@ impl Account {
             .expect("delegation bps sum must fit into u16")
     }
 
-    /// Returns veNEAR balance of the account without modifications.
+    /// Returns veNEAR balance of the account at the given timestamp without modifications.
     pub fn total_balance(
         &self,
         current_timestamp: TimestampNs,
         venear_growth_config: &VenearGrowthConfig,
     ) -> NearToken {
-        let current_timestamp = truncate_to_seconds(current_timestamp);
-        require!(
-            current_timestamp >= self.update_timestamp,
-            "Timestamp must be increasing"
-        );
-        let mut delegated_balance = self.delegated_balance;
-        delegated_balance.update(
-            self.update_timestamp,
-            current_timestamp,
-            venear_growth_config,
-        );
-        let total = delegated_balance.total();
-        let self_bps = Bps::new(10_000_u16.saturating_sub(self.delegated_bps()));
-        if !self_bps.is_zero() {
-            let mut balance = self.balance;
-            balance.update(
-                self.update_timestamp,
-                current_timestamp,
-                venear_growth_config,
-            );
-            near_add(total, balance.scale_by_bps(self_bps).total())
-        } else {
-            total
+        let mut account = self.clone();
+        account.update(current_timestamp, venear_growth_config);
+        account.owned_total()
+    }
+
+    /// The voting power owned by this account: incoming delegated balance plus own balance minus
+    /// the exact `delegation_contribution` of each outgoing delegation, so the sub-milliNEAR
+    /// remainders stay with the owner. Assumes the balances are already updated.
+    pub fn owned_total(&self) -> NearToken {
+        let mut retained = self.balance;
+        for delegation in &self.delegations {
+            retained = retained - self.balance.delegation_contribution(delegation.bps);
         }
+        near_add(self.delegated_balance.total(), retained.total())
     }
 
     pub fn update(

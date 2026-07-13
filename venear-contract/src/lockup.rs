@@ -3,11 +3,11 @@ use crate::config::LockupContractConfig;
 use crate::*;
 use common::events;
 use common::lockup_update::{LockupUpdateV1, VLockupUpdate};
-use common::near_add;
+use common::{near_add, near_sub};
 use near_sdk::json_types::U64;
 use near_sdk::{Gas, IntoStorageKey, Promise, env, is_promise_success};
 #[cfg(target_arch = "wasm32")]
-use {common::near_sub, near_sdk::json_types::Base58CryptoHash};
+use near_sdk::json_types::Base58CryptoHash;
 
 const LOCKUP_DEPLOY_MIN_GAS: Gas = Gas::from_tgas(20);
 const ON_LOCKUP_DEPLOYED: Gas = Gas::from_tgas(15);
@@ -157,8 +157,10 @@ impl Contract {
         let mut account: Account = self.internal_expect_account_updated(&account_id);
         let old_balance = account.balance;
         let mut global_state: GlobalState = self.internal_global_state_updated();
-        // Decreasing the locked NEAR will result in dropped extra veNEAR rewards.
-        if lockup_update.locked_near_balance < old_balance.near_balance {
+        // Decreasing the locked NEAR will result in dropped extra veNEAR rewards. The stored
+        // near balance includes the storage deposit, so strip it to compare locked to locked.
+        let old_locked_near_balance = near_sub(old_balance.near_balance, account_internal.deposit);
+        if lockup_update.locked_near_balance < old_locked_near_balance {
             account.balance.extra_venear_balance = NearToken::ZERO;
         }
         // Updating balance and also adding internal balance deposit.
@@ -378,4 +380,62 @@ fn internal_get_hash_and_size(register_id: u64) -> (u64, CryptoHash) {
     }
     let hash = env::read_register(hash_register).unwrap();
     (size, hash.try_into().unwrap())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::{apply_lockup_update, fresh_contract};
+
+    const DAY_NS: u64 = 86_400_000_000_000;
+
+    /// Regression test: the forfeit check must compare locked to locked, excluding the storage
+    /// deposit. Locking a small extra amount (less than the deposit) must keep accrued extra.
+    #[test]
+    fn small_lock_increase_keeps_extra_venear() {
+        let caller: AccountId = "caller.near".parse().unwrap();
+        let mut contract = fresh_contract(caller.clone());
+        contract.internal_register_account(&caller, NearToken::from_near(1));
+
+        apply_lockup_update(&mut contract, &caller, NearToken::from_near(100), 0, 1);
+        apply_lockup_update(
+            &mut contract,
+            &caller,
+            NearToken::from_millinear(100_500),
+            30 * DAY_NS,
+            2,
+        );
+
+        let balance = contract.get_account_info(caller).unwrap().account.balance;
+        assert_eq!(balance.near_balance, NearToken::from_millinear(101_500));
+        assert_eq!(
+            balance.extra_venear_balance,
+            contract.internal_get_venear_growth_config().calculate(
+                0.into(),
+                (30 * DAY_NS).into(),
+                NearToken::from_near(101)
+            )
+        );
+    }
+
+    /// Decreasing the locked NEAR still forfeits all accrued extra veNEAR.
+    #[test]
+    fn unlock_forfeits_extra_venear() {
+        let caller: AccountId = "caller.near".parse().unwrap();
+        let mut contract = fresh_contract(caller.clone());
+        contract.internal_register_account(&caller, NearToken::from_near(1));
+
+        apply_lockup_update(&mut contract, &caller, NearToken::from_near(100), 0, 1);
+        apply_lockup_update(
+            &mut contract,
+            &caller,
+            NearToken::from_millinear(99_999),
+            30 * DAY_NS,
+            2,
+        );
+
+        let balance = contract.get_account_info(caller).unwrap().account.balance;
+        assert_eq!(balance.near_balance, NearToken::from_millinear(100_999));
+        assert_eq!(balance.extra_venear_balance, NearToken::from_yoctonear(0));
+    }
 }
