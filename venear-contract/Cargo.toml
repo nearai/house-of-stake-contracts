@@ -14,9 +14,9 @@ crate-type = ["cdylib"]
 # in https://github.com/near/NEPs/blob/master/neps/nep-0330.md
 [package.metadata.near.reproducible_build]
 # docker image, descriptor of build environment
-image = "sourcescan/cargo-near:0.13.4-rust-1.85.1"
+image = "sourcescan/cargo-near:0.13.6-rust-1.86.0"
 # tag after colon above serves only descriptive purpose; image is identified by digest
-image_digest = "sha256:1f8b71742802f38990d442e8678aa4c0cd1c8317dd3ff493f41c079675d4f35b"
+image_digest = "sha256:589c460a6dd7c66656206ab8fc94db5d74d10feb4126af26e7c67ad0407086b8"
 # list of environment variables names, whose values, if set, will be used as external build parameters
 # in a reproducible manner
 # supported by `sourcescan/cargo-near:0.10.1-rust-1.82.0` image or later images
@@ -39,3 +39,7 @@ common = { path = "../common" }
 near-sdk.workspace = true
 serde_json.workspace = true
 hex.workspace = true
+
+[dev-dependencies]
+near-sdk = { workspace = true, features = ["unit-testing"] }
+common = { path = "../common", features = ["test-utils"] }

@@ -7,13 +7,13 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-near-sdk.workspace = true
+near-sdk = { workspace = true, features = ["non-contract-usage"] }
 serde_json.workspace = true
 sha2 = "0.10.8"
 
 [dev-dependencies]
 common = { path = "../common" }
-near-workspaces = { version = "0.18" }
+near-workspaces = { version = "0.22" }
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["json"] }
 base64 = "0.22"

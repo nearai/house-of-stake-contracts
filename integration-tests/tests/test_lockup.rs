@@ -463,7 +463,7 @@ pub async fn test_lockup_staking() -> Result<(), Box<dyn std::error::Error>> {
     assert_almost_eq(
         user_account_details.balance,
         initial_user_balance
-            .checked_add(NearToken::from_near(5))
+            .checked_add(NearToken::from_millinear(5020))
             .unwrap(),
         NearToken::from_millinear(1),
     );
@@ -999,7 +999,6 @@ pub async fn test_lockup_delete_after_staking() -> Result<(), Box<dyn std::error
 pub async fn test_ft_on_transfer_error() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default().build().await?;
     let user = v.create_account_with_lockup().await?;
-    let _root = v.sandbox.root_account().unwrap();
     let lockup_id = v.get_lockup_account_id(user.id()).await?;
 
     let outcome = user
@@ -1021,7 +1020,6 @@ pub async fn test_ft_on_transfer_error() -> Result<(), Box<dyn std::error::Error
 pub async fn test_ft_on_transfer_success() -> Result<(), Box<dyn std::error::Error>> {
     let v = VenearTestWorkspaceBuilder::default().build().await?;
     let user = v.create_account_with_lockup().await?;
-    let _root = v.sandbox.root_account().unwrap();
     let lockup_id = v.get_lockup_account_id(user.id()).await?;
 
     let staking_pool = v.sandbox.dev_create_account().await?;

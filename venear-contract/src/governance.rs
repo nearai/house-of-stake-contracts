@@ -98,6 +98,17 @@ impl Contract {
         self.assert_owner();
         self.config.guardians = guardians;
     }
+
+    /// Sets the maximum number of partial delegation entries allowed per account.
+    /// Existing accounts above the new cap remain valid until they call `set_delegations`.
+    /// Can only be called by the owner.
+    /// Requires 1 yocto NEAR.
+    #[payable]
+    pub fn set_max_delegations(&mut self, max_delegations: u32) {
+        assert_one_yocto();
+        self.assert_owner();
+        self.config.max_delegations = max_delegations;
+    }
 }
 
 impl Contract {

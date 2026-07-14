@@ -1,9 +1,9 @@
 [workspace.package]
-version = "1.0.3"
+version = "1.1.0"
 authors = ["Fastnear Inc <hello@fastnear.com>"]
 edition = "2024"
 repository = "https://github.com/fastnear/house-of-stake-contracts"
-rust-version = "1.85.1"
+rust-version = "1.86"
 license = "MIT OR Apache-2.0"
 
 [workspace]
@@ -21,7 +21,7 @@ members = [
 ]
 
 [workspace.dependencies]
-near-sdk = { version = "=5.9.0", features = ["wee_alloc", "unstable"] }
+near-sdk = { version = "=5.26.1", features = ["wee_alloc", "unstable"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 uint = { version = "0.10.0", default-features = false }
 hex = "0.4.3"

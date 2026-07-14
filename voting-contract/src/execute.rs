@@ -1,7 +1,7 @@
 use crate::proposal::{ProposalAction, ProposalId, ProposalStatus};
 use crate::*;
 use common::events;
-use near_sdk::{Gas, Promise, PromiseResult, ext_contract};
+use near_sdk::{Gas, Promise, PromiseError, ext_contract};
 
 const GAS_FOR_ON_EXECUTE_CALLBACK: Gas = Gas::from_tgas(10);
 
@@ -11,6 +11,7 @@ impl Contract {
     /// Can be called by anyone. The proposal must be in `Executable` status.
     pub fn execute_proposal(&mut self, proposal_id: ProposalId) -> Promise {
         self.assert_not_paused();
+        self.internal_advance_queue();
         let mut proposal = self.internal_expect_proposal_updated(proposal_id);
 
         require!(
@@ -56,10 +57,11 @@ impl Contract {
 
     #[private]
     pub fn on_execute_proposal(&mut self, proposal_id: ProposalId) {
+        self.internal_advance_queue();
         let mut proposal = self.internal_expect_proposal_updated(proposal_id);
 
         let all_succeeded = (0..env::promise_results_count())
-            .all(|i| !matches!(env::promise_result(i), PromiseResult::Failed));
+            .all(|i| !matches!(env::promise_result_checked(i, 0), Err(PromiseError::Failed)));
 
         proposal.status = if all_succeeded {
             ProposalStatus::Succeeded

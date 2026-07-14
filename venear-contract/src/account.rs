@@ -1,5 +1,5 @@
 use crate::*;
-use common::{VenearBalance, Version, events, near_add, truncate_to_seconds};
+use common::{Bps, VenearBalance, Version, events, near_add, truncate_to_seconds};
 use near_sdk::json_types::U64;
 
 /// Full information about the account
@@ -121,7 +121,7 @@ impl Contract {
             update_timestamp: truncate_to_seconds(env::block_timestamp().into()),
             balance: VenearBalance::from_near(deposit),
             delegated_balance: Default::default(),
-            delegation: None,
+            delegations: vec![],
         };
         global_state.total_venear_balance = global_state
             .total_venear_balance
@@ -163,23 +163,24 @@ impl Contract {
         account
     }
 
+    /// Returns the "owned" voting power for an account — the portion that counts for ft_mint/ft_burn.
+    fn account_owned_total(account: &Account) -> NearToken {
+        let mut total = account.delegated_balance.total();
+        let self_bps = Bps::new(10_000_u16.saturating_sub(account.delegated_bps()));
+        if !self_bps.is_zero() {
+            total = near_add(total, account.balance.scale_by_bps(self_bps).total());
+        }
+        total
+    }
+
     pub fn internal_set_account(&mut self, account_id: AccountId, account: Account) {
         // Previous balance
         let old_balance = self
             .internal_get_account(&account_id)
-            .map(|account| {
-                let mut total = account.delegated_balance.total();
-                if account.delegation.is_none() {
-                    total = near_add(total, account.balance.total());
-                }
-                total
-            })
+            .map(|old_account| Self::account_owned_total(&old_account))
             .unwrap_or_default();
         // New balance
-        let mut new_balance = account.delegated_balance.total();
-        if account.delegation.is_none() {
-            new_balance = near_add(new_balance, account.balance.total());
-        }
+        let new_balance = Self::account_owned_total(&account);
         if new_balance > old_balance {
             events::emit::ft_mint(&account_id, new_balance.checked_sub(old_balance).unwrap());
         } else if new_balance < old_balance {
