@@ -97,6 +97,7 @@ fn create_price_rejects_max_amount_below_amount() {
         U128(LOCK_FACTOR_DENOM),
         Some(PriceMetadata {
             max_amount: Some(U128(9)),
+            farm_reward_rate: None,
         }),
         acct(VALIDATOR_OWNER_ACCOUNT),
     );

@@ -38,7 +38,7 @@ Backlog for taking **`stake.dao`** (`staking-contract`) from **implemented v1** 
 
 - [ ] **Reproducible WASM** — Ship with `cargo near build` / [Cargo.toml](../../Cargo.toml) `near.reproducible_build` pins; record artifact hash in release notes (same pattern as sibling HoS contracts).
 - [ ] **CI green on merge branch** — `make test` (includes WASM build via `build_all.sh`), `cargo clippy`, `cargo fmt --check`.
-- [ ] **Mainnet init config** — Finalize `Config`: `owner_account_id`, `guardians`, `min_lock_amount`, `epoch_unstake_settle_epochs`, `min_storage_deposit`, `per_lock_storage_stake`, lock duration bounds. Document who can change each via governance ([`governance.rs`](../../src/governance.rs)).
+- [ ] **Mainnet init config** — Finalize `Config`: `owner_account_id`, `guardians`, `min_lock_amount`, `epoch_unstake_settle_epochs`, `min_storage_deposit`, `per_lock_storage_stake`, `per_farm_position_storage_stake`, lock duration bounds. Document who can change each via governance ([`governance.rs`](../../src/governance.rs)).
 - [ ] **Upgrade path** — Dry-run `upgrade()` + `migrate_state` on testnet; confirm guardian pause works before/after upgrade.
 
 ### Operations

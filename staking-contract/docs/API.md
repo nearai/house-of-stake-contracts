@@ -45,6 +45,10 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 | `get_purchases_for_account` | `account_id`, `from_index: u64`, `limit: u64` | `Purchase[]` | Paginated direct payment purchases by buyer account. |
 | `get_purchases_for_product` | `product_id`, `from_index: u64`, `limit: u64` | `Purchase[]` | Paginated direct payment purchases by product. |
 | `get_revenue_balance_for_validator` | `validator_id: AccountId` | `NearToken` | Current withdrawable direct-payment revenue for the validator. |
+| `get_farm_pool` | `price_id: string` | `FarmPool \| null` | Stored farm accumulator for a Farm price. |
+| `get_farm_position` | `account_id`, `product_id` | `FarmPositionView \| null` | Stored farm position plus view-time `staked_near_amount`, `pending_reward_units`, and `total_earned_reward_units` for one `(account, product)`. |
+| `get_farm_positions_for_account` | `account_id`, `from_index: u64`, `limit: u64` | `FarmPositionView[]` | Paginated current and historical farm positions for an account, including view-time staked NEAR and reward fields. |
+| `get_farm_account` | `account_id` | `FarmAccountView` | Stored closed-position reward roll-up plus simulated pending rewards for active positions. `active_positions` contains `FarmPositionView` rows. Reward units are 24-decimal fixed-point accounting units (`1e24 == 1 whole reward unit`). |
 
 ---
 
@@ -52,9 +56,9 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 
 | Method | Access | Deposit | Description |
 |--------|--------|---------|-------------|
-| `storage_deposit` | Any | **Attach NEAR** | NEP-145 register/top-up: `account_id?: AccountId`, `registration_only?: bool`. With `registration_only=true`, only the amount needed to reach `min_storage_deposit` is retained and excess is refunded. Non-registration top-ups must satisfy retained storage for `min_storage_deposit + per_lock_storage_stake × user_lock_count + per_purchase_storage_stake × user_purchase_count`. |
+| `storage_deposit` | Any | **Attach NEAR** | NEP-145 register/top-up: `account_id?: AccountId`, `registration_only?: bool`. With `registration_only=true`, only the amount needed to reach `min_storage_deposit` is retained and excess is refunded. Non-registration top-ups must satisfy retained storage for `min_storage_deposit + per_lock_storage_stake × user_lock_count + per_farm_position_storage_stake × user_farm_position_count + per_purchase_storage_stake × user_purchase_count`. |
 | `storage_withdraw` | Account owner | **1 yocto** + optional `amount: NearToken` | NEP-145 withdraw from `available`; omitting `amount` withdraws all available storage. |
-| `storage_unregister` | Account owner | **1 yocto** + optional `force: bool` | NEP-145 unregister/refund when the account has no retained per-lock, per-purchase, or subscription storage. `force=true` is rejected; without force the method returns `false` instead of deleting accounts that still own retained records. |
+| `storage_unregister` | Account owner | **1 yocto** + optional `force: bool` | NEP-145 unregister/refund when the account has no retained per-lock, per-purchase, subscription, farm-position, or pending-unstake storage. `force=true` is rejected; without force the method returns `false` instead of deleting accounts that still own retained records. |
 
 ---
 
@@ -83,8 +87,8 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 | `archive_product` | `product_id`. |
 | `unarchive_product` | `product_id` — restore **`CatalogStatus::Active`** (must currently be archived). |
 | `delete_product` | `product_id` (invariants: no attached prices in use — see contract). |
-| `create_price` | `product_id`, `name`, `description`, `amount` (`U128` yocto), `price_type`, `billing_period`, `lock_factor_near_months`, `metadata`. For recurring variable-stake prices, `metadata.max_amount` is an optional inclusive upper bound and must be `>= amount`. |
-| `edit_price` | `price_id`, `name`, `description`. |
+| `create_price` | `product_id`, `name`, `description`, `amount` (`U128` yocto), `price_type`, `billing_period`, `lock_factor_near_months`, `metadata`. `PriceType::Farm` requires no billing period, `lock_factor_near_months == 0`, `metadata.farm_reward_rate`, and creates a linked `FarmPool`. At most one active Farm price may exist per product. For recurring variable-stake and farm prices, `metadata.max_amount` is an optional inclusive upper bound and must be `>= amount`. |
+| `edit_price` | `price_id`, optional `name`, optional `description`, optional `metadata`. Farm prices may update `metadata.farm_reward_rate`; the farm pool is settled with the old rate first, then the new rate applies prospectively. |
 | `archive_price` | `price_id`. |
 | `unarchive_price` | `price_id` — restore **`CatalogStatus::Active`** (must currently be archived). |
 | `delete_price` | `price_id`. |
@@ -97,6 +101,15 @@ All mutation entrypoints attach **1 yocto**, require contract **not paused**, va
 | Method | Access | Deposit | Returns | Description |
 |--------|--------|---------|---------|-------------|
 | `lock` | Buyer / subscriber | **Attach NEAR** | **`PromiseOrValue<LockId>`** | **`price_id`**, **`product_id`**, **`duration_ns`** — provide exactly one of **`price_id`** or **`product_id`**. One-off prices require **`duration_ns`** (`U64`). Recurring monthly subscription prices require **`duration_ns: null`** and derive the duration from the billing period. Default price from **`Product.default_price_id`** when only **`product_id`** is set. **WASM:** shared per-epoch pipeline (**0–3**) then mint (**5a**); see [features/lazy-epoch-pipeline.md](features/lazy-epoch-pipeline.md). **Host tests:** synchronous mint (no promise chain). |
+
+## Staking farm (`stake.rs`)
+
+Farm rewards are non-transferable accounting units. `FarmPool.reward_rate` is 24-decimal reward units per second per staked NEAR, scaled by `FARM_REWARD_RATE_DENOM = 1`. Accumulators use `FARM_ACC_REWARD_PER_SHARE_DENOM = 1_000_000_000_000_000_000_000_000`.
+
+| Method | Access | Deposit | Returns | Description |
+|--------|--------|---------|---------|-------------|
+| `stake` | Registered account | **Attach NEAR** | **`PromiseOrValue<FarmPosition>`** | `product_id`, optional `price_id`. Resolves the active Farm price, validates amount/min/max, runs the shared validator settlement pipeline, mints validator shares, updates `FarmPool.total_farm_shares`, and creates or aggregates the account's one live farm position for the product. |
+| `unstake` | Position owner | **1 yocto** | **`Promise`** | `product_id`, optional `amount: U128`. Burns all shares when `amount` is `null`; otherwise converts requested NEAR to shares with ceiling division after the validator settlement preamble. TODO: confirm that `amount: null` should remain the final full-exit API. Queues the same `user_pending_unstake` tranches as `unlock`; users later call `withdraw(validator_id)`. Full unstake closes the position and rolls accrued reward units into `FarmAccount`. |
 
 ## Direct payments (`payments.rs`)
 
@@ -151,6 +164,8 @@ Public **`epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator
 |--------|-------------------|-----------|
 | `lock` | `CommitLock` or `CommitRecurringSubscriptionLock` | Mint one-off lock or resolve recurring subscription lock after settlement (**5a**), then release with lock id (**6**) |
 | `update_subscription` | `SubscriptionUpdate` | Update subscription lock or schedule deferred changes (**5d**), then release with outcome (**6**) |
+| `stake` | `CommitFarmStake` | Farm stake after settlement (**5e**), then release with `FarmPosition` (**6**) |
+| `unstake` | `FarmUnstakeQueue` | Farm share exit (**5f**), then terminal release (**6**) |
 | `unlock` | `UnlockQueueUnstake` | Share exit only (**5b**), then terminal release (**6**) |
 | `withdraw` (WASM) | `WithdrawUserTransfer` | Payout from claim bucket (**5c**), then terminal release (**6**) |
 | `epoch_settle` | `SettleOnly` | No-op then **6** |
@@ -174,15 +189,18 @@ Pipeline steps and callbacks: [features/lazy-epoch-pipeline.md](features/lazy-ep
 | `on_after_pool_withdraw_maybe_settle` | **2c** | After **2b**; continues through **3** → **4** for the original `UserAction`. |
 | `on_deposit_and_stake` | **3b** | Stake callback; pending queue + **`last_settlement_epoch`**. |
 | `on_unstake` | **3c** | Unstake callback; **`last_unstake_epoch`**, **`last_settlement_epoch`**. |
-| `on_epoch_settlement_dispatch_continue` | **4** | Fan-out to **5a** / **5b** / **5c** / **5d** and choose a terminal or value-returning release callback. |
+| `on_epoch_settlement_dispatch_continue` | **4** | Fan-out to **5a** / **5b** / **5c** / **5d** / **5e** / **5f** and choose a terminal or value-returning release callback. |
 | `resolve_lock` | **5a** | One-off catalog lock mint (`lock.rs`). |
 | `resolve_recurring_subscription_lock_after_settle` | **5a** | Recurring subscription renewal/new-period resolution after validator settlement (`lock.rs`). |
 | `resolve_unlock` | **5b** | Share exit and lock status update (`unlock.rs`). |
 | `on_withdraw_user_transfer_after_settle` | **5c** | Claim from `pending_to_claim` and transfer to user (`withdraw.rs`). |
 | `on_subscription_update_after_settle` | **5d** | Subscription update after settlement (`subscriptions.rs`). |
+| `resolve_farm_stake` | **5e** | Farm stake mint and reward-accounting update (`stake.rs`). |
+| `resolve_farm_unstake` | **5f** | Farm share exit, reward settlement, and optional account roll-up (`stake.rs`). |
 | `on_epoch_pipeline_terminal_release` | **6** | Set **`tx_status`** → **`Idle`** for no-value tails. |
 | `on_epoch_pipeline_release_with_lock_id` | **6** | Release **`Busy`** and return `LockId`; refunds payable lock deposit if the tail fails. |
 | `on_epoch_pipeline_release_with_subscription_update_outcome` | **6** | Release **`Busy`** and return `SubscriptionPlanChangeOutcome`; refunds attached update deposit if the tail fails. |
+| `on_epoch_pipeline_release_with_farm_position` | **6** | Release **`Busy`** and return `FarmPosition`; refunds attached farm stake if the tail fails. |
 
 ---
 
@@ -207,6 +225,7 @@ Pipeline steps and callbacks: [features/lazy-epoch-pipeline.md](features/lazy-ep
 | `accept_ownership` | **Proposed** account accepts (must match `proposed_new_owner_account_id`). |
 | `set_guardians` | Replace **`guardians`** list. |
 | `set_per_lock_storage_stake` | Per-lock storage surcharge config. |
+| `set_per_farm_position_storage_stake` | Per-farm-position storage surcharge config. |
 | `set_per_purchase_storage_stake` | Per-direct-purchase storage surcharge config. |
 | `set_lock_bounds` | `min_lock_duration_ns`, `max_lock_duration_ns` (`U64`). |
 | `set_min_lock_amount` | Minimum attach for locks; must be **≥ 1 NEAR** (`PROTOCOL_MIN_LOCK_AMOUNT_YOCTO` in `config.rs`). |
@@ -245,7 +264,7 @@ Pipeline steps and callbacks: [features/lazy-epoch-pipeline.md](features/lazy-ep
 
 - **`Config`** — [`../src/config.rs`](../src/config.rs): `owner_account_id`, `guardians`, lock/storage economics, `epoch_unstake_settle_epochs`, … **`min_lock_amount`** is the minimum attach for locks (including first delegation to an empty pool); governance may raise it but not below **`PROTOCOL_MIN_LOCK_AMOUNT_YOCTO`** (1 NEAR), enforced in `new` and `set_min_lock_amount`.
 - **`Validator`** — [`../src/validators.rs`](../src/validators.rs): **`validator_id`** (pool contract account), accounting fields, pending buckets, **`tx_status`** (`Idle` \| `Busy`).
-- **`Product`**, **`Price`**, **`PriceMetadata`**, **`Subscription`**, **`PendingSubscriptionUpdate`**, **`SubscriptionPlanChangeOutcome`**, **`Lock`**, **`Purchase`**, **`Account`**, **`StorageBalance`**, **`StorageBalanceBounds`** — [`../src/types.rs`](../src/types.rs), [`../src/accounts.rs`](../src/accounts.rs). **`Account`** is prepaid **`storage_deposit`** only (unlocked stake exits transfer directly to the user via **`withdraw`**).
+- **`Product`**, **`Price`**, **`PriceMetadata`**, **`Subscription`**, **`PendingSubscriptionUpdate`**, **`SubscriptionPlanChangeOutcome`**, **`Lock`**, **`Purchase`**, **`FarmPool`**, **`FarmPosition`**, **`FarmPositionView`**, **`FarmAccount`**, **`FarmAccountView`**, **`Account`**, **`StorageBalance`**, **`StorageBalanceBounds`** — [`../src/types.rs`](../src/types.rs), [`../src/accounts.rs`](../src/accounts.rs). **`Account`** is prepaid **`storage_deposit`** only (unlocked stake exits transfer directly to the user via **`withdraw`**).
 
 For EVENT_JSON shapes and naming, see [`../src/events.rs`](../src/events.rs).
 

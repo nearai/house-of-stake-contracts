@@ -223,6 +223,17 @@ async fn sandbox_test_clock_fast_forwards_only_selected_subscription()
         .args_json(json!({ "subscription_id": subscription_id }))
         .await?
         .json()?;
+    let sub_a_timestamp_before: serde_json::Value = worker
+        .view(staking.id(), "test_get_subscription_timestamp")
+        .args_json(json!({ "subscription_id": subscription_id }))
+        .await?
+        .json()?;
+    assert!(
+        json_u64_field(&sub_a_timestamp_before).expect("subscription timestamp before")
+            >= json_u64_field(&sub_a_stored_before_clock["start_ns"])
+                .expect("stored sub_a start_ns"),
+        "unset subscription test clock should use a current block timestamp"
+    );
 
     let unauthorized = attacker
         .call(staking.id(), "test_fast_forward_subscription_to")
@@ -238,13 +249,19 @@ async fn sandbox_test_clock_fast_forwards_only_selected_subscription()
         "non-owner should not be allowed to modify a subscription test clock"
     );
 
-    fast_forward_subscription_for_product_to(
-        &buyer,
-        staking.id(),
-        &product_a,
-        apply_ns.saturating_add(1),
-    )
-    .await?;
+    let target_timestamp_ns = apply_ns.saturating_add(1);
+    fast_forward_subscription_for_product_to(&buyer, staking.id(), &product_a, target_timestamp_ns)
+        .await?;
+    let sub_a_timestamp_after: serde_json::Value = worker
+        .view(staking.id(), "test_get_subscription_timestamp")
+        .args_json(json!({ "subscription_id": subscription_id }))
+        .await?
+        .json()?;
+    assert_eq!(
+        json_u64_field(&sub_a_timestamp_after).expect("subscription timestamp after"),
+        target_timestamp_ns,
+        "subscription test clock getter should return the selected virtual timestamp"
+    );
 
     let sub_a_after: serde_json::Value = worker
         .view(staking.id(), "get_subscription_for_product")

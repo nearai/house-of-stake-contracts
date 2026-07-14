@@ -12,6 +12,7 @@ pub mod pause;
 pub mod payments;
 pub mod prices;
 pub mod products;
+pub mod stake;
 pub mod subscriptions;
 pub mod types;
 pub mod unlock;
@@ -51,13 +52,18 @@ enum StorageKeys {
     PurchasesByProduct,
     UserPurchaseCount,
     RevenueByValidator,
+    FarmPools,
+    FarmPositions,
+    FarmPositionProductsByAccount,
+    FarmAccounts,
+    UserFarmPositionCount,
 }
 
 #[derive(PanicOnDefault)]
 #[near(contract_state)]
 pub struct Contract {
     /// Protocol configuration: owner, guardians, pause-independent bounds (`min_lock_amount`,
-    /// lock duration range), epoch settle epochs, storage minimums, and per-lock storage stake.
+    /// lock duration range), epoch settle epochs, and storage economics.
     pub config: VConfig,
     /// When `true`, user-facing mutating methods reject until [`crate::pause::Contract::unpause`].
     pub paused: bool,
@@ -97,6 +103,16 @@ pub struct Contract {
     pub user_purchase_count: LookupMap<AccountId, u32>,
     /// Withdrawable direct-payment revenue aggregated by validator pool account.
     pub revenue_by_validator: LookupMap<ValidatorId, NearToken>,
+    /// Farm reward accumulator per Farm price id.
+    pub farm_pools: LookupMap<PriceId, VFarmPool>,
+    /// One farm position per `(account_id, product_id)`.
+    pub farm_positions: LookupMap<(AccountId, ProductId), VFarmPosition>,
+    /// Secondary index: farm owner account -> product ids with current or historical farm positions.
+    pub farm_position_products_by_account: LookupMap<AccountId, Vec<ProductId>>,
+    /// Monotonic count of farm positions created per account; multiplied by [`Config::per_farm_position_storage_stake`] for prepaid retained-position storage.
+    pub user_farm_position_count: LookupMap<AccountId, u32>,
+    /// Per-account rolled-up farm reward totals from closed positions.
+    pub farm_accounts: LookupMap<AccountId, VFarmAccount>,
     /// Secondary index: `(subscriber, product_id)` → `subscription_id` for at-most-one subscription per product per account.
     pub subscription_by_account_product: LookupMap<(AccountId, ProductId), SubscriptionId>,
     /// Secondary index: `subscriber` → owned subscription ids. Used for account-level listing and
@@ -137,6 +153,13 @@ impl Contract {
             purchases_by_product: LookupMap::new(StorageKeys::PurchasesByProduct),
             user_purchase_count: LookupMap::new(StorageKeys::UserPurchaseCount),
             revenue_by_validator: LookupMap::new(StorageKeys::RevenueByValidator),
+            farm_pools: LookupMap::new(StorageKeys::FarmPools),
+            farm_positions: LookupMap::new(StorageKeys::FarmPositions),
+            farm_position_products_by_account: LookupMap::new(
+                StorageKeys::FarmPositionProductsByAccount,
+            ),
+            user_farm_position_count: LookupMap::new(StorageKeys::UserFarmPositionCount),
+            farm_accounts: LookupMap::new(StorageKeys::FarmAccounts),
             subscription_by_account_product: LookupMap::new(
                 StorageKeys::SubscriptionByAccountProduct,
             ),

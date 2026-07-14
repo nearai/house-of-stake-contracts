@@ -224,6 +224,7 @@ fn recurring_lock_rejects_amount_above_price_max_amount() {
         1,
         Some(PriceMetadata {
             max_amount: Some(U128(NearToken::from_near(60).as_yoctonear())),
+            farm_reward_rate: None,
         }),
     );
     register_buyer(&mut c);
@@ -244,6 +245,7 @@ fn update_subscription_rejects_target_amount_above_price_max_amount() {
         1,
         Some(PriceMetadata {
             max_amount: Some(U128(NearToken::from_near(60).as_yoctonear())),
+            farm_reward_rate: None,
         }),
     );
     register_buyer(&mut c);

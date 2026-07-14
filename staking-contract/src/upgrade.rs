@@ -1,5 +1,6 @@
 use crate::*;
 use near_sdk::env;
+use near_sdk::store::{LookupMap, Vector};
 
 #[cfg(target_arch = "wasm32")]
 use near_sdk::{Gas, sys};
@@ -14,11 +15,81 @@ impl Contract {
     #[private]
     #[init(ignore_state)]
     pub fn migrate_state() -> Self {
-        env::state_read().unwrap()
+        let old: ContractV1_0_1 = env::state_read().unwrap();
+        old.into()
     }
 
     pub fn get_version(&self) -> String {
         env!("CARGO_PKG_VERSION").to_string()
+    }
+}
+
+#[allow(non_camel_case_types)]
+#[near(serializers = [borsh])]
+struct ContractV1_0_1 {
+    pub config: VConfig,
+    pub paused: bool,
+    pub validators: LookupMap<ValidatorId, VValidator>,
+    pub validator_ids: Vector<ValidatorId>,
+    pub product_ids: Vector<ProductId>,
+    pub products: LookupMap<ProductId, VProduct>,
+    pub prices: LookupMap<PriceId, VPrice>,
+    pub accounts: LookupMap<AccountId, VAccount>,
+    pub subscriptions: LookupMap<SubscriptionId, VSubscription>,
+    pub locks: LookupMap<LockId, VLock>,
+    pub user_validator_shares: LookupMap<(AccountId, ValidatorId), u128>,
+    pub user_pending_unstake: LookupMap<(AccountId, ValidatorId), Vec<PendingUnstakeTranche>>,
+    pub user_lock_count: LookupMap<AccountId, u32>,
+    pub purchases: LookupMap<PurchaseId, VPurchase>,
+    pub purchase_ids: Vector<PurchaseId>,
+    pub purchases_by_account: LookupMap<AccountId, Vec<PurchaseId>>,
+    pub purchases_by_product: LookupMap<ProductId, Vec<PurchaseId>>,
+    pub user_purchase_count: LookupMap<AccountId, u32>,
+    pub revenue_by_validator: LookupMap<ValidatorId, NearToken>,
+    pub subscription_by_account_product: LookupMap<(AccountId, ProductId), SubscriptionId>,
+    pub subscriptions_by_account: LookupMap<AccountId, Vec<SubscriptionId>>,
+    pub subscription_ids: Vector<SubscriptionId>,
+    pub pending_update_target_price_counts: LookupMap<PriceId, u32>,
+    pub pending_update_target_product_counts: LookupMap<ProductId, u32>,
+    pub id_nonce: u64,
+}
+
+impl From<ContractV1_0_1> for Contract {
+    fn from(old: ContractV1_0_1) -> Self {
+        Self {
+            config: Config::from(old.config).into(),
+            paused: old.paused,
+            validators: old.validators,
+            validator_ids: old.validator_ids,
+            product_ids: old.product_ids,
+            products: old.products,
+            prices: old.prices,
+            accounts: old.accounts,
+            subscriptions: old.subscriptions,
+            locks: old.locks,
+            user_validator_shares: old.user_validator_shares,
+            user_pending_unstake: old.user_pending_unstake,
+            user_lock_count: old.user_lock_count,
+            user_farm_position_count: LookupMap::new(StorageKeys::UserFarmPositionCount),
+            purchases: old.purchases,
+            purchase_ids: old.purchase_ids,
+            purchases_by_account: old.purchases_by_account,
+            purchases_by_product: old.purchases_by_product,
+            user_purchase_count: old.user_purchase_count,
+            revenue_by_validator: old.revenue_by_validator,
+            farm_pools: LookupMap::new(StorageKeys::FarmPools),
+            farm_positions: LookupMap::new(StorageKeys::FarmPositions),
+            farm_position_products_by_account: LookupMap::new(
+                StorageKeys::FarmPositionProductsByAccount,
+            ),
+            farm_accounts: LookupMap::new(StorageKeys::FarmAccounts),
+            subscription_by_account_product: old.subscription_by_account_product,
+            subscriptions_by_account: old.subscriptions_by_account,
+            subscription_ids: old.subscription_ids,
+            pending_update_target_price_counts: old.pending_update_target_price_counts,
+            pending_update_target_product_counts: old.pending_update_target_product_counts,
+            id_nonce: old.id_nonce,
+        }
     }
 }
 

@@ -371,6 +371,7 @@ pub async fn test_lockup_staking() -> Result<(), Box<dyn std::error::Error>> {
 
     let account_details = v.sandbox.view_account(&lockup_id).await?;
     let initial_balance = account_details.balance;
+    let staking_pool_balance_delta = NearToken::from_millinear(100);
 
     // Deposit and stake 50 NEAR
     let outcome = user
@@ -402,7 +403,7 @@ pub async fn test_lockup_staking() -> Result<(), Box<dyn std::error::Error>> {
         initial_balance
             .checked_sub(NearToken::from_near(50))
             .unwrap(),
-        NearToken::from_millinear(1),
+        staking_pool_balance_delta,
     );
 
     // Verify staked amount
@@ -647,7 +648,7 @@ pub async fn test_lockup_staking() -> Result<(), Box<dyn std::error::Error>> {
         initial_lockup_balance
             .checked_add(NearToken::from_near(25))
             .unwrap(),
-        NearToken::from_millinear(1),
+        staking_pool_balance_delta,
     );
 
     let initial_lockup_balance = account_details.balance;
@@ -694,7 +695,7 @@ pub async fn test_lockup_staking() -> Result<(), Box<dyn std::error::Error>> {
         initial_lockup_balance
             .checked_add(NearToken::from_near(35))
             .unwrap(),
-        NearToken::from_millinear(1),
+        staking_pool_balance_delta,
     );
 
     let initial_lockup_balance = account_details.balance;
@@ -823,7 +824,7 @@ pub async fn test_lockup_staking() -> Result<(), Box<dyn std::error::Error>> {
         initial_lockup_balance
             .checked_add(NearToken::from_near(40))
             .unwrap(),
-        NearToken::from_millinear(1),
+        staking_pool_balance_delta,
     );
 
     // Unselect the staking pool

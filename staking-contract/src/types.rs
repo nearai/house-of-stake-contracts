@@ -1,8 +1,9 @@
 //! Catalog, lifecycle, and versioned on-chain storage types.
 
 use crate::config::Config;
+use near_sdk::borsh::{BorshDeserialize, BorshSerialize, io};
 use near_sdk::json_types::{U64, U128};
-use near_sdk::{AccountId, NearToken, near};
+use near_sdk::{AccountId, NearToken, env, near};
 
 /// Stripe-style string IDs (generated in [`crate::ids`]).
 pub type ProductId = String;
@@ -43,6 +44,7 @@ impl PoolAccountView {
 pub enum PriceType {
     OneOff,
     Recurring,
+    Farm,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -252,6 +254,13 @@ pub enum LockStatus {
     Withdrawn,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
+pub enum FarmStatus {
+    Active,
+    Closed,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[near(serializers = [borsh, json])]
 pub enum OrderRef {
@@ -286,8 +295,26 @@ pub struct Product {
 #[derive(Clone)]
 #[near(serializers = [borsh, json])]
 pub struct PriceMetadata {
-    /// Optional inclusive upper bound for variable subscription stake amounts.
+    /// Optional inclusive upper bound for variable subscription stake amounts and active farm stake.
     pub max_amount: Option<U128>,
+    /// Farm-only reward rate. Unit: 24-decimal reward units per second per staked NEAR,
+    /// scaled by [`crate::stake::FARM_REWARD_RATE_DENOM`].
+    pub farm_reward_rate: Option<U128>,
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh])]
+struct PriceMetadataV0 {
+    max_amount: Option<U128>,
+}
+
+impl From<PriceMetadataV0> for PriceMetadata {
+    fn from(value: PriceMetadataV0) -> Self {
+        Self {
+            max_amount: value.max_amount,
+            farm_reward_rate: None,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -308,6 +335,40 @@ pub struct Price {
     pub metadata: Option<PriceMetadata>,
     pub status: CatalogStatus,
     pub usage_count: u64,
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh])]
+struct PriceV0 {
+    price_id: PriceId,
+    product_id: ProductId,
+    name: String,
+    description: String,
+    amount: U128,
+    price_type: PriceType,
+    billing_period: Option<BillingPeriod>,
+    lock_factor_near_months: U128,
+    metadata: Option<PriceMetadataV0>,
+    status: CatalogStatus,
+    usage_count: u64,
+}
+
+impl From<PriceV0> for Price {
+    fn from(value: PriceV0) -> Self {
+        Self {
+            price_id: value.price_id,
+            product_id: value.product_id,
+            name: value.name,
+            description: value.description,
+            amount: value.amount,
+            price_type: value.price_type,
+            billing_period: value.billing_period,
+            lock_factor_near_months: value.lock_factor_near_months,
+            metadata: value.metadata.map(Into::into),
+            status: value.status,
+            usage_count: value.usage_count,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -380,6 +441,106 @@ pub struct Purchase {
     pub created_ns: U64,
 }
 
+#[derive(Clone)]
+#[near(serializers = [borsh, json])]
+pub struct FarmPool {
+    /// Farm price that owns this accumulator.
+    pub price_id: PriceId,
+    /// Product for deriving the validator and product-level catalog constraints.
+    pub product_id: ProductId,
+    /// 24-decimal reward units emitted per second per staked NEAR.
+    pub reward_rate: U128,
+    /// Validator shares currently attributed to active farm positions for this price.
+    pub total_farm_shares: U128,
+    /// Cumulative reward units per farm share, scaled by `FARM_ACC_REWARD_PER_SHARE_DENOM`.
+    pub acc_reward_per_share: U128,
+    /// Last timestamp when this accumulator was settled.
+    pub last_reward_settle_ns: U64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
+pub struct FarmPosition {
+    /// Position owner.
+    pub account_id: AccountId,
+    /// Product with one current or historical farm position for this account.
+    pub product_id: ProductId,
+    /// Farm price whose accumulator this position follows.
+    pub price_id: PriceId,
+    /// Denormalized validator used by immutable historical position views.
+    pub validator_id: ValidatorId,
+    /// Validator shares currently active for this farm position.
+    pub shares: U128,
+    /// Position's share of `FarmPool.acc_reward_per_share` already accounted for.
+    pub reward_debt: U128,
+    /// Settled but not yet rolled up reward units for this position.
+    pub accrued_reward_units: U128,
+    /// Active positions earn rewards; closed positions remain for historical views.
+    pub status: FarmStatus,
+    /// Position creation or last reopen timestamp.
+    pub created_ns: U64,
+    /// Last stake, unstake, or reward-settlement timestamp.
+    pub updated_ns: U64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [json])]
+pub struct FarmPositionView {
+    /// Position owner.
+    pub account_id: AccountId,
+    /// Product with one current or historical farm position for this account.
+    pub product_id: ProductId,
+    /// Farm price whose accumulator this position follows.
+    pub price_id: PriceId,
+    /// Denormalized validator used by immutable historical position views.
+    pub validator_id: ValidatorId,
+    /// Validator shares currently active for this farm position.
+    pub shares: U128,
+    /// Active staked NEAR amount represented by `shares` at view time.
+    pub staked_near_amount: U128,
+    /// Position's share of `FarmPool.acc_reward_per_share` already accounted for.
+    pub reward_debt: U128,
+    /// Settled but not yet rolled up reward units for this position.
+    pub accrued_reward_units: U128,
+    /// Simulated pending rewards for this position, including settled-but-unrolled rewards.
+    pub pending_reward_units: U128,
+    /// Total position rewards not yet rolled into the farm account.
+    pub total_earned_reward_units: U128,
+    /// Active positions earn rewards; closed positions remain for historical views.
+    pub status: FarmStatus,
+    /// Position creation or last reopen timestamp.
+    pub created_ns: U64,
+    /// Last stake, unstake, or reward-settlement timestamp.
+    pub updated_ns: U64,
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh, json])]
+pub struct FarmAccount {
+    /// Account that owns the closed-position reward roll-up.
+    pub account_id: AccountId,
+    /// Closed-position reward roll-up already earned by this account.
+    pub accumulated_reward_units: U128,
+    /// Number of active farm positions with non-zero shares.
+    pub active_position_count: u32,
+    pub last_update_ns: U64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [json])]
+pub struct FarmAccountView {
+    /// Account that owns this farm reward roll-up.
+    pub account_id: AccountId,
+    /// Stored rewards from farm positions that have been fully closed.
+    pub accumulated_reward_units: U128,
+    /// Simulated pending rewards across currently active farm positions.
+    pub pending_reward_units: U128,
+    /// `accumulated_reward_units + pending_reward_units`.
+    pub total_earned_reward_units: U128,
+    /// Active farm positions with non-zero shares at view time.
+    pub active_positions: Vec<FarmPositionView>,
+}
+
 /// User-facing tail chained after [`Contract::promise_validator_per_epoch_settlement_then`]:
 /// either the full pre-user pipeline ran (balance sync → withdraw-if-ready →
 /// [`crate::epoch::Contract::try_epoch_stake_or_unstake`]), or the pool had **already** settled this NEAR epoch and
@@ -425,6 +586,19 @@ pub enum UserAction {
         target_amount: U128,
         subscription_id: SubscriptionId,
     },
+    CommitFarmStake {
+        validator_id: ValidatorId,
+        account_id: AccountId,
+        deposit: NearToken,
+        product_id: ProductId,
+        price_id: PriceId,
+    },
+    FarmUnstakeQueue {
+        validator_id: ValidatorId,
+        account_id: AccountId,
+        product_id: ProductId,
+        amount: Option<U128>,
+    },
 }
 
 impl UserAction {
@@ -435,7 +609,9 @@ impl UserAction {
             | Self::UnlockQueueUnstake { validator_id, .. }
             | Self::WithdrawUserTransfer { validator_id, .. }
             | Self::SettleOnly { validator_id }
-            | Self::SubscriptionUpdate { validator_id, .. } => validator_id,
+            | Self::SubscriptionUpdate { validator_id, .. }
+            | Self::CommitFarmStake { validator_id, .. }
+            | Self::FarmUnstakeQueue { validator_id, .. } => validator_id,
         }
     }
 
@@ -448,6 +624,11 @@ impl UserAction {
                 Some((buyer.clone(), *locked))
             }
             Self::SubscriptionUpdate { buyer, deposit, .. } => Some((buyer.clone(), *deposit)),
+            Self::CommitFarmStake {
+                account_id,
+                deposit,
+                ..
+            } => Some((account_id.clone(), *deposit)),
             _ => None,
         }
     }
@@ -465,20 +646,55 @@ impl UserAction {
 
 #[derive(Clone)]
 #[near(serializers = [borsh])]
+pub struct ConfigV0 {
+    pub owner_account_id: AccountId,
+    pub proposed_new_owner_account_id: Option<AccountId>,
+    pub guardians: Vec<AccountId>,
+    pub min_lock_duration_ns: U64,
+    pub max_lock_duration_ns: U64,
+    pub epoch_unstake_settle_epochs: u64,
+    pub min_storage_deposit: NearToken,
+    pub per_lock_storage_stake: NearToken,
+    pub per_purchase_storage_stake: NearToken,
+    pub min_lock_amount: NearToken,
+}
+
+impl From<ConfigV0> for Config {
+    fn from(value: ConfigV0) -> Self {
+        Self {
+            owner_account_id: value.owner_account_id,
+            proposed_new_owner_account_id: value.proposed_new_owner_account_id,
+            guardians: value.guardians,
+            min_lock_duration_ns: value.min_lock_duration_ns,
+            max_lock_duration_ns: value.max_lock_duration_ns,
+            epoch_unstake_settle_epochs: value.epoch_unstake_settle_epochs,
+            min_storage_deposit: value.min_storage_deposit,
+            per_lock_storage_stake: value.per_lock_storage_stake,
+            per_farm_position_storage_stake: NearToken::from_yoctonear(0),
+            per_purchase_storage_stake: value.per_purchase_storage_stake,
+            min_lock_amount: value.min_lock_amount,
+        }
+    }
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh])]
 pub enum VConfig {
-    V0(Config),
+    V0(ConfigV0),
+    V1(Config),
 }
 
 impl From<Config> for VConfig {
     fn from(value: Config) -> Self {
-        Self::V0(value)
+        Self::V1(value)
     }
 }
 
 impl From<VConfig> for Config {
     fn from(value: VConfig) -> Self {
         match value {
-            VConfig::V0(inner) => inner,
+            VConfig::V0(inner) => inner.into(),
+            VConfig::V1(inner) => inner,
         }
     }
 }
@@ -486,7 +702,8 @@ impl From<VConfig> for Config {
 impl AsRef<Config> for VConfig {
     fn as_ref(&self) -> &Config {
         match self {
-            VConfig::V0(c) => c,
+            VConfig::V0(_) => env::panic_str("ConfigV0 must be migrated before use"),
+            VConfig::V1(c) => c,
         }
     }
 }
@@ -494,7 +711,8 @@ impl AsRef<Config> for VConfig {
 impl AsMut<Config> for VConfig {
     fn as_mut(&mut self) -> &mut Config {
         match self {
-            VConfig::V0(c) => c,
+            VConfig::V0(_) => env::panic_str("ConfigV0 must be migrated before use"),
+            VConfig::V1(c) => c,
         }
     }
 }
@@ -540,14 +758,14 @@ impl From<VProduct> for Product {
 }
 
 #[derive(Clone)]
-#[near(serializers = [borsh])]
 pub enum VPrice {
     V0(Price),
+    V1(Price),
 }
 
 impl From<Price> for VPrice {
     fn from(value: Price) -> Self {
-        Self::V0(value)
+        Self::V1(value)
     }
 }
 
@@ -555,6 +773,48 @@ impl From<VPrice> for Price {
     fn from(value: VPrice) -> Self {
         match value {
             VPrice::V0(inner) => inner,
+            VPrice::V1(inner) => inner,
+        }
+    }
+}
+
+impl BorshSerialize for VPrice {
+    fn serialize<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        match self {
+            // Kept for compatibility with farm-upgrade records that were already written as
+            // variant 0 with the two-field PriceMetadata layout.
+            VPrice::V0(inner) => {
+                0u8.serialize(writer)?;
+                inner.serialize(writer)
+            }
+            VPrice::V1(inner) => {
+                1u8.serialize(writer)?;
+                inner.serialize(writer)
+            }
+        }
+    }
+}
+
+impl BorshDeserialize for VPrice {
+    fn deserialize_reader<R: io::Read>(reader: &mut R) -> io::Result<Self> {
+        let variant = u8::deserialize_reader(reader)?;
+        match variant {
+            0 => {
+                let mut payload = Vec::new();
+                reader.read_to_end(&mut payload)?;
+                match Price::try_from_slice(&payload) {
+                    Ok(price) => Ok(VPrice::V0(price)),
+                    Err(price_err) => match PriceV0::try_from_slice(&payload) {
+                        Ok(price_v0) => Ok(VPrice::V0(price_v0.into())),
+                        Err(_) => Err(price_err),
+                    },
+                }
+            }
+            1 => Ok(VPrice::V1(Price::deserialize_reader(reader)?)),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Unexpected VPrice variant: {variant}"),
+            )),
         }
     }
 }
@@ -625,6 +885,149 @@ pub enum VPurchase {
     V0(Purchase),
 }
 
+#[derive(Clone)]
+#[near(serializers = [borsh])]
+pub enum VFarmPool {
+    V0(FarmPool),
+}
+
+impl From<FarmPool> for VFarmPool {
+    fn from(value: FarmPool) -> Self {
+        Self::V0(value)
+    }
+}
+
+impl From<VFarmPool> for FarmPool {
+    fn from(value: VFarmPool) -> Self {
+        match value {
+            VFarmPool::V0(inner) => inner,
+        }
+    }
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh])]
+pub enum VFarmPosition {
+    V0(FarmPosition),
+}
+
+impl From<FarmPosition> for VFarmPosition {
+    fn from(value: FarmPosition) -> Self {
+        Self::V0(value)
+    }
+}
+
+impl From<VFarmPosition> for FarmPosition {
+    fn from(value: VFarmPosition) -> Self {
+        match value {
+            VFarmPosition::V0(inner) => inner,
+        }
+    }
+}
+
+#[derive(Clone)]
+#[near(serializers = [borsh])]
+pub enum VFarmAccount {
+    V0(FarmAccount),
+}
+
+impl From<FarmAccount> for VFarmAccount {
+    fn from(value: FarmAccount) -> Self {
+        Self::V0(value)
+    }
+}
+
+impl From<VFarmAccount> for FarmAccount {
+    fn from(value: VFarmAccount) -> Self {
+        match value {
+            VFarmAccount::V0(inner) => inner,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn price_v0_with_metadata() -> PriceV0 {
+        PriceV0 {
+            price_id: "price_v0".to_string(),
+            product_id: "product_v0".to_string(),
+            name: "Starter".to_string(),
+            description: "[1, 10] NEAR".to_string(),
+            amount: U128(1),
+            price_type: PriceType::Recurring,
+            billing_period: Some(BillingPeriod::Monthly),
+            lock_factor_near_months: U128(1),
+            metadata: Some(PriceMetadataV0 {
+                max_amount: Some(U128(10)),
+            }),
+            status: CatalogStatus::Active,
+            usage_count: 3,
+        }
+    }
+
+    fn farm_price() -> Price {
+        Price {
+            price_id: "price_farm".to_string(),
+            product_id: "product_farm".to_string(),
+            name: "Farm".to_string(),
+            description: "Farm price".to_string(),
+            amount: U128(1),
+            price_type: PriceType::Farm,
+            billing_period: None,
+            lock_factor_near_months: U128(0),
+            metadata: Some(PriceMetadata {
+                max_amount: Some(U128(100)),
+                farm_reward_rate: Some(U128(7)),
+            }),
+            status: CatalogStatus::Active,
+            usage_count: 1,
+        }
+    }
+
+    #[test]
+    fn vprice_reads_price_v0_metadata_as_farm_reward_none() {
+        let mut bytes = vec![0u8];
+        price_v0_with_metadata().serialize(&mut bytes).unwrap();
+
+        let price: Price = VPrice::try_from_slice(&bytes).unwrap().into();
+
+        assert_eq!(price.price_id, "price_v0");
+        assert_eq!(price.metadata.as_ref().unwrap().max_amount, Some(U128(10)));
+        assert_eq!(price.metadata.as_ref().unwrap().farm_reward_rate, None);
+    }
+
+    #[test]
+    fn vprice_reads_farm_upgrade_variant_zero_price_layout() {
+        let mut bytes = vec![0u8];
+        farm_price().serialize(&mut bytes).unwrap();
+
+        let price: Price = VPrice::try_from_slice(&bytes).unwrap().into();
+
+        assert_eq!(price.price_type, PriceType::Farm);
+        assert_eq!(
+            price.metadata.as_ref().unwrap().farm_reward_rate,
+            Some(U128(7))
+        );
+    }
+
+    #[test]
+    fn vprice_writes_new_prices_as_variant_one() {
+        let price = farm_price();
+        let mut bytes = Vec::new();
+        VPrice::from(price.clone()).serialize(&mut bytes).unwrap();
+
+        assert_eq!(bytes.first().copied(), Some(1));
+        let decoded: Price = VPrice::try_from_slice(&bytes).unwrap().into();
+        assert_eq!(decoded.price_id, price.price_id);
+        assert_eq!(
+            decoded.metadata.as_ref().unwrap().farm_reward_rate,
+            Some(U128(7))
+        );
+    }
+}
+
 impl From<Purchase> for VPurchase {
     fn from(value: Purchase) -> Self {
         Self::V0(value)
@@ -656,6 +1059,7 @@ mod versioned_tests {
             epoch_unstake_settle_epochs: 4,
             min_storage_deposit: NearToken::from_near(1),
             per_lock_storage_stake: NearToken::from_near(0),
+            per_farm_position_storage_stake: NearToken::from_near(0),
             per_purchase_storage_stake: NearToken::from_near(0),
             min_lock_amount: NearToken::from_near(1),
         };

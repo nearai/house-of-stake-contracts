@@ -5,7 +5,7 @@
 use crate::gas::callbacks;
 use crate::*;
 use near_sdk::ext_contract;
-use near_sdk::json_types::U128;
+use near_sdk::json_types::{U64, U128};
 use near_sdk::{AccountId, Promise, env, near, require};
 
 /// Retry id generation when a collision exists in [`Contract::prices`] (extremely unlikely).
@@ -38,8 +38,9 @@ pub trait ExtSelfPrices {
         &mut self,
         #[callback] pool_owner: AccountId,
         price_id: PriceId,
-        name: String,
-        description: String,
+        name: Option<String>,
+        description: Option<String>,
+        metadata: Option<PriceMetadata>,
         expected_caller: AccountId,
     );
     fn archive_price_after_get_owner(
@@ -98,13 +99,20 @@ impl Contract {
         })
     }
 
-    /// Update display fields only; `amount`, `price_type`, and billing metadata are fixed after create.
+    /// Update display fields and mutable metadata. Farm reward-rate changes are applied prospectively
+    /// by settling the farm pool before the rate is changed.
     #[payable]
-    pub fn edit_price(&mut self, price_id: PriceId, name: String, description: String) -> Promise {
+    pub fn edit_price(
+        &mut self,
+        price_id: PriceId,
+        name: Option<String>,
+        description: Option<String>,
+        metadata: Option<PriceMetadata>,
+    ) -> Promise {
         self.promise_catalog_admin_on_price(price_id, |expected_caller, price_id| {
             ext_self_prices::ext(env::current_account_id())
                 .with_static_gas(callbacks::ON_VALIDATOR_OWNER_CHECK)
-                .edit_price_after_get_owner(price_id, name, description, expected_caller)
+                .edit_price_after_get_owner(price_id, name, description, metadata, expected_caller)
         })
     }
 
@@ -160,11 +168,15 @@ impl Contract {
             product.status == CatalogStatus::Active,
             "This product is archived or inactive"
         );
-        if let Some(max_amount) = metadata.as_ref().and_then(|m| m.max_amount) {
-            require!(
-                max_amount.0 >= amount.0,
-                "Price max_amount must be greater than or equal to amount"
-            );
+        self.validate_price_fields(
+            price_type,
+            billing_period,
+            lock_factor_near_months,
+            amount,
+            metadata.as_ref(),
+        );
+        if price_type == PriceType::Farm {
+            self.require_no_active_farm_price_for_product(&product);
         }
 
         let price_id = next_unique_price_id(self);
@@ -177,11 +189,25 @@ impl Contract {
             price_type,
             billing_period,
             lock_factor_near_months,
-            metadata,
+            metadata: metadata.clone(),
             status: CatalogStatus::Active,
             usage_count: 0,
         };
         self.internal_set_price(price_id.clone(), price);
+        if price_type == PriceType::Farm {
+            let reward_rate = metadata
+                .and_then(|m| m.farm_reward_rate)
+                .expect("Farm price metadata must contain farm_reward_rate");
+            let pool = FarmPool {
+                price_id: price_id.clone(),
+                product_id: product_id.clone(),
+                reward_rate,
+                total_farm_shares: U128(0),
+                acc_reward_per_share: U128(0),
+                last_reward_settle_ns: U64(crate::utils::block_timestamp()),
+            };
+            self.internal_set_farm_pool(price_id.clone(), pool);
+        }
         product.price_ids.push(price_id.clone());
         self.internal_set_product(product_id, product);
         price_id
@@ -192,14 +218,62 @@ impl Contract {
         &mut self,
         #[callback] pool_owner: AccountId,
         price_id: PriceId,
-        name: String,
-        description: String,
+        name: Option<String>,
+        description: Option<String>,
+        metadata: Option<PriceMetadata>,
         expected_caller: AccountId,
     ) {
         self.assert_validator_owner(pool_owner, &expected_caller);
         let mut price = self.require_price(&price_id);
-        price.name = name;
-        price.description = description;
+
+        if let Some(name) = name {
+            price.name = name;
+        }
+        if let Some(description) = description {
+            price.description = description;
+        }
+
+        if let Some(metadata) = metadata {
+            match price.price_type {
+                PriceType::Farm => {
+                    if let Some(max_amount) = metadata.max_amount {
+                        require!(
+                            max_amount.0 >= price.amount.0,
+                            "Price max_amount must be greater than or equal to amount"
+                        );
+                    }
+                    let old_rate = price.metadata.as_ref().and_then(|m| m.farm_reward_rate);
+                    let new_rate = metadata
+                        .farm_reward_rate
+                        .unwrap_or_else(|| old_rate.expect("Farm price must have a reward rate"));
+                    if Some(new_rate) != old_rate {
+                        self.settle_farm_pool(&price_id);
+                        let mut pool = self.require_farm_pool(&price_id);
+                        pool.reward_rate = new_rate;
+                        self.internal_set_farm_pool(price_id.clone(), pool);
+                        crate::events::log_farm_reward_rate_update(&price_id, new_rate.0);
+                    }
+                    price.metadata = Some(PriceMetadata {
+                        max_amount: metadata.max_amount,
+                        farm_reward_rate: Some(new_rate),
+                    });
+                }
+                PriceType::OneOff | PriceType::Recurring => {
+                    require!(
+                        metadata.farm_reward_rate.is_none(),
+                        "farm_reward_rate is only valid for Farm prices"
+                    );
+                    if let Some(max_amount) = metadata.max_amount {
+                        require!(
+                            max_amount.0 >= price.amount.0,
+                            "Price max_amount must be greater than or equal to amount"
+                        );
+                    }
+                    price.metadata = Some(metadata);
+                }
+            }
+        }
+
         self.internal_set_price(price_id, price);
     }
 
@@ -213,6 +287,13 @@ impl Contract {
         self.assert_validator_owner(pool_owner, &expected_caller);
         let mut price = self.require_price(&price_id);
         self.assert_no_pending_update_references_price(&price_id);
+        if price.price_type == PriceType::Farm {
+            let pool = self.require_farm_pool(&price_id);
+            require!(
+                pool.total_farm_shares.0 == 0,
+                "Cannot archive a farm price while it has active stake"
+            );
+        }
         let product_id = price.product_id.clone();
         price.status = CatalogStatus::Archived;
         self.internal_set_price(price_id.clone(), price);
@@ -233,6 +314,15 @@ impl Contract {
             price.usage_count == 0,
             "Cannot delete this price while it is in use"
         );
+        if price.price_type == PriceType::Farm {
+            if let Some(pool) = self.internal_get_farm_pool(&price_id) {
+                require!(
+                    pool.total_farm_shares.0 == 0,
+                    "Cannot delete a farm price while it has active stake"
+                );
+                self.farm_pools.remove(&price_id);
+            }
+        }
         self.assert_no_pending_update_references_price(&price_id);
         let product_id = price.product_id.clone();
         let mut product = self.require_product(&price.product_id);
@@ -255,6 +345,10 @@ impl Contract {
             price.status == CatalogStatus::Archived,
             "Price is not archived"
         );
+        if price.price_type == PriceType::Farm {
+            let product = self.require_product(&price.product_id);
+            self.require_no_active_farm_price_for_product(&product);
+        }
         price.status = CatalogStatus::Active;
         self.internal_set_price(price_id, price);
     }
@@ -278,6 +372,63 @@ impl Contract {
     pub(crate) fn require_price(&self, price_id: &PriceId) -> Price {
         self.internal_get_price(price_id)
             .unwrap_or_else(|| env::panic_str("Price not found in the catalog"))
+    }
+
+    fn validate_price_fields(
+        &self,
+        price_type: PriceType,
+        billing_period: Option<BillingPeriod>,
+        lock_factor_near_months: U128,
+        amount: U128,
+        metadata: Option<&PriceMetadata>,
+    ) {
+        if let Some(max_amount) = metadata.and_then(|m| m.max_amount) {
+            require!(
+                max_amount.0 >= amount.0,
+                "Price max_amount must be greater than or equal to amount"
+            );
+        }
+        match price_type {
+            PriceType::OneOff => {
+                require!(
+                    billing_period.is_none(),
+                    "One-off price must not set billing_period"
+                );
+                require!(
+                    metadata.and_then(|m| m.farm_reward_rate).is_none(),
+                    "farm_reward_rate is only valid for Farm prices"
+                );
+            }
+            PriceType::Recurring => {
+                require!(
+                    billing_period == Some(BillingPeriod::Monthly),
+                    "Recurring price must use monthly billing_period"
+                );
+                require!(
+                    metadata.and_then(|m| m.farm_reward_rate).is_none(),
+                    "farm_reward_rate is only valid for Farm prices"
+                );
+            }
+            PriceType::Farm => {
+                require!(
+                    billing_period.is_none(),
+                    "Farm price must not set billing_period"
+                );
+                require!(
+                    lock_factor_near_months.0 == 0,
+                    "Farm price lock_factor_near_months must be zero"
+                );
+                // TODO: split farm minimum stake from `min_lock_amount` once launch values are finalized.
+                require!(
+                    amount.0 >= self.internal_get_config().min_lock_amount.as_yoctonear(),
+                    "Farm price amount is below min_lock_amount"
+                );
+                require!(
+                    metadata.and_then(|m| m.farm_reward_rate).is_some(),
+                    "Farm price requires farm_reward_rate"
+                );
+            }
+        }
     }
 
     pub(crate) fn require_price_and_product(&self, price_id: &PriceId) -> (Price, Product) {

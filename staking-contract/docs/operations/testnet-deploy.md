@@ -47,6 +47,7 @@ The default config is testnet-friendly:
 - `epoch_unstake_settle_epochs=1`
 - `min_storage_deposit=0.01 NEAR`
 - `per_lock_storage_stake=0`
+- `per_farm_position_storage_stake=0`
 - `per_purchase_storage_stake=0`
 - `min_lock_amount=1 NEAR`
 
@@ -79,6 +80,30 @@ ACTION=upgrade \
 OWNER_ACCOUNT_ID="$STAKING_ACCOUNT_ID" \
 BUILD_WASM=1 \
 ./scripts/deploy_testnet_staking_contract.sh "$STAKING_ACCOUNT_ID"
+```
+
+## Staking Farm Upgrade Script
+
+Use the focused farm upgrade script when you only want to build the latest
+staking contract WASM and call the owner-gated `upgrade()` method on the shared
+testnet contract.
+
+Preview without sending a transaction:
+
+```bash
+./scripts/upgrade_testnet_staking_farm.sh
+```
+
+Run the farm upgrade:
+
+```bash
+EXECUTE=1 ./scripts/upgrade_testnet_staking_farm.sh
+```
+
+Run staking contract tests first:
+
+```bash
+RUN_TESTS=1 EXECUTE=1 ./scripts/upgrade_testnet_staking_farm.sh
 ```
 
 ## Validators And Catalog

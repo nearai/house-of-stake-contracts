@@ -1,6 +1,6 @@
 //! `EVENT_JSON` logs for indexers (NEP-297-style payload; standard `stake.dao`).
 
-use crate::ValidatorId;
+use crate::{PriceId, ProductId, ValidatorId};
 use near_sdk::{AccountId, log};
 
 fn emit(event: &str, data: serde_json::Value) {
@@ -154,6 +154,60 @@ pub fn log_validator_withdraw_in(amount_yocto: u128, validator_id: &ValidatorId)
         serde_json::json!({
             "validator_id": validator_id.to_string(),
             "amount_yocto": amount_yocto.to_string(),
+        }),
+    );
+}
+
+pub fn log_farm_stake(
+    account: &AccountId,
+    product_id: &ProductId,
+    price_id: &PriceId,
+    validator_id: &ValidatorId,
+    amount_yocto: u128,
+    shares: u128,
+) {
+    emit(
+        "farm_stake",
+        serde_json::json!({
+            "account_id": account.to_string(),
+            "product_id": product_id,
+            "price_id": price_id,
+            "validator_id": validator_id.to_string(),
+            "amount_yocto": amount_yocto.to_string(),
+            "shares": shares.to_string(),
+        }),
+    );
+}
+
+pub fn log_farm_unstake(
+    account: &AccountId,
+    product_id: &ProductId,
+    price_id: &PriceId,
+    validator_id: &ValidatorId,
+    amount_yocto: u128,
+    shares_removed: u128,
+    remaining_shares: u128,
+) {
+    emit(
+        "farm_unstake",
+        serde_json::json!({
+            "account_id": account.to_string(),
+            "product_id": product_id,
+            "price_id": price_id,
+            "validator_id": validator_id.to_string(),
+            "amount_yocto": amount_yocto.to_string(),
+            "shares_removed": shares_removed.to_string(),
+            "remaining_shares": remaining_shares.to_string(),
+        }),
+    );
+}
+
+pub fn log_farm_reward_rate_update(price_id: &PriceId, reward_rate: u128) {
+    emit(
+        "farm_reward_rate_update",
+        serde_json::json!({
+            "price_id": price_id,
+            "reward_rate": reward_rate.to_string(),
         }),
     );
 }
