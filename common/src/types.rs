@@ -26,7 +26,7 @@ pub type Version = u64;
 
 /// Represents balance of NEAR and veNEAR tokens. NEAR tokens grow over time, while veNEAR tokens
 /// do not.
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[near(serializers=[borsh, json])]
 pub struct VenearBalance {
     /// The balance in NEAR tokens. This balance doesn't grow over time.
@@ -122,7 +122,7 @@ impl SubAssign<Self> for VenearBalance {
 /// `pooled_add`/`pooled_sub` (global totals) fold the sub-milliNEAR near remainder into
 /// `extra_venear_balance` to conserve the total; `pooled_add_delegation`/`pooled_sub_delegation`
 /// credit the exact `delegation_contribution` instead, leaving the remainder with the owner.
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[near(serializers=[borsh, json])]
 pub struct PooledVenearBalance(VenearBalance);
 

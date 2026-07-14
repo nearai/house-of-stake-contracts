@@ -4,10 +4,10 @@ use crate::*;
 use common::events;
 use common::lockup_update::{LockupUpdateV1, VLockupUpdate};
 use common::{near_add, near_sub};
-use near_sdk::json_types::U64;
-use near_sdk::{Gas, IntoStorageKey, Promise, env, is_promise_success};
 #[cfg(target_arch = "wasm32")]
 use near_sdk::json_types::Base58CryptoHash;
+use near_sdk::json_types::U64;
+use near_sdk::{Gas, IntoStorageKey, Promise, env, is_promise_success};
 
 const LOCKUP_DEPLOY_MIN_GAS: Gas = Gas::from_tgas(20);
 const ON_LOCKUP_DEPLOYED: Gas = Gas::from_tgas(15);
@@ -401,7 +401,7 @@ mod tests {
         apply_lockup_update(
             &mut contract,
             &caller,
-            NearToken::from_millinear(100_500),
+            NearToken::from_millinear(100_500), // 100.5 NEAR
             30 * DAY_NS,
             2,
         );

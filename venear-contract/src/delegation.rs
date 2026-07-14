@@ -106,7 +106,7 @@ impl Contract {
 mod tests {
     use super::*;
     use crate::test_utils::{apply_lockup_update, entry, fresh_contract, set_ctx};
-    use common::{near_add, Bps};
+    use common::{Bps, near_add};
 
     /// Register `caller` with 1 NEAR and each delegate with zero, so set_delegations can scale onto them.
     fn registered_contract(caller: &AccountId, delegates: &[&str]) -> Contract {
