@@ -1193,6 +1193,12 @@ impl Contract {
     ) -> Option<Subscription> {
         self.internal_get_subscription(&subscription_id)
     }
+
+    /// Test-only view: read the timestamp used to project one subscription's current billing window.
+    pub fn test_get_subscription_timestamp(&self, subscription_id: SubscriptionId) -> U64 {
+        let _ = self.require_subscription_by_id(&subscription_id);
+        U64(self.subscription_now(&subscription_id))
+    }
 }
 
 #[cfg(feature = "test")]
