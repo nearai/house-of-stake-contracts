@@ -40,9 +40,16 @@ async fn fetch_accounts(
     Ok(accounts)
 }
 
-/// Voting power under the deployed v1.1.0 formula.
+/// Voting power under the deployed v1.1.0 formula, which scaled the owner's balance by the
+/// aggregate delegated bps instead of subtracting each delegation's exact contribution.
 fn legacy_voting_power(account: &VenearAccount) -> NearToken {
-    let self_bps = Bps::new(10_000_u16.saturating_sub(account.delegated_bps()));
+    let delegated_bps: u32 = account
+        .delegations
+        .iter()
+        .map(|delegation| u32::from(delegation.bps))
+        .sum();
+    let delegated_bps = u16::try_from(delegated_bps).expect("delegated bps must fit into u16");
+    let self_bps = Bps::new(10_000_u16.saturating_sub(delegated_bps));
     let retained = near_add(
         self_bps * account.balance.near_balance,
         self_bps * account.balance.extra_venear_balance,

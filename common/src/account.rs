@@ -89,17 +89,6 @@ impl From<VAccount> for Account {
 }
 
 impl Account {
-    /// Sum of `bps` across all delegation entries. Always `<= 10_000` for well-formed accounts
-    /// (enforced by `validate_delegations` at write time).
-    pub fn delegated_bps(&self) -> u16 {
-        self.delegations
-            .iter()
-            .map(|delegation| u32::from(delegation.bps))
-            .sum::<u32>()
-            .try_into()
-            .expect("delegation bps sum must fit into u16")
-    }
-
     /// Returns veNEAR balance of the account at the given timestamp without modifications.
     pub fn total_balance(
         &self,
@@ -224,44 +213,5 @@ mod tests {
         assert_eq!(account.delegations.len(), 2);
         assert_eq!(account.delegations[0].bps, Bps::new(2_500));
         assert_eq!(account.delegations[1].bps, Bps::new(7_500));
-    }
-
-    #[test]
-    fn delegated_bps_empty_is_zero() {
-        assert_eq!(sample_account(vec![]).delegated_bps(), 0);
-    }
-
-    #[test]
-    fn delegated_bps_sums_partial_entries() {
-        let account = sample_account(vec![
-            DelegationEntry {
-                account_id: account_id("a.near"),
-                bps: Bps::new(1_234),
-            },
-            DelegationEntry {
-                account_id: account_id("b.near"),
-                bps: Bps::new(2_000),
-            },
-            DelegationEntry {
-                account_id: account_id("c.near"),
-                bps: Bps::new(766),
-            },
-        ]);
-        assert_eq!(account.delegated_bps(), 4_000);
-    }
-
-    #[test]
-    fn delegated_bps_full_allocation() {
-        let account = sample_account(vec![
-            DelegationEntry {
-                account_id: account_id("a.near"),
-                bps: Bps::new(6_000),
-            },
-            DelegationEntry {
-                account_id: account_id("b.near"),
-                bps: Bps::new(4_000),
-            },
-        ]);
-        assert_eq!(account.delegated_bps(), 10_000);
     }
 }
