@@ -45,21 +45,12 @@ impl Bps {
         }
     }
 
-    pub const fn as_u16(self) -> u16 {
-        self.0
-    }
-
     pub const fn is_zero(self) -> bool {
         self.0 == 0
     }
 
     pub const fn is_full(self) -> bool {
         self.0 == Self::MAX_RAW
-    }
-
-    /// `Bps::FULL - self`. Always in range because `self.0 <= 10_000`.
-    pub const fn complement(self) -> Self {
-        Self(Self::MAX_RAW - self.0)
     }
 }
 
@@ -119,9 +110,9 @@ mod tests {
 
     #[test]
     fn try_new_accepts_in_range() {
-        assert_eq!(Bps::try_new(0).unwrap().as_u16(), 0);
-        assert_eq!(Bps::try_new(3_500).unwrap().as_u16(), 3_500);
-        assert_eq!(Bps::try_new(10_000).unwrap().as_u16(), 10_000);
+        assert_eq!(u16::from(Bps::try_new(0).unwrap()), 0);
+        assert_eq!(u16::from(Bps::try_new(3_500).unwrap()), 3_500);
+        assert_eq!(u16::from(Bps::try_new(10_000).unwrap()), 10_000);
     }
 
     #[test]
@@ -140,9 +131,8 @@ mod tests {
     fn const_constructors() {
         assert!(Bps::ZERO.is_zero());
         assert!(Bps::FULL.is_full());
-        assert_eq!(Bps::FULL.complement(), Bps::ZERO);
-        assert_eq!(Bps::ZERO.complement(), Bps::FULL);
-        assert_eq!(Bps::new(2_500).complement(), Bps::new(7_500));
+        assert_eq!(u16::from(Bps::ZERO), 0);
+        assert_eq!(u16::from(Bps::FULL), Bps::MAX_RAW);
     }
 
     #[test]
