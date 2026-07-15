@@ -149,7 +149,7 @@ impl VoteStats {
 /// Otherwise, starts on the next Monday 00:00 CET (fixed UTC+1) strictly after `after_ns`.
 pub fn next_voting_start_ns(after_ns: u64) -> u64 {
     if cfg!(feature = "sandbox") {
-        after_ns + 120 * 1_000_000_000
+        after_ns + 5 * 1_000_000_000
     } else {
         // CET = UTC+1. Compute the boundary in CET-shifted coords, then shift back.
         const CET_OFFSET_NS: u64 = 3600 * 1_000_000_000;

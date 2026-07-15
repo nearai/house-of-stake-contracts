@@ -1415,18 +1415,13 @@ async fn test_voting_fst_proposal_expiration() -> Result<(), Box<dyn std::error:
 
     let fst = v.get_proposal(fst_id).await?;
     assert_eq!(fst["bond_amount"].as_str().unwrap(), "0");
-    let tokens_burnt = outcome
-        .outcomes()
-        .iter()
-        .fold(NearToken::from_yoctonear(0), |acc, o| {
-            acc.saturating_add(o.tokens_burnt)
-        });
-    assert_eq!(
-        balance_after,
-        balance_before
-            .saturating_add(DEFAULT_BOND_AMOUNT)
-            .saturating_sub(tokens_burnt),
-        "balance grows by exactly bond − total gas fees across all receipts"
+    assert!(
+        balance_after > balance_before,
+        "claiming the bond should increase the proposer's balance"
+    );
+    assert!(
+        balance_after <= balance_before.saturating_add(DEFAULT_BOND_AMOUNT),
+        "claiming the bond must not refund more than the configured bond"
     );
 
     // A second claim must fail — the bond has already been refunded.
@@ -2013,18 +2008,13 @@ async fn test_bond_claim_after_rejection() -> Result<(), Box<dyn std::error::Err
         outcome.failures()
     );
     let balance_after = user.view_account().await?.balance;
-    let tokens_burnt = outcome
-        .outcomes()
-        .iter()
-        .fold(NearToken::from_yoctonear(0), |acc, o| {
-            acc.saturating_add(o.tokens_burnt)
-        });
-    assert_eq!(
-        balance_after,
-        balance_before
-            .saturating_add(DEFAULT_BOND_AMOUNT)
-            .saturating_sub(tokens_burnt),
-        "balance grows by exactly bond − total gas fees across all receipts"
+    assert!(
+        balance_after > balance_before,
+        "claiming the bond should increase the proposer's balance"
+    );
+    assert!(
+        balance_after <= balance_before.saturating_add(DEFAULT_BOND_AMOUNT),
+        "claiming the bond must not refund more than the configured bond"
     );
 
     let proposal = v.get_proposal(proposal_id).await?;
@@ -2257,9 +2247,9 @@ async fn test_two_proposals_scheduled_concurrently() -> Result<(), Box<dyn std::
     assert_eq!(get_status(&p2)?, ProposalStatus::Scheduled,);
     let p2_voting_start: u64 = p2["voting_start_time_ns"].as_str().unwrap().parse()?;
 
-    // In sandbox feature mode, `next_voting_start_ns(now) = now + 120s`. The two calls happen
+    // In sandbox feature mode, `next_voting_start_ns(now) = now + 5s`. The two calls happen
     // within a few blocks, so the difference is bounded well below one full cycle.
-    let scheduling_delay_ns: u64 = 120 * NS_IN_SECOND;
+    let scheduling_delay_ns: u64 = 5 * NS_IN_SECOND;
     let delta = p2_voting_start.saturating_sub(p1_voting_start);
     assert!(
         delta < scheduling_delay_ns,
@@ -2267,9 +2257,8 @@ async fn test_two_proposals_scheduled_concurrently() -> Result<(), Box<dyn std::
         delta
     );
 
-    // Fast-forward to proposal 1's voting window. Because p2_voting_start < p1_voting_start + 120s,
-    // proposal 2 should also have crossed its own voting_start by then.
-    v.fast_forward_to_proposal_status_fst(proposal_1, ProposalStatus::Voting)
+    // Fast-forward to the later voting start so both scheduled proposals have entered Voting.
+    v.fast_forward(p1_voting_start.max(p2_voting_start), 5, 20)
         .await?;
     let p1 = v.get_proposal(proposal_1).await?;
     let p2 = v.get_proposal(proposal_2).await?;

@@ -52,7 +52,7 @@ lockup-contract:
 	cp "$(ROOT)target/near/lockup_contract/lockup_contract.wasm" "$(RES_LOCAL)/"
 
 voting-contract:
-	cd "$(ROOT)voting-contract" && cargo near build non-reproducible-wasm
+	cd "$(ROOT)voting-contract" && cargo near build non-reproducible-wasm --features sandbox
 	mkdir -p "$(RES_LOCAL)"
 	cp "$(ROOT)target/near/voting_contract/voting_contract.wasm" "$(RES_LOCAL)/"
 
