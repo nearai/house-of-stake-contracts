@@ -463,9 +463,9 @@ pub async fn test_lockup_staking() -> Result<(), Box<dyn std::error::Error>> {
     assert_almost_eq(
         user_account_details.balance,
         initial_user_balance
-            .checked_add(NearToken::from_millinear(5020))
+            .checked_add(NearToken::from_near(5))
             .unwrap(),
-        NearToken::from_millinear(1),
+        NearToken::from_millinear(250),
     );
 
     let lockup_account_details = v.sandbox.view_account(&lockup_id).await?;
