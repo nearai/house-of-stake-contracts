@@ -4,14 +4,14 @@
 # staking-contract.
 #
 # Preview:
-#   FARM_REWARD_RATE=3858024691358024 ./scripts/setup_testnet_near_ai_cloud_farm.sh
+#   FARM_REWARD_RATE=3802570537683474 ./scripts/setup_testnet_near_ai_cloud_farm.sh
 #
 # Or derive FARM_REWARD_RATE from APY and price assumptions:
-#   TARGET_APY_BPS=500 NEAR_PRICE_USD_CENTS=200 CREDIT_PRICE_USD_CENTS=100 \
+#   TARGET_APY_BPS=450 NEAR_PRICE_USD_CENTS=200 CREDIT_PRICE_USD_CENTS=100 DISCOUNT_BPS=7500 \
 #     ./scripts/setup_testnet_near_ai_cloud_farm.sh
 #
 # Execute:
-#   FARM_REWARD_RATE=3858024691358024 EXECUTE=1 ./scripts/setup_testnet_near_ai_cloud_farm.sh
+#   FARM_REWARD_RATE=3802570537683474 EXECUTE=1 ./scripts/setup_testnet_near_ai_cloud_farm.sh
 #
 # Optional environment:
 #   STAKING_ACCOUNT_ID=hos-e2e-0601144939.testnet
@@ -26,14 +26,15 @@
 #   MIN_FARM_STAKE_YOCTO=1000000000000000000000000
 #   MAX_FARM_STAKE_YOCTO=10000000000000000000000000
 #   FARM_REWARD_RATE=<integer reward units per second per staked NEAR>
-#   TARGET_APY_BPS=500                  # 5.00%; used only when FARM_REWARD_RATE is unset
+#   TARGET_APY_BPS=450                  # 4.50%; used only when FARM_REWARD_RATE is unset
 #   NEAR_PRICE_USD_CENTS=200            # $2.00; used only with TARGET_APY_BPS
 #   CREDIT_PRICE_USD_CENTS=100          # $1.00; used only with TARGET_APY_BPS
-#   REWARD_SECONDS_PER_YEAR=31536000    # 365 days
+#   DISCOUNT_BPS=7500                  # 75%; used only with TARGET_APY_BPS
+#   REWARD_SECONDS_PER_YEAR=31557600    # 365.25 days
 #   PRODUCT_SCAN_LIMIT=200
 #
 # Reward-rate formula:
-#   credits_per_near_year = (TARGET_APY_BPS / 10000) * NEAR_PRICE_USD / CREDIT_PRICE_USD
+#   credits_per_near_year = (TARGET_APY_BPS / 10000) * NEAR_PRICE_USD / CREDIT_PRICE_USD / (DISCOUNT_BPS / 10000)
 #   FARM_REWARD_RATE = floor(credits_per_near_year * 1e24 / REWARD_SECONDS_PER_YEAR)
 set -euo pipefail
 
@@ -55,7 +56,8 @@ cd "$REPO_ROOT"
 : "${TARGET_APY_BPS:=}"
 : "${NEAR_PRICE_USD_CENTS:=}"
 : "${CREDIT_PRICE_USD_CENTS:=}"
-: "${REWARD_SECONDS_PER_YEAR:=31536000}"
+: "${DISCOUNT_BPS:=}"
+: "${REWARD_SECONDS_PER_YEAR:=31557600}"
 : "${PRODUCT_SCAN_LIMIT:=200}"
 : "${EXECUTE:=0}"
 
@@ -77,34 +79,38 @@ require_command jq
 calculate_farm_reward_rate() {
   require_command python3
 
-  python3 - "$TARGET_APY_BPS" "$NEAR_PRICE_USD_CENTS" "$CREDIT_PRICE_USD_CENTS" "$REWARD_SECONDS_PER_YEAR" <<'PY'
+  python3 - "$TARGET_APY_BPS" "$NEAR_PRICE_USD_CENTS" "$CREDIT_PRICE_USD_CENTS" "$DISCOUNT_BPS" "$REWARD_SECONDS_PER_YEAR" <<'PY'
 import sys
 
-apy_bps, near_cents, credit_cents, seconds_per_year = map(int, sys.argv[1:])
+apy_bps, near_cents, credit_cents, discount_bps, seconds_per_year = map(int, sys.argv[1:])
 if apy_bps <= 0:
     raise SystemExit("TARGET_APY_BPS must be positive")
 if near_cents <= 0:
     raise SystemExit("NEAR_PRICE_USD_CENTS must be positive")
 if credit_cents <= 0:
     raise SystemExit("CREDIT_PRICE_USD_CENTS must be positive")
+if discount_bps <= 0:
+    raise SystemExit("DISCOUNT_BPS must be positive")
 if seconds_per_year <= 0:
     raise SystemExit("REWARD_SECONDS_PER_YEAR must be positive")
 
-rate = (apy_bps * near_cents * 10**24) // (10_000 * credit_cents * seconds_per_year)
+rate = (apy_bps * near_cents * 10_000 * 10**24) // (
+    10_000 * credit_cents * discount_bps * seconds_per_year
+)
 print(rate)
 PY
 }
 
 if [[ -z "${FARM_REWARD_RATE:-}" ]]; then
-  if [[ -n "$TARGET_APY_BPS" || -n "$NEAR_PRICE_USD_CENTS" || -n "$CREDIT_PRICE_USD_CENTS" ]]; then
-    if [[ -z "$TARGET_APY_BPS" || -z "$NEAR_PRICE_USD_CENTS" || -z "$CREDIT_PRICE_USD_CENTS" ]]; then
-      echo "TARGET_APY_BPS, NEAR_PRICE_USD_CENTS, and CREDIT_PRICE_USD_CENTS must all be set to derive FARM_REWARD_RATE." >&2
+  if [[ -n "$TARGET_APY_BPS" || -n "$NEAR_PRICE_USD_CENTS" || -n "$CREDIT_PRICE_USD_CENTS" || -n "$DISCOUNT_BPS" ]]; then
+    if [[ -z "$TARGET_APY_BPS" || -z "$NEAR_PRICE_USD_CENTS" || -z "$CREDIT_PRICE_USD_CENTS" || -z "$DISCOUNT_BPS" ]]; then
+      echo "TARGET_APY_BPS, NEAR_PRICE_USD_CENTS, CREDIT_PRICE_USD_CENTS, and DISCOUNT_BPS must all be set to derive FARM_REWARD_RATE." >&2
       exit 1
     fi
     FARM_REWARD_RATE="$(calculate_farm_reward_rate)"
-    FARM_REWARD_RATE_SOURCE="derived from TARGET_APY_BPS=$TARGET_APY_BPS, NEAR_PRICE_USD_CENTS=$NEAR_PRICE_USD_CENTS, CREDIT_PRICE_USD_CENTS=$CREDIT_PRICE_USD_CENTS, REWARD_SECONDS_PER_YEAR=$REWARD_SECONDS_PER_YEAR"
+    FARM_REWARD_RATE_SOURCE="derived from TARGET_APY_BPS=$TARGET_APY_BPS, NEAR_PRICE_USD_CENTS=$NEAR_PRICE_USD_CENTS, CREDIT_PRICE_USD_CENTS=$CREDIT_PRICE_USD_CENTS, DISCOUNT_BPS=$DISCOUNT_BPS, REWARD_SECONDS_PER_YEAR=$REWARD_SECONDS_PER_YEAR"
   else
-    echo "FARM_REWARD_RATE is required, or derive it with TARGET_APY_BPS, NEAR_PRICE_USD_CENTS, and CREDIT_PRICE_USD_CENTS." >&2
+    echo "FARM_REWARD_RATE is required, or derive it with TARGET_APY_BPS, NEAR_PRICE_USD_CENTS, CREDIT_PRICE_USD_CENTS, and DISCOUNT_BPS." >&2
     echo "Unit: 24-decimal reward units per second per staked NEAR." >&2
     exit 1
   fi
