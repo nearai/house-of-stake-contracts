@@ -20,9 +20,14 @@ popd
 cp target/near/lockup_contract/lockup_contract.wasm res/local/
 
 pushd voting-contract
-cargo near build non-reproducible-wasm --features sandbox
+cargo near build non-reproducible-wasm
 popd
 cp target/near/voting_contract/voting_contract.wasm res/local/
+
+pushd voting-contract
+cargo near build non-reproducible-wasm --features sandbox
+popd
+cp target/near/voting_contract/voting_contract.wasm res/local/voting_contract_sandbox.wasm
 
 pushd staking-contract
 cargo near build non-reproducible-wasm

@@ -145,7 +145,7 @@ impl VoteStats {
     }
 }
 
-/// Returns the next voting start time. In sandbox test mode, starts after 120 seconds.
+/// Returns the next voting start time. In sandbox test mode, starts after 5 seconds.
 /// Otherwise, starts on the next Monday 00:00 CET (fixed UTC+1) strictly after `after_ns`.
 pub fn next_voting_start_ns(after_ns: u64) -> u64 {
     if cfg!(feature = "sandbox") {

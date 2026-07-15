@@ -1412,12 +1412,16 @@ async fn test_voting_fst_proposal_expiration() -> Result<(), Box<dyn std::error:
         outcome.failures()
     );
     let balance_after = user_a.view_account().await?.balance;
+    let net_refund = balance_after.saturating_sub(balance_before);
+    let min_expected_refund = DEFAULT_BOND_AMOUNT.saturating_sub(NearToken::from_millinear(5));
 
     let fst = v.get_proposal(fst_id).await?;
     assert_eq!(fst["bond_amount"].as_str().unwrap(), "0");
     assert!(
-        balance_after > balance_before,
-        "claiming the bond should increase the proposer's balance"
+        net_refund >= min_expected_refund,
+        "claiming the bond should refund nearly all of the configured bond after gas: got {}, expected at least {}",
+        net_refund,
+        min_expected_refund
     );
     assert!(
         balance_after <= balance_before.saturating_add(DEFAULT_BOND_AMOUNT),
@@ -2008,9 +2012,13 @@ async fn test_bond_claim_after_rejection() -> Result<(), Box<dyn std::error::Err
         outcome.failures()
     );
     let balance_after = user.view_account().await?.balance;
+    let net_refund = balance_after.saturating_sub(balance_before);
+    let min_expected_refund = DEFAULT_BOND_AMOUNT.saturating_sub(NearToken::from_millinear(5));
     assert!(
-        balance_after > balance_before,
-        "claiming the bond should increase the proposer's balance"
+        net_refund >= min_expected_refund,
+        "claiming the bond should refund nearly all of the configured bond after gas: got {}, expected at least {}",
+        net_refund,
+        min_expected_refund
     );
     assert!(
         balance_after <= balance_before.saturating_add(DEFAULT_BOND_AMOUNT),

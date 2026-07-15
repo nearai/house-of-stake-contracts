@@ -3,7 +3,7 @@
 .DEFAULT_GOAL := help
 
 .PHONY: help all-contracts \
-	sandbox-staking-whitelist-contract venear-contract lockup-contract voting-contract \
+	sandbox-staking-whitelist-contract venear-contract lockup-contract voting-contract voting-contract-sandbox \
 	staking-contract staking-contract-test mock-staking-pool-contract \
 	whitelist venear lockup voting staking staking-test mock-pool \
 	check-sandbox-staking-whitelist-contract check-venear-contract check-lockup-contract \
@@ -13,6 +13,7 @@
 
 ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 RES_LOCAL := $(ROOT)res/local
+INTEGRATION_TEST_ARGS := $(shell find "$(ROOT)integration-tests/tests" -maxdepth 1 -name 'test_*.rs' ! -name 'test_lockup.rs' -printf '--test %f\n' | sed 's/\.rs$$//' | sort)
 
 help:
 	@echo "WASM builds (cargo near build non-reproducible-wasm; copies .wasm to res/local/):"
@@ -20,6 +21,7 @@ help:
 	@echo "  make venear-contract                        (alias: make venear)"
 	@echo "  make lockup-contract                        (alias: make lockup)"
 	@echo "  make voting-contract                        (alias: make voting)"
+	@echo "  make voting-contract-sandbox                build sandbox-feature voting WASM for integration tests"
 	@echo "  make staking-contract                       (alias: make staking)"
 	@echo "  make staking-contract-test                  build test-feature WASM with mocked clock"
 	@echo "  make mock-staking-pool-contract             (alias: make mock-pool) — for staking-contract sandbox tests"
@@ -52,9 +54,14 @@ lockup-contract:
 	cp "$(ROOT)target/near/lockup_contract/lockup_contract.wasm" "$(RES_LOCAL)/"
 
 voting-contract:
-	cd "$(ROOT)voting-contract" && cargo near build non-reproducible-wasm --features sandbox
+	cd "$(ROOT)voting-contract" && cargo near build non-reproducible-wasm
 	mkdir -p "$(RES_LOCAL)"
 	cp "$(ROOT)target/near/voting_contract/voting_contract.wasm" "$(RES_LOCAL)/"
+
+voting-contract-sandbox:
+	cd "$(ROOT)voting-contract" && cargo near build non-reproducible-wasm --features sandbox
+	mkdir -p "$(RES_LOCAL)"
+	cp "$(ROOT)target/near/voting_contract/voting_contract.wasm" "$(RES_LOCAL)/voting_contract_sandbox.wasm"
 
 staking-contract:
 	cd "$(ROOT)staking-contract" && cargo near build non-reproducible-wasm
@@ -109,16 +116,9 @@ test-staking-contract test-staking:
 
 # Run all contract tests across the workspace
 test:
-	$(MAKE) all-contracts staking-contract-test
+	$(MAKE) all-contracts voting-contract-sandbox staking-contract-test
 	cd "$(ROOT)" && cargo test --workspace --exclude integration-tests
 	$(MAKE) test-integration
 
 test-integration:
-	cd "$(ROOT)" && cargo test -p integration-tests \
-		--test test_contracts_upgrade \
-		--test test_staking_contract \
-		--test test_venear \
-		--test test_voting \
-		--test test_voting_fst \
-		--test test_voting_partial_delegation \
-		--test test_voting_queue
+	cd "$(ROOT)" && cargo test -p integration-tests $(INTEGRATION_TEST_ARGS)
