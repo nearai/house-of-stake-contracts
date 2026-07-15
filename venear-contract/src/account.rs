@@ -1,5 +1,5 @@
 use crate::*;
-use common::{Bps, VenearBalance, Version, events, near_add, truncate_to_seconds};
+use common::{VenearBalance, Version, events, truncate_to_seconds};
 use near_sdk::json_types::U64;
 
 /// Full information about the account
@@ -163,24 +163,14 @@ impl Contract {
         account
     }
 
-    /// Returns the "owned" voting power for an account — the portion that counts for ft_mint/ft_burn.
-    fn account_owned_total(account: &Account) -> NearToken {
-        let mut total = account.delegated_balance.total();
-        let self_bps = Bps::new(10_000_u16.saturating_sub(account.delegated_bps()));
-        if !self_bps.is_zero() {
-            total = near_add(total, account.balance.scale_by_bps(self_bps).total());
-        }
-        total
-    }
-
     pub fn internal_set_account(&mut self, account_id: AccountId, account: Account) {
         // Previous balance
         let old_balance = self
             .internal_get_account(&account_id)
-            .map(|old_account| Self::account_owned_total(&old_account))
+            .map(|old_account| old_account.owned_total())
             .unwrap_or_default();
         // New balance
-        let new_balance = Self::account_owned_total(&account);
+        let new_balance = account.owned_total();
         if new_balance > old_balance {
             events::emit::ft_mint(&account_id, new_balance.checked_sub(old_balance).unwrap());
         } else if new_balance < old_balance {

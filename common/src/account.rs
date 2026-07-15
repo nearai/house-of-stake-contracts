@@ -89,47 +89,26 @@ impl From<VAccount> for Account {
 }
 
 impl Account {
-    /// Sum of `bps` across all delegation entries. Always `<= 10_000` for well-formed accounts
-    /// (enforced by `validate_delegations` at write time).
-    pub fn delegated_bps(&self) -> u16 {
-        self.delegations
-            .iter()
-            .map(|delegation| u32::from(delegation.bps))
-            .sum::<u32>()
-            .try_into()
-            .expect("delegation bps sum must fit into u16")
-    }
-
-    /// Returns veNEAR balance of the account without modifications.
+    /// Returns veNEAR balance of the account at the given timestamp without modifications.
     pub fn total_balance(
         &self,
         current_timestamp: TimestampNs,
         venear_growth_config: &VenearGrowthConfig,
     ) -> NearToken {
-        let current_timestamp = truncate_to_seconds(current_timestamp);
-        require!(
-            current_timestamp >= self.update_timestamp,
-            "Timestamp must be increasing"
-        );
-        let mut delegated_balance = self.delegated_balance;
-        delegated_balance.update(
-            self.update_timestamp,
-            current_timestamp,
-            venear_growth_config,
-        );
-        let total = delegated_balance.total();
-        let self_bps = Bps::new(10_000_u16.saturating_sub(self.delegated_bps()));
-        if !self_bps.is_zero() {
-            let mut balance = self.balance;
-            balance.update(
-                self.update_timestamp,
-                current_timestamp,
-                venear_growth_config,
-            );
-            near_add(total, balance.scale_by_bps(self_bps).total())
-        } else {
-            total
+        let mut account = self.clone();
+        account.update(current_timestamp, venear_growth_config);
+        account.owned_total()
+    }
+
+    /// The voting power owned by this account: incoming delegated balance plus own balance minus
+    /// the exact `delegation_contribution` of each outgoing delegation, so the sub-milliNEAR
+    /// remainders stay with the owner. Assumes the balances are already updated.
+    pub fn owned_total(&self) -> NearToken {
+        let mut retained = self.balance;
+        for delegation in &self.delegations {
+            retained = retained - self.balance.delegation_contribution(delegation.bps);
         }
+        near_add(self.delegated_balance.total(), retained.total())
     }
 
     pub fn update(
@@ -234,44 +213,5 @@ mod tests {
         assert_eq!(account.delegations.len(), 2);
         assert_eq!(account.delegations[0].bps, Bps::new(2_500));
         assert_eq!(account.delegations[1].bps, Bps::new(7_500));
-    }
-
-    #[test]
-    fn delegated_bps_empty_is_zero() {
-        assert_eq!(sample_account(vec![]).delegated_bps(), 0);
-    }
-
-    #[test]
-    fn delegated_bps_sums_partial_entries() {
-        let account = sample_account(vec![
-            DelegationEntry {
-                account_id: account_id("a.near"),
-                bps: Bps::new(1_234),
-            },
-            DelegationEntry {
-                account_id: account_id("b.near"),
-                bps: Bps::new(2_000),
-            },
-            DelegationEntry {
-                account_id: account_id("c.near"),
-                bps: Bps::new(766),
-            },
-        ]);
-        assert_eq!(account.delegated_bps(), 4_000);
-    }
-
-    #[test]
-    fn delegated_bps_full_allocation() {
-        let account = sample_account(vec![
-            DelegationEntry {
-                account_id: account_id("a.near"),
-                bps: Bps::new(6_000),
-            },
-            DelegationEntry {
-                account_id: account_id("b.near"),
-                bps: Bps::new(4_000),
-            },
-        ]);
-        assert_eq!(account.delegated_bps(), 10_000);
     }
 }
