@@ -31,7 +31,7 @@ Backlog for taking **`stake.dao`** (`staking-contract`) from **implemented v1** 
 ### End-to-end funds path
 
 - [x] **Sandbox E2E (mock pool)** — Golden path in [`sandbox_golden_path.rs`](../../tests/sandbox_golden_path.rs): **`lock`** → **`epoch_settle`** → **`unlock`** → settlement epochs → **`withdraw(validator_id)`** with NEAR received by buyer. Deeper pipeline cases remain in [`sandbox_mock_pool.rs`](../../tests/sandbox_mock_pool.rs) and [`sandbox_epoch_settlement.rs`](../../tests/sandbox_epoch_settlement.rs).
-- [ ] **Testnet validation on a real pool** — Deploy via [`scripts/deploy_testnet_staking_stack.sh`](../../../scripts/deploy_testnet_staking_stack.sh) (mock pool) **and** exercise at least one **production-shaped** staking pool account on testnet (allowlist, catalog, lock, unlock, withdraw). Mock pool behavior must not be the only pre-mainnet evidence.
+- [ ] **Testnet validation on a real pool** — Deploy via [`staking-contract/scripts/deploy_testnet_staking_stack.sh`](../../scripts/deploy_testnet_staking_stack.sh) (mock pool) **and** exercise at least one **production-shaped** staking pool account on testnet (allowlist, catalog, lock, unlock, withdraw). Mock pool behavior must not be the only pre-mainnet evidence.
 - [ ] **Concurrent / retry behavior** — QA `tx_status == Busy` (overlapping lock/unlock/withdraw), failed pool callbacks, and **`epoch_settle`** recovery; ensure users are never permanently stuck.
 
 ### Release engineering
@@ -92,7 +92,7 @@ Backlog for taking **`stake.dao`** (`staking-contract`) from **implemented v1** 
 | Governance | Owner, guardians, pause, upgrade, validator allowlist, catalog via pool `get_owner_id` |
 | Events | `EVENT_JSON` for indexing |
 | Unit + sandbox tests | Host `testing_env!` modules + mock-pool sandbox suites |
-| Testnet deploy script | [`deploy_testnet_staking_stack.sh`](../../../scripts/deploy_testnet_staking_stack.sh) |
+| Testnet deploy script | [`deploy_testnet_staking_stack.sh`](../../scripts/deploy_testnet_staking_stack.sh) |
 | CI workflows | build / format / clippy / test |
 
 ---

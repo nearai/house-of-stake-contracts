@@ -4,7 +4,7 @@ set -euo pipefail
 # Configure chat-api system configs for House-of-Stake payments.
 #
 # Required:
-#   ADMIN_SESSION_TOKEN=sess_... ./scripts/configure_chat_api_hos_system_configs.sh
+#   ADMIN_SESSION_TOKEN=sess_... ./staking-contract/scripts/configure_chat_api_hos_system_configs.sh
 #
 # Optional:
 #   CHAT_API_URL=http://localhost:8080

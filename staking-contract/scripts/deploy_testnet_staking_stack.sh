@@ -6,14 +6,14 @@
 #   - near CLI installed (https://docs.near.org/tools/near-cli)
 #   - Logged in for testnet:  near account import-account …  OR  keys for your parent account in keychain
 #   - jq installed (for JSON init payloads)
-#   - WASM files in res/local/ (run ./scripts/build_staking_test_wasms.sh first)
+#   - WASM files in res/local/ (run ./staking-contract/scripts/build_staking_test_wasms.sh first)
 #
 # Usage:
-#   ./scripts/deploy_testnet_staking_stack.sh <parent.testnet>
+#   ./staking-contract/scripts/deploy_testnet_staking_stack.sh <parent.testnet>
 #
 # Example:
-#   ./scripts/build_staking_test_wasms.sh
-#   ./scripts/deploy_testnet_staking_stack.sh mylab.testnet
+#   ./staking-contract/scripts/build_staking_test_wasms.sh
+#   ./staking-contract/scripts/deploy_testnet_staking_stack.sh mylab.testnet
 #
 # Environment (optional):
 #   CHAIN_ID=testnet
@@ -31,7 +31,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
 ROOT_ACCOUNT_ID="${1:-}"
@@ -69,7 +69,7 @@ if [[ ! -f "$STAKING_WASM" || ! -f "$MOCK_POOL_WASM" ]]; then
   echo "Missing WASM. Expected:" >&2
   echo "  $STAKING_WASM" >&2
   echo "  $MOCK_POOL_WASM" >&2
-  echo "Run:  $REPO_ROOT/scripts/build_staking_test_wasms.sh" >&2
+  echo "Run:  $REPO_ROOT/staking-contract/scripts/build_staking_test_wasms.sh" >&2
   exit 1
 fi
 

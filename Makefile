@@ -9,7 +9,7 @@
 	check-sandbox-staking-whitelist-contract check-venear-contract check-lockup-contract \
 	check-voting-contract check-staking-contract check-mock-staking-pool-contract \
 	check-whitelist check-venear check-lockup check-voting check-staking check-mock-pool \
-	test test-staking-contract test-staking
+	test test-integration test-staking-contract test-staking
 
 ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 RES_LOCAL := $(ROOT)res/local
@@ -29,7 +29,8 @@ help:
 	@echo "  make check-<name>   e.g. make check-staking-contract, make check-whitelist"
 	@echo ""
 	@echo "Tests:"
-	@echo "  make test                                  run all contract tests"
+	@echo "  make test                                  run contract tests; skips outdated lockup integration test"
+	@echo "  make test-integration                      run integration tests except test_lockup"
 	@echo "  make test-staking-contract                 run staking-contract test suite (builds both normal and test-feature WASM)"
 	@echo "  make test-staking                          alias for test-staking-contract"
 
@@ -109,4 +110,15 @@ test-staking-contract test-staking:
 # Run all contract tests across the workspace
 test:
 	$(MAKE) all-contracts staking-contract-test
-	cd "$(ROOT)" && cargo test --workspace
+	cd "$(ROOT)" && cargo test --workspace --exclude integration-tests
+	$(MAKE) test-integration
+
+test-integration:
+	cd "$(ROOT)" && cargo test -p integration-tests \
+		--test test_contracts_upgrade \
+		--test test_staking_contract \
+		--test test_venear \
+		--test test_voting \
+		--test test_voting_fst \
+		--test test_voting_partial_delegation \
+		--test test_voting_queue

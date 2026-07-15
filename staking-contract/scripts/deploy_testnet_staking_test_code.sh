@@ -10,7 +10,7 @@
 #
 # Usage:
 #   BUILD_WASM=1 CONFIRM_TEST_ONLY_DEPLOY=1 \
-#     ./scripts/deploy_testnet_staking_test_code.sh hos-e2e-0601144939.testnet
+#     ./staking-contract/scripts/deploy_testnet_staking_test_code.sh hos-e2e-0601144939.testnet
 #
 # Environment:
 #   CHAIN_ID=testnet
@@ -21,7 +21,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
 usage() {

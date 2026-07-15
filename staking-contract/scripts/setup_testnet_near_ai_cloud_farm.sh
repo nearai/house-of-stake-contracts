@@ -4,14 +4,14 @@
 # staking-contract.
 #
 # Preview:
-#   FARM_REWARD_RATE=3802570537683474 ./scripts/setup_testnet_near_ai_cloud_farm.sh
+#   FARM_REWARD_RATE=3802570537683474 ./staking-contract/scripts/setup_testnet_near_ai_cloud_farm.sh
 #
 # Or derive FARM_REWARD_RATE from APY and price assumptions:
 #   TARGET_APY_BPS=450 NEAR_PRICE_USD_CENTS=200 CREDIT_PRICE_USD_CENTS=100 DISCOUNT_BPS=7500 \
-#     ./scripts/setup_testnet_near_ai_cloud_farm.sh
+#     ./staking-contract/scripts/setup_testnet_near_ai_cloud_farm.sh
 #
 # Execute:
-#   FARM_REWARD_RATE=3802570537683474 EXECUTE=1 ./scripts/setup_testnet_near_ai_cloud_farm.sh
+#   FARM_REWARD_RATE=3802570537683474 EXECUTE=1 ./staking-contract/scripts/setup_testnet_near_ai_cloud_farm.sh
 #
 # Optional environment:
 #   STAKING_ACCOUNT_ID=hos-e2e-0601144939.testnet
@@ -39,7 +39,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
 : "${CHAIN_ID:=testnet}"

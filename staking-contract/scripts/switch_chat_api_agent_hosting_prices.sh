@@ -13,19 +13,19 @@ set -euo pipefail
 #
 # Preview staging rollback:
 #   ADMIN_SESSION_TOKEN=sess_... TARGET_ENV=staging DRY_RUN=1 \
-#     ./scripts/switch_chat_api_agent_hosting_prices.sh
+#     ./staking-contract/scripts/switch_chat_api_agent_hosting_prices.sh
 #
 # Apply staging rollback:
 #   ADMIN_SESSION_TOKEN=sess_... TARGET_ENV=staging \
-#     ./scripts/switch_chat_api_agent_hosting_prices.sh
+#     ./staking-contract/scripts/switch_chat_api_agent_hosting_prices.sh
 #
 # Preview production switch:
 #   ADMIN_SESSION_TOKEN=sess_... TARGET_ENV=production DRY_RUN=1 \
-#     ./scripts/switch_chat_api_agent_hosting_prices.sh
+#     ./staking-contract/scripts/switch_chat_api_agent_hosting_prices.sh
 #
 # Apply production switch:
 #   ADMIN_SESSION_TOKEN=sess_... TARGET_ENV=production \
-#     ./scripts/switch_chat_api_agent_hosting_prices.sh
+#     ./staking-contract/scripts/switch_chat_api_agent_hosting_prices.sh
 #
 # Optional:
 #   CHAT_API_URL=http://localhost:8080
@@ -35,7 +35,7 @@ set -euo pipefail
 #   VERIFY_PRICE_NAMES=0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
 : "${TARGET_ENV:=production}"
