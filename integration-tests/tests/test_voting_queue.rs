@@ -117,7 +117,10 @@ async fn test_queued_promotes_on_sandbox_timeout() -> Result<(), Box<dyn std::er
     let mut latest_sandbox_end = earliest_freed_slot_end;
     for id in &ids[1..3] {
         let proposal = v.get_proposal(*id).await?;
-        let sandbox_start: u64 = proposal["sandbox_start_time_ns"].as_str().unwrap().parse()?;
+        let sandbox_start: u64 = proposal["sandbox_start_time_ns"]
+            .as_str()
+            .unwrap()
+            .parse()?;
         let sandbox_duration: u64 = proposal["sandbox_duration_ns"].as_str().unwrap().parse()?;
         latest_sandbox_end = latest_sandbox_end.max(sandbox_start + sandbox_duration);
     }
@@ -433,7 +436,10 @@ async fn test_view_virtual_advance() -> Result<(), Box<dyn std::error::Error>> {
     let mut latest_sandbox_end = 0;
     for id in &ids[0..3] {
         let proposal = v.get_proposal(*id).await?;
-        let sandbox_start: u64 = proposal["sandbox_start_time_ns"].as_str().unwrap().parse()?;
+        let sandbox_start: u64 = proposal["sandbox_start_time_ns"]
+            .as_str()
+            .unwrap()
+            .parse()?;
         let sandbox_duration: u64 = proposal["sandbox_duration_ns"].as_str().unwrap().parse()?;
         latest_sandbox_end = latest_sandbox_end.max(sandbox_start + sandbox_duration);
     }
