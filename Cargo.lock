@@ -392,7 +392,7 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 
 [[package]]
 name = "common"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "merkle-tree",
  "near-sdk",
@@ -1662,7 +1662,7 @@ dependencies = [
 
 [[package]]
 name = "integration-tests"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "base64 0.22.1",
  "common",
@@ -1845,7 +1845,7 @@ dependencies = [
 
 [[package]]
 name = "lockup-contract"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "common",
  "near-sdk",
@@ -1909,7 +1909,7 @@ checksum = "8452105ba047068f40ff7093dd1d9da90898e63dd61736462e9cdda6a90ad3c3"
 
 [[package]]
 name = "merkle-tree"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "near-sdk",
  "serde_json",
@@ -3423,7 +3423,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "sandbox-staking-whitelist-contract"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "near-sdk",
  "serde_json",
@@ -4510,7 +4510,7 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "venear-contract"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "common",
  "hex",
@@ -4527,7 +4527,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "voting-contract"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "chrono",
  "common",

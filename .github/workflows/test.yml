@@ -2,12 +2,13 @@ name: Test
 
 on:
   push:
-    branches: [main, master, feat/stake-dao]
+    branches: [main, master]
   pull_request:
-    branches: [main, master, feat/stake-dao]
+    branches: [main, master]
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_NEAR_TAG: cargo-near-v0.22.0
 
 jobs:
   test:
@@ -23,10 +24,10 @@ jobs:
 
       # `make test` builds cargo-near WASM artifacts before running tests. Plain
       # `cargo build --target wasm32-unknown-unknown` can produce modules that
-      # fail with PrepareError(Deserialization) on the near-workspaces sandbox.
+      # fail with PrepareError(Deserialization) on near-workspaces sandbox.
       - name: Install cargo-near
         run: |
-          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/cargo-near/releases/latest/download/cargo-near-installer.sh | sh
+          curl --proto '=https' --tlsv1.2 -LsSf "https://github.com/near/cargo-near/releases/download/${CARGO_NEAR_TAG}/cargo-near-installer.sh" | sh
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           cargo near --version
 

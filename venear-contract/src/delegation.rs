@@ -63,7 +63,7 @@ impl Contract {
             let mut delegate = self.internal_expect_account_updated(&delegation.account_id);
             delegate.delegated_balance = delegate
                 .delegated_balance
-                .pooled_sub_scaled(&owner.balance, delegation.bps);
+                .pooled_sub_delegation(&owner.balance, delegation.bps);
             self.internal_set_account(delegation.account_id.clone(), delegate);
         }
 
@@ -71,7 +71,7 @@ impl Contract {
             let mut delegate = self.internal_expect_account_updated(&entry.account_id);
             delegate.delegated_balance = delegate
                 .delegated_balance
-                .pooled_add_scaled(&owner.balance, entry.bps);
+                .pooled_add_delegation(&owner.balance, entry.bps);
             self.internal_set_account(entry.account_id.clone(), delegate);
         }
 
@@ -105,7 +105,8 @@ impl Contract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{entry, fresh_contract, set_ctx};
+    use crate::test_utils::{apply_lockup_update, entry, fresh_contract, set_ctx};
+    use common::{Bps, near_add};
 
     /// Register `caller` with 1 NEAR and each delegate with zero, so set_delegations can scale onto them.
     fn registered_contract(caller: &AccountId, delegates: &[&str]) -> Contract {
@@ -116,6 +117,13 @@ mod tests {
             contract.internal_register_account(&id, NearToken::from_yoctonear(0));
         }
         contract
+    }
+
+    /// Expected pool contribution for an owner with zero extra veNEAR: the bps share of the near
+    /// balance, rounded down to whole milliNEAR.
+    fn contribution_near(balance: NearToken, bps: Bps) -> NearToken {
+        let share = balance.as_yoctonear() * u128::from(u16::from(bps)) / 10_000;
+        NearToken::from_millinear(share / NearToken::from_millinear(1).as_yoctonear())
     }
 
     fn delegated_total(contract: &Contract, account_id: &str) -> NearToken {
@@ -199,6 +207,117 @@ mod tests {
             delegated_total(&contract, "a.near"),
             NearToken::from_near(1)
         );
+    }
+
+    /// Regression test for mainnet tx HDtSFscvJQ7G6rA6Xy9XWdEnyLhaKJVPJbTDyyycChHX: a partial
+    /// delegation whose bps-scaled near share is not milliNEAR-aligned became un-clearable after
+    /// growth, underflowing `near_sub` in `pooled_sub_delegation`.
+    #[test]
+    fn clears_partial_delegation_after_growth_period() {
+        let caller: AccountId = "caller.near".parse().unwrap();
+        let delegate: AccountId = "a.near".parse().unwrap();
+        let mut contract = fresh_contract(caller.clone());
+        contract.internal_register_account(&caller, NearToken::from_millinear(4_100));
+        contract.internal_register_account(&delegate, NearToken::from_yoctonear(0));
+
+        set_ctx(caller.clone(), NearToken::from_near(1).as_yoctonear(), 0);
+        contract.set_delegations(vec![entry("a.near", 2_512)]);
+
+        let day_ns: u64 = 86_400_000_000_000;
+        set_ctx(
+            caller.clone(),
+            NearToken::from_near(1).as_yoctonear(),
+            27 * day_ns,
+        );
+        contract.set_delegations(vec![]);
+
+        assert_eq!(
+            contract
+                .get_account_info(caller)
+                .unwrap()
+                .account
+                .delegations,
+            vec![]
+        );
+        assert_eq!(
+            delegated_total(&contract, "a.near"),
+            NearToken::from_yoctonear(0)
+        );
+    }
+
+    /// Five delegates with different, milliNEAR-misaligned shares survive 10 years of growth,
+    /// a lockup deposit at year 3 and its withdrawal at year 7, and clear back to exactly zero.
+    #[test]
+    fn clears_five_delegates_after_ten_years() {
+        let caller: AccountId = "caller.near".parse().unwrap();
+        let delegates = ["a.near", "b.near", "c.near", "d.near", "e.near"];
+        // The 777-yocto tail keeps the balance itself off the milliNEAR grid (base != near).
+        let stake = near_add(NearToken::from_near(777), NearToken::from_yoctonear(777));
+        let mut contract = fresh_contract(caller.clone());
+        contract.internal_register_account(&caller, stake);
+        for delegate in delegates {
+            contract.internal_register_account(&delegate.parse().unwrap(), NearToken::ZERO);
+        }
+
+        let entries = vec![
+            entry("a.near", 2_512),
+            entry("b.near", 1_733),
+            entry("c.near", 999),
+            entry("d.near", 3_001),
+            entry("e.near", 777),
+        ];
+        set_ctx(caller.clone(), NearToken::from_near(1).as_yoctonear(), 0);
+        contract.set_delegations(entries.clone());
+
+        for delegation in &entries {
+            assert_eq!(
+                delegated_total(&contract, delegation.account_id.as_str()),
+                contribution_near(stake, delegation.bps)
+            );
+        }
+
+        let year_ns: u64 = 365 * 86_400_000_000_000;
+
+        // Year 3: the lockup reports newly locked NEAR; pools rebase onto the larger balance.
+        apply_lockup_update(
+            &mut contract,
+            &caller,
+            NearToken::from_near(111),
+            3 * year_ns,
+            1,
+        );
+
+        // Year 7: the locked NEAR is withdrawn, forfeiting all extra veNEAR; each pool must
+        // hold exactly the near-only share of the remaining deposit again.
+        apply_lockup_update(&mut contract, &caller, NearToken::ZERO, 7 * year_ns, 2);
+        for delegation in &entries {
+            assert_eq!(
+                delegated_total(&contract, delegation.account_id.as_str()),
+                contribution_near(stake, delegation.bps)
+            );
+        }
+
+        set_ctx(
+            caller.clone(),
+            NearToken::from_near(1).as_yoctonear(),
+            10 * year_ns,
+        );
+        contract.set_delegations(vec![]);
+
+        assert_eq!(
+            contract
+                .get_account_info(caller)
+                .unwrap()
+                .account
+                .delegations,
+            vec![]
+        );
+        for delegate in delegates {
+            assert_eq!(
+                delegated_total(&contract, delegate),
+                NearToken::from_yoctonear(0)
+            );
+        }
     }
 
     #[test]

@@ -1,4 +1,4 @@
-# House of Stake — per-contract NEAR WASM builds (same output as build_all.sh).
+# House of Stake per-contract NEAR WASM builds.
 
 .DEFAULT_GOAL := help
 
@@ -13,30 +13,29 @@
 
 ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 RES_LOCAL := $(ROOT)res/local
-INTEGRATION_TEST_ARGS := $(shell find "$(ROOT)integration-tests/tests" -maxdepth 1 -name 'test_*.rs' ! -name 'test_lockup.rs' -printf '--test %f\n' | sed 's/\.rs$$//' | sort)
+INTEGRATION_TEST_FILES := $(sort $(notdir $(wildcard $(ROOT)integration-tests/tests/test_*.rs)))
+INTEGRATION_TEST_ARGS := $(foreach test,$(patsubst %.rs,%,$(INTEGRATION_TEST_FILES)),--test $(test))
 
 help:
 	@echo "WASM builds (cargo near build non-reproducible-wasm; copies .wasm to res/local/):"
 	@echo "  make sandbox-staking-whitelist-contract   (alias: make whitelist)"
-	@echo "  make venear-contract                        (alias: make venear)"
-	@echo "  make lockup-contract                        (alias: make lockup)"
-	@echo "  make voting-contract                        (alias: make voting)"
-	@echo "  make voting-contract-sandbox                build sandbox-feature voting WASM for integration tests"
-	@echo "  make staking-contract                       (alias: make staking)"
-	@echo "  make staking-contract-test                  build test-feature WASM with mocked clock"
-	@echo "  make mock-staking-pool-contract             (alias: make mock-pool) — for staking-contract sandbox tests"
-	@echo "  make all-contracts                          all of the above, in order"
+	@echo "  make venear-contract                      (alias: make venear)"
+	@echo "  make lockup-contract                      (alias: make lockup)"
+	@echo "  make voting-contract                      (alias: make voting)"
+	@echo "  make voting-contract-sandbox              build sandbox-feature voting WASM for integration tests"
+	@echo "  make staking-contract                     (alias: make staking)"
+	@echo "  make staking-contract-test                build test-feature WASM with mocked clock"
+	@echo "  make mock-staking-pool-contract           (alias: make mock-pool) for staking-contract sandbox tests"
+	@echo "  make all-contracts                        all deployable contract WASM artifacts"
 	@echo ""
-	@echo "Fast compile checks (cargo check -p … from workspace root):"
+	@echo "Fast compile checks:"
 	@echo "  make check-<name>   e.g. make check-staking-contract, make check-whitelist"
 	@echo ""
 	@echo "Tests:"
-	@echo "  make test                                  run contract tests; skips outdated lockup integration test"
-	@echo "  make test-integration                      run integration tests except test_lockup"
-	@echo "  make test-staking-contract                 run staking-contract test suite (builds both normal and test-feature WASM)"
-	@echo "  make test-staking                          alias for test-staking-contract"
-
-# --- WASM: same order as build_all.sh ---
+	@echo "  make test                                 run workspace tests and integration tests"
+	@echo "  make test-integration                     run integration tests"
+	@echo "  make test-staking-contract                run staking-contract test suite"
+	@echo "  make test-staking                         alias for test-staking-contract"
 
 sandbox-staking-whitelist-contract:
 	cd "$(ROOT)sandbox-staking-whitelist-contract" && cargo near build non-reproducible-wasm
@@ -80,8 +79,6 @@ mock-staking-pool-contract:
 
 all-contracts: sandbox-staking-whitelist-contract venear-contract lockup-contract voting-contract staking-contract mock-staking-pool-contract
 
-# --- Short aliases ---
-
 whitelist: sandbox-staking-whitelist-contract
 venear: venear-contract
 lockup: lockup-contract
@@ -89,8 +86,6 @@ voting: voting-contract
 staking: staking-contract
 staking-test: staking-contract-test
 mock-pool: mock-staking-pool-contract
-
-# --- cargo check (host, no WASM) ---
 
 check-sandbox-staking-whitelist-contract check-whitelist:
 	cd "$(ROOT)" && cargo check -p sandbox-staking-whitelist-contract
@@ -114,11 +109,11 @@ test-staking-contract test-staking:
 	$(MAKE) staking-contract staking-contract-test mock-staking-pool-contract
 	cd "$(ROOT)" && cargo test -p staking-contract
 
-# Run all contract tests across the workspace
 test:
 	$(MAKE) all-contracts voting-contract-sandbox staking-contract-test
 	cd "$(ROOT)" && cargo test --workspace --exclude integration-tests
 	$(MAKE) test-integration
 
 test-integration:
+	@if [ -z "$(strip $(INTEGRATION_TEST_ARGS))" ]; then echo "No integration tests matched"; exit 1; fi
 	cd "$(ROOT)" && cargo test -p integration-tests $(INTEGRATION_TEST_ARGS)
