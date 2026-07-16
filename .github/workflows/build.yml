@@ -21,15 +21,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build release wasm32
+      # Build the same cargo-near artifacts used by deploy/test tooling. Plain
+      # `cargo build --target wasm32-unknown-unknown` can produce modules that
+      # fail with PrepareError(Deserialization) on near-workspaces sandbox.
+      - name: Install cargo-near
         run: |
-          set -euo pipefail
-          for pkg in \
-            lockup-contract \
-            venear-contract \
-            voting-contract \
-            staking-contract \
-            sandbox-staking-whitelist-contract; do
-            echo "== wasm32 $pkg =="
-            cargo build -p "$pkg" --target wasm32-unknown-unknown --release
-          done
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/cargo-near/releases/latest/download/cargo-near-installer.sh | sh
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          cargo near --version
+
+      - name: Build contract wasm
+        run: make all-contracts voting-contract-sandbox staking-contract-test
