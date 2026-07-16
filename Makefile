@@ -11,7 +11,7 @@
 
 ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 RES_LOCAL := $(ROOT)res/local
-INTEGRATION_TEST_FILES := $(sort $(filter-out test_lockup.rs,$(notdir $(wildcard $(ROOT)integration-tests/tests/test_*.rs))))
+INTEGRATION_TEST_FILES := $(sort $(notdir $(wildcard $(ROOT)integration-tests/tests/test_*.rs)))
 INTEGRATION_TEST_ARGS := $(foreach test,$(patsubst %.rs,%,$(INTEGRATION_TEST_FILES)),--test $(test))
 
 help:
@@ -26,8 +26,8 @@ help:
 	@echo "  make check-<name>   e.g. make check-voting-contract, make check-whitelist"
 	@echo ""
 	@echo "Tests:"
-	@echo "  make test                                 run workspace tests and integration tests except test_lockup"
-	@echo "  make test-integration                     run integration tests except test_lockup"
+	@echo "  make test                                 run workspace tests and integration tests"
+	@echo "  make test-integration                     run integration tests"
 
 sandbox-staking-whitelist-contract:
 	cd "$(ROOT)sandbox-staking-whitelist-contract" && cargo near build non-reproducible-wasm
