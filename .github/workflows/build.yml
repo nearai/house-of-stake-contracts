@@ -1,0 +1,35 @@
+name: Build WASM
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NEAR_TAG: cargo-near-v0.22.0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.86.0
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Build the same cargo-near artifacts used by deploy/test tooling. Plain
+      # `cargo build --target wasm32-unknown-unknown` can produce modules that
+      # fail with PrepareError(Deserialization) on near-workspaces sandbox.
+      - name: Install cargo-near
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf "https://github.com/near/cargo-near/releases/download/${CARGO_NEAR_TAG}/cargo-near-installer.sh" | sh
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          cargo near --version
+
+      - name: Build contract wasm
+        run: make all-contracts
