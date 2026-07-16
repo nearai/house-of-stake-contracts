@@ -112,19 +112,9 @@ async fn test_queued_promotes_on_sandbox_timeout() -> Result<(), Box<dyn std::er
     let p0_sandbox_start: u64 = p0_pre["sandbox_start_time_ns"].as_str().unwrap().parse()?;
     let earliest_freed_slot_end = p0_sandbox_start + sandbox_duration;
 
-    // Fast-forward past the latest sandbox deadline. The three already-Sandbox proposals
-    // were approved a few blocks apart, so their exact end times can differ.
-    let mut latest_sandbox_end = earliest_freed_slot_end;
-    for id in &ids[1..3] {
-        let proposal = v.get_proposal(*id).await?;
-        let sandbox_start: u64 = proposal["sandbox_start_time_ns"]
-            .as_str()
-            .unwrap()
-            .parse()?;
-        let sandbox_duration: u64 = proposal["sandbox_duration_ns"].as_str().unwrap().parse()?;
-        latest_sandbox_end = latest_sandbox_end.max(sandbox_start + sandbox_duration);
-    }
-    v.fast_forward(latest_sandbox_end, 5, 20).await?;
+    // Fast-forward past the sandbox deadline. The three already-Sandbox proposals all time out.
+    v.fast_forward_to_proposal_status_fst(ids[0], ProposalStatus::Defeated)
+        .await?;
 
     assert_eq!(
         get_status(&v.get_proposal(ids[0]).await?)?,
@@ -433,17 +423,8 @@ async fn test_view_virtual_advance() -> Result<(), Box<dyn std::error::Error>> {
 
     // Phase 2: first sandbox batch expires. ids[0..=2] virtually Defeated,
     // ids[3..=5] virtually promoted into Sandbox.
-    let mut latest_sandbox_end = 0;
-    for id in &ids[0..3] {
-        let proposal = v.get_proposal(*id).await?;
-        let sandbox_start: u64 = proposal["sandbox_start_time_ns"]
-            .as_str()
-            .unwrap()
-            .parse()?;
-        let sandbox_duration: u64 = proposal["sandbox_duration_ns"].as_str().unwrap().parse()?;
-        latest_sandbox_end = latest_sandbox_end.max(sandbox_start + sandbox_duration);
-    }
-    v.fast_forward(latest_sandbox_end, 5, 20).await?;
+    v.fast_forward_to_proposal_status_fst(ids[0], ProposalStatus::Defeated)
+        .await?;
     for i in 0..3 {
         assert_eq!(
             get_status(&v.get_proposal(ids[i]).await?)?,
