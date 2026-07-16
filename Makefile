@@ -11,7 +11,8 @@
 
 ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 RES_LOCAL := $(ROOT)res/local
-INTEGRATION_TEST_ARGS := $(shell find "$(ROOT)integration-tests/tests" -maxdepth 1 -name 'test_*.rs' ! -name 'test_lockup.rs' -printf '--test %f\n' | sed 's/\.rs$$//' | sort)
+INTEGRATION_TEST_FILES := $(sort $(filter-out test_lockup.rs,$(notdir $(wildcard $(ROOT)integration-tests/tests/test_*.rs))))
+INTEGRATION_TEST_ARGS := $(foreach test,$(patsubst %.rs,%,$(INTEGRATION_TEST_FILES)),--test $(test))
 
 help:
 	@echo "WASM builds (cargo near build non-reproducible-wasm; copies .wasm to res/local/):"
@@ -73,4 +74,5 @@ test:
 	$(MAKE) test-integration
 
 test-integration:
+	@if [ -z "$(strip $(INTEGRATION_TEST_ARGS))" ]; then echo "No integration tests matched"; exit 1; fi
 	cd "$(ROOT)" && cargo test -p integration-tests $(INTEGRATION_TEST_ARGS)
