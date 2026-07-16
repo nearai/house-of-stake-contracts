@@ -8,7 +8,7 @@ allowlisting, and catalog product/price setup on NEAR testnet.
 From the repository root:
 
 ```bash
-./scripts/build_staking_wasm.sh
+./staking-contract/scripts/build_staking_wasm.sh
 ```
 
 This writes:
@@ -26,7 +26,7 @@ export STAKING_ACCOUNT_ID=stake-dao-dev.testnet
 export OWNER_ACCOUNT_ID=owner.stake-dao-dev.testnet
 export GUARDIANS_JSON='["guardian.stake-dao-dev.testnet"]'
 
-BUILD_WASM=1 ./scripts/deploy_testnet_staking_contract.sh "$STAKING_ACCOUNT_ID"
+BUILD_WASM=1 ./staking-contract/scripts/deploy_testnet_staking_contract.sh "$STAKING_ACCOUNT_ID"
 ```
 
 To create the contract subaccount first:
@@ -37,7 +37,7 @@ PARENT_ACCOUNT_ID=my-parent.testnet \
 STAKING_ACCOUNT_ID=stake-dao-dev.my-parent.testnet \
 OWNER_ACCOUNT_ID=my-parent.testnet \
 BUILD_WASM=1 \
-./scripts/deploy_testnet_staking_contract.sh "$STAKING_ACCOUNT_ID"
+./staking-contract/scripts/deploy_testnet_staking_contract.sh "$STAKING_ACCOUNT_ID"
 ```
 
 The default config is testnet-friendly:
@@ -70,7 +70,7 @@ DRY_RUN=1 \
 ACTION=upgrade \
 OWNER_ACCOUNT_ID="$STAKING_ACCOUNT_ID" \
 BUILD_WASM=1 \
-./scripts/deploy_testnet_staking_contract.sh "$STAKING_ACCOUNT_ID"
+./staking-contract/scripts/deploy_testnet_staking_contract.sh "$STAKING_ACCOUNT_ID"
 ```
 
 Run the upgrade:
@@ -79,7 +79,7 @@ Run the upgrade:
 ACTION=upgrade \
 OWNER_ACCOUNT_ID="$STAKING_ACCOUNT_ID" \
 BUILD_WASM=1 \
-./scripts/deploy_testnet_staking_contract.sh "$STAKING_ACCOUNT_ID"
+./staking-contract/scripts/deploy_testnet_staking_contract.sh "$STAKING_ACCOUNT_ID"
 ```
 
 ## Staking Farm Upgrade Script
@@ -91,19 +91,19 @@ testnet contract.
 Preview without sending a transaction:
 
 ```bash
-./scripts/upgrade_testnet_staking_farm.sh
+./staking-contract/scripts/upgrade_testnet_staking_farm.sh
 ```
 
 Run the farm upgrade:
 
 ```bash
-EXECUTE=1 ./scripts/upgrade_testnet_staking_farm.sh
+EXECUTE=1 ./staking-contract/scripts/upgrade_testnet_staking_farm.sh
 ```
 
 Run staking contract tests first:
 
 ```bash
-RUN_TESTS=1 EXECUTE=1 ./scripts/upgrade_testnet_staking_farm.sh
+RUN_TESTS=1 EXECUTE=1 ./staking-contract/scripts/upgrade_testnet_staking_farm.sh
 ```
 
 ## Validators And Catalog
@@ -138,7 +138,7 @@ export CATALOG_JSON='[
   }
 ]'
 
-DRY_RUN=1 ACTION=configure ./scripts/deploy_testnet_staking_contract.sh "$STAKING_ACCOUNT_ID"
+DRY_RUN=1 ACTION=configure ./staking-contract/scripts/deploy_testnet_staking_contract.sh "$STAKING_ACCOUNT_ID"
 ```
 
 Remove `DRY_RUN=1` to send transactions. For a newly created product, the script
@@ -160,7 +160,7 @@ NEAR_AI_CREDITS_CATALOG=1 \
 NEAR_AI_CREDITS_OWNER_ACCOUNT_ID="$STAKING_ACCOUNT_ID" \
 DRY_RUN=1 \
 ACTION=configure \
-./scripts/deploy_testnet_staking_contract.sh "$STAKING_ACCOUNT_ID"
+./staking-contract/scripts/deploy_testnet_staking_contract.sh "$STAKING_ACCOUNT_ID"
 ```
 
 `NEAR_AI_CREDITS_PRICE_AMOUNT_YOCTO` defaults to
@@ -186,7 +186,7 @@ AGENT_SUBSCRIPTION_CATALOG=1 \
 AGENT_SUBSCRIPTION_OWNER_ACCOUNT_ID="$STAKING_ACCOUNT_ID" \
 DRY_RUN=1 \
 ACTION=configure \
-./scripts/deploy_testnet_staking_contract.sh "$STAKING_ACCOUNT_ID"
+./staking-contract/scripts/deploy_testnet_staking_contract.sh "$STAKING_ACCOUNT_ID"
 ```
 
 `AGENT_SUBSCRIPTION_VALIDATOR_ID` is inferred when `VALIDATORS_JSON` contains
@@ -219,7 +219,7 @@ run:
 ACTION=upgrade-and-configure \
 OWNER_ACCOUNT_ID="$STAKING_ACCOUNT_ID" \
 BUILD_WASM=1 \
-./scripts/deploy_testnet_staking_contract.sh "$STAKING_ACCOUNT_ID"
+./staking-contract/scripts/deploy_testnet_staking_contract.sh "$STAKING_ACCOUNT_ID"
 ```
 
 Buyers must call `storage_deposit` before `lock` or `pay` flows because the

@@ -16,15 +16,15 @@ use std::str::FromStr;
 
 pub const NS_IN_SECOND: u64 = 1_000_000_000;
 pub const UNLOCK_DURATION_SECONDS: u64 = 60;
-pub const VOTING_DURATION_SECONDS: u64 = 250;
-pub const TIMELOCK_DURATION_SECONDS: u64 = 250;
-pub const PROPOSAL_EXPIRATION_SECONDS: u64 = 250;
-pub const SANDBOX_DURATION_SECONDS: u64 = 250;
+pub const VOTING_DURATION_SECONDS: u64 = 10;
+pub const TIMELOCK_DURATION_SECONDS: u64 = 10;
+pub const PROPOSAL_EXPIRATION_SECONDS: u64 = 10;
+pub const SANDBOX_DURATION_SECONDS: u64 = 10;
 pub const DEFAULT_BOND_AMOUNT: NearToken = NearToken::from_millinear(100);
 
 pub const LOCKUP_WASM_FILEPATH: &str = "../res/local/lockup_contract.wasm";
 pub const VENEAR_WASM_FILEPATH: &str = "../res/local/venear_contract.wasm";
-pub const VOTING_WASM_FILEPATH: &str = "../res/local/voting_contract.wasm";
+pub const VOTING_WASM_FILEPATH: &str = "../res/local/voting_contract_sandbox.wasm";
 pub const SANDBOX_CONTRACT_WASM_FILEPATH: &str =
     "../res/local/sandbox_staking_whitelist_contract.wasm";
 

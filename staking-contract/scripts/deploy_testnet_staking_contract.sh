@@ -8,10 +8,10 @@
 #   - WASM built at res/local/staking_contract.wasm, or run with BUILD_WASM=1.
 #
 # Usage:
-#   BUILD_WASM=1 ./scripts/deploy_testnet_staking_contract.sh <staking-account.testnet>
-#   ACTION=upgrade ./scripts/deploy_testnet_staking_contract.sh <staking-account.testnet>
-#   ACTION=configure ./scripts/deploy_testnet_staking_contract.sh hos-e2e-0601144939.testnet
-#   ACTION=upgrade-and-configure BUILD_WASM=1 ./scripts/deploy_testnet_staking_contract.sh hos-e2e-0601144939.testnet
+#   BUILD_WASM=1 ./staking-contract/scripts/deploy_testnet_staking_contract.sh <staking-account.testnet>
+#   ACTION=upgrade ./staking-contract/scripts/deploy_testnet_staking_contract.sh <staking-account.testnet>
+#   ACTION=configure ./staking-contract/scripts/deploy_testnet_staking_contract.sh hos-e2e-0601144939.testnet
+#   ACTION=upgrade-and-configure BUILD_WASM=1 ./staking-contract/scripts/deploy_testnet_staking_contract.sh hos-e2e-0601144939.testnet
 #
 # Common environment:
 #   CHAIN_ID=testnet
@@ -62,7 +62,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
 usage() {
@@ -297,7 +297,7 @@ if printf '%s' "$VALIDATORS_JSON" | jq -e 'any(.[]; .deploy_mock_pool == true)' 
 fi
 
 if [[ "${BUILD_WASM:-0}" == "1" ]]; then
-  "$REPO_ROOT/scripts/build_staking_wasm.sh"
+  "$REPO_ROOT/staking-contract/scripts/build_staking_wasm.sh"
   if [[ "$needs_mock_pool" == "1" ]]; then
     make mock-staking-pool-contract
   fi
