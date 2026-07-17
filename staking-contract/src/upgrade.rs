@@ -56,6 +56,22 @@ struct ContractV1_0_1 {
 
 impl From<ContractV1_0_1> for Contract {
     fn from(old: ContractV1_0_1) -> Self {
+        let mut user_pending_unstake_validator_count =
+            LookupMap::new(StorageKeys::UserPendingUnstakeValidatorCount);
+        for validator_id in old.validator_ids.iter() {
+            if let Some(validator) = old.validators.get(validator_id) {
+                let validator: Validator = validator.clone().into();
+                for account_id in validator.accounts_with_pending_unstake {
+                    let next = user_pending_unstake_validator_count
+                        .get(&account_id)
+                        .copied()
+                        .unwrap_or(0u32)
+                        .saturating_add(1);
+                    user_pending_unstake_validator_count.insert(account_id, next);
+                }
+            }
+        }
+
         let mut subscription_ids = IterableMap::new(StorageKeys::SubscriptionIds);
         for subscription_id in old.subscription_ids.iter() {
             subscription_ids.insert(subscription_id.clone(), ());
@@ -74,6 +90,7 @@ impl From<ContractV1_0_1> for Contract {
             locks: old.locks,
             user_validator_shares: old.user_validator_shares,
             user_pending_unstake: old.user_pending_unstake,
+            user_pending_unstake_validator_count,
             user_lock_count: old.user_lock_count,
             user_farm_position_count: LookupMap::new(StorageKeys::UserFarmPositionCount),
             purchases: old.purchases,

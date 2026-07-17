@@ -35,7 +35,7 @@ Typical sequence after locks exist (no public `epoch_stake` / `epoch_unstake` / 
 1. **`lock`** — Mints shares, queues `pending_to_stake`, then [`try_epoch_stake_or_unstake`](src/epoch.rs) runs after balance refresh (one pool **`deposit_and_stake`** or **`unstake`** per NEAR epoch, net of pending buckets).
 2. User **`unlock`** — After lock period; refresh balance, queue unstake, then **`unstake`** / withdraw-from-pool as needed.
 3. Wait **`epoch_unstake_settle_epochs`** (config) after each successful pool **`unstake`**.
-4. User **`withdraw(validator_id)`** — May pull unstaked NEAR from the pool into `pending_to_withdraw` when allowed, then pro-rata claim and **transfer** that NEAR to the caller in one flow.
+4. User **`withdraw(validator_id)`** — May pull unstaked NEAR from the pool by moving `pending_to_withdraw` into the in-contract `pending_to_claim` bucket when allowed, then pro-rata claim and **transfer** that NEAR to the caller in one flow.
 
 **Per pool and NEAR epoch (matches the staking pool contract):** the pool accepts **at most one** successful **`deposit_and_stake`** **or** **`unstake`** per `epoch_height` for that pool account. The contract records the epoch of the last such success in **`Validator.last_settlement_epoch`**, so a second success in the **same** epoch is rejected.
 

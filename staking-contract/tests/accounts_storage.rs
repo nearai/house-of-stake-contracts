@@ -207,6 +207,8 @@ fn storage_unregister_returns_false_with_pending_unstake_tranches() {
             available_epoch_height: 0,
         }],
     );
+    c.user_pending_unstake_validator_count
+        .insert(acct(BUYER), 1);
 
     testing_env!(ctx(acct(BUYER), one_yocto()));
     assert!(!c.storage_unregister(None));
