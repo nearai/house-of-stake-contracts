@@ -334,7 +334,7 @@ impl Contract {
             .insert(account_id.clone(), ids);
 
         if add_global {
-            self.subscription_ids.push(subscription_id.clone());
+            self.subscription_ids.insert(subscription_id.clone(), ());
         }
     }
 
@@ -364,17 +364,7 @@ impl Contract {
             return;
         }
 
-        let Some(index) = self
-            .subscription_ids
-            .iter()
-            .position(|id| id == subscription_id)
-        else {
-            return;
-        };
-        let Ok(index) = u32::try_from(index) else {
-            return;
-        };
-        self.subscription_ids.swap_remove(index);
+        self.subscription_ids.remove(subscription_id);
     }
 
     pub(crate) fn assert_no_pending_update_references_price(&self, price_id: &PriceId) {
