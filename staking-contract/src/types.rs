@@ -1,6 +1,7 @@
 //! Catalog, lifecycle, and versioned on-chain storage types.
 
 use crate::config::Config;
+pub use near_contract_standards::storage_management::{StorageBalance, StorageBalanceBounds};
 use near_sdk::borsh::{BorshDeserialize, BorshSerialize, io};
 use near_sdk::json_types::{U64, U128};
 use near_sdk::{AccountId, NearToken, env, near};
@@ -97,22 +98,6 @@ impl Default for Account {
             storage_deposit: NearToken::from_near(0),
         }
     }
-}
-
-/// NEP-145 storage balance for a registered account.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[near(serializers = [json])]
-pub struct StorageBalance {
-    pub total: NearToken,
-    pub available: NearToken,
-}
-
-/// NEP-145 registration bounds.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[near(serializers = [json])]
-pub struct StorageBalanceBounds {
-    pub min: NearToken,
-    pub max: Option<NearToken>,
 }
 
 /// Allowlisted staking pool row (pool contract account id + share-pool accounting).
