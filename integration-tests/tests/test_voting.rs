@@ -1620,8 +1620,7 @@ async fn test_proposal_with_transfer_action() -> Result<(), Box<dyn std::error::
 
     // Fund the voting contract so it can execute transfers
     let voting_id: AccountId = v.voting_id().clone();
-    let _ = v
-        .sandbox
+    v.sandbox
         .root_account()?
         .transfer_near(&voting_id, NearToken::from_near(5))
         .await?
@@ -1710,7 +1709,7 @@ async fn test_proposal_with_function_call_actions() -> Result<(), Box<dyn std::e
 
     // Propose transferring ownership to the voting contract itself,
     // so governance proposals can change its config.
-    let _ = voting
+    voting
         .owner
         .call(v.voting_id(), "propose_new_owner_account_id")
         .args_json(json!({ "new_owner_account_id": v.voting_id() }))

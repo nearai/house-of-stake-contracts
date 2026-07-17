@@ -371,7 +371,6 @@ pub async fn test_lockup_staking() -> Result<(), Box<dyn std::error::Error>> {
 
     let account_details = v.sandbox.view_account(&lockup_id).await?;
     let initial_balance = account_details.balance;
-    let staking_pool_balance_delta = NearToken::from_millinear(100);
 
     // Deposit and stake 50 NEAR
     let outcome = user
@@ -403,7 +402,7 @@ pub async fn test_lockup_staking() -> Result<(), Box<dyn std::error::Error>> {
         initial_balance
             .checked_sub(NearToken::from_near(50))
             .unwrap(),
-        staking_pool_balance_delta,
+        NearToken::from_millinear(1),
     );
 
     // Verify staked amount
@@ -463,9 +462,9 @@ pub async fn test_lockup_staking() -> Result<(), Box<dyn std::error::Error>> {
     assert_almost_eq(
         user_account_details.balance,
         initial_user_balance
-            .checked_add(NearToken::from_near(5))
+            .checked_add(NearToken::from_millinear(5020))
             .unwrap(),
-        NearToken::from_millinear(250),
+        NearToken::from_millinear(1),
     );
 
     let lockup_account_details = v.sandbox.view_account(&lockup_id).await?;
@@ -648,7 +647,7 @@ pub async fn test_lockup_staking() -> Result<(), Box<dyn std::error::Error>> {
         initial_lockup_balance
             .checked_add(NearToken::from_near(25))
             .unwrap(),
-        staking_pool_balance_delta,
+        NearToken::from_millinear(1),
     );
 
     let initial_lockup_balance = account_details.balance;
@@ -695,7 +694,7 @@ pub async fn test_lockup_staking() -> Result<(), Box<dyn std::error::Error>> {
         initial_lockup_balance
             .checked_add(NearToken::from_near(35))
             .unwrap(),
-        staking_pool_balance_delta,
+        NearToken::from_millinear(1),
     );
 
     let initial_lockup_balance = account_details.balance;
@@ -824,7 +823,7 @@ pub async fn test_lockup_staking() -> Result<(), Box<dyn std::error::Error>> {
         initial_lockup_balance
             .checked_add(NearToken::from_near(40))
             .unwrap(),
-        staking_pool_balance_delta,
+        NearToken::from_millinear(1),
     );
 
     // Unselect the staking pool
