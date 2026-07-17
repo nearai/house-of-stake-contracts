@@ -314,61 +314,57 @@ impl Contract {
         }
     }
 
-    pub(crate) fn add_subscription_to_account_index(
+    pub(crate) fn add_subscription_to_indexes(
         &mut self,
         account_id: &AccountId,
         subscription_id: &SubscriptionId,
+        add_global: bool,
     ) {
         let mut ids = self
             .subscriptions_by_account
             .get(account_id)
             .cloned()
             .unwrap_or_default();
-        if !ids.iter().any(|id| id == subscription_id) {
-            ids.push(subscription_id.clone());
-            self.subscriptions_by_account
-                .insert(account_id.clone(), ids);
-        }
-    }
-
-    pub(crate) fn add_subscription_to_global_index(&mut self, subscription_id: &SubscriptionId) {
-        if self.subscription_ids.iter().any(|id| id == subscription_id) {
+        if ids.iter().any(|id| id == subscription_id) {
             return;
         }
-        self.subscription_ids.push(subscription_id.clone());
+
+        ids.push(subscription_id.clone());
+        self.subscriptions_by_account
+            .insert(account_id.clone(), ids);
+
+        if add_global {
+            self.subscription_ids.insert(subscription_id.clone(), ());
+        }
     }
 
-    pub(crate) fn remove_subscription_from_account_index(
+    pub(crate) fn remove_subscription_from_indexes(
         &mut self,
         account_id: &AccountId,
         subscription_id: &SubscriptionId,
+        remove_global: bool,
     ) {
         let Some(mut ids) = self.subscriptions_by_account.get(account_id).cloned() else {
             return;
         };
         let before = ids.len();
         ids.retain(|id| id != subscription_id);
-        if ids.len() != before {
+        if ids.len() == before {
+            return;
+        }
+
+        if ids.is_empty() {
+            self.subscriptions_by_account.remove(account_id);
+        } else {
             self.subscriptions_by_account
                 .insert(account_id.clone(), ids);
         }
-    }
 
-    pub(crate) fn remove_subscription_from_global_index(
-        &mut self,
-        subscription_id: &SubscriptionId,
-    ) {
-        let Some(index) = self
-            .subscription_ids
-            .iter()
-            .position(|id| id == subscription_id)
-        else {
+        if !remove_global {
             return;
-        };
-        let Ok(index) = u32::try_from(index) else {
-            return;
-        };
-        self.subscription_ids.swap_remove(index);
+        }
+
+        self.subscription_ids.remove(subscription_id);
     }
 
     pub(crate) fn assert_no_pending_update_references_price(&self, price_id: &PriceId) {

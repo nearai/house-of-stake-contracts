@@ -24,7 +24,7 @@ pub mod withdraw;
 pub use config::Config;
 pub use types::*;
 
-use near_sdk::store::{LookupMap, Vector};
+use near_sdk::store::{IterableMap, LookupMap, Vector};
 use near_sdk::{AccountId, BorshStorageKey, NearToken, PanicOnDefault, near};
 
 #[derive(BorshStorageKey)]
@@ -118,8 +118,8 @@ pub struct Contract {
     /// Secondary index: `subscriber` → owned subscription ids. Used for account-level listing and
     /// subscription-specific plan changes without scanning the full catalog.
     pub subscriptions_by_account: LookupMap<AccountId, Vec<SubscriptionId>>,
-    /// Creation order of subscription ids. Used by catalog admin guards to detect pending references.
-    pub subscription_ids: Vector<SubscriptionId>,
+    /// Subscription ids keyed for efficient membership and removal while remaining iterable for views.
+    pub subscription_ids: IterableMap<SubscriptionId, ()>,
     /// Pending subscription-update target price reference counts, used by bounded catalog guards.
     pub pending_update_target_price_counts: LookupMap<PriceId, u32>,
     /// Pending subscription-update target product reference counts, used by bounded catalog guards.
@@ -164,7 +164,7 @@ impl Contract {
                 StorageKeys::SubscriptionByAccountProduct,
             ),
             subscriptions_by_account: LookupMap::new(StorageKeys::SubscriptionsByAccount),
-            subscription_ids: Vector::new(StorageKeys::SubscriptionIds),
+            subscription_ids: IterableMap::new(StorageKeys::SubscriptionIds),
             pending_update_target_price_counts: LookupMap::new(
                 StorageKeys::PendingUpdateTargetPriceCounts,
             ),

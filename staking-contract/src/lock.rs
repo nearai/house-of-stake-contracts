@@ -216,8 +216,7 @@ impl Contract {
                 // creates a fresh subscription (same path as first-time subscribe).
                 let old_sub_key = (buyer.clone(), sub.product_id.clone());
                 self.subscription_by_account_product.remove(&old_sub_key);
-                self.remove_subscription_from_account_index(&buyer, &sid);
-                self.remove_subscription_from_global_index(&sid);
+                self.remove_subscription_from_indexes(&buyer, &sid, true);
                 self.internal_remove_subscription(&sid);
                 let (sid_new, sub_new) =
                     self.new_subscription_for_lock(&buyer, &product, &price_id, now);
@@ -433,9 +432,8 @@ impl Contract {
                 subscription.product_id.clone(),
             );
             self.internal_set_subscription(sub_id.clone(), subscription);
-            self.add_subscription_to_account_index(&buyer, &sub_id);
+            self.add_subscription_to_indexes(&buyer, &sub_id, is_new_index);
             if is_new_index {
-                self.add_subscription_to_global_index(&sub_id);
                 self.subscription_by_account_product
                     .insert(sub_key, sub_id.clone());
             }
