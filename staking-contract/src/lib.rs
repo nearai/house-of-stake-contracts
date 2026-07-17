@@ -57,7 +57,7 @@ enum StorageKeys {
     FarmPositionProductsByAccount,
     FarmAccounts,
     UserFarmPositionCount,
-    UserPendingUnstakeValidators,
+    UserPendingUnstakeValidatorCount,
 }
 
 #[derive(PanicOnDefault)]
@@ -90,9 +90,9 @@ pub struct Contract {
     /// After unlock, NEAR liability slices for this user on this pool until [`crate::Contract::withdraw`]
     /// (epoch-gated; paid from `pending_to_claim` once pool funds are in the contract claim bucket).
     pub user_pending_unstake: LookupMap<(AccountId, ValidatorId), Vec<PendingUnstakeTranche>>,
-    /// Validator pools for which an account has at least one pending unstake tranche.
+    /// Number of validator pools for which an account has at least one pending unstake tranche.
     /// This keeps `storage_unregister` bounded by account state instead of scanning every validator.
-    pub user_pending_unstake_validators: LookupMap<AccountId, Vec<ValidatorId>>,
+    pub user_pending_unstake_validator_count: LookupMap<AccountId, u32>,
     /// Monotonic count of locks created per account; multiplied by [`Config::per_lock_storage_stake`] for prepaid lock storage.
     pub user_lock_count: LookupMap<AccountId, u32>,
     /// Direct one-off payment records keyed by [`Purchase::purchase_id`] (`pay_*`).
@@ -150,8 +150,8 @@ impl Contract {
             locks: LookupMap::new(StorageKeys::Locks),
             user_validator_shares: LookupMap::new(StorageKeys::UserValidatorShares),
             user_pending_unstake: LookupMap::new(StorageKeys::UserPendingUnstake),
-            user_pending_unstake_validators: LookupMap::new(
-                StorageKeys::UserPendingUnstakeValidators,
+            user_pending_unstake_validator_count: LookupMap::new(
+                StorageKeys::UserPendingUnstakeValidatorCount,
             ),
             user_lock_count: LookupMap::new(StorageKeys::UserLockCount),
             purchases: LookupMap::new(StorageKeys::Purchases),

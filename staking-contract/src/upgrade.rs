@@ -56,20 +56,18 @@ struct ContractV1_0_1 {
 
 impl From<ContractV1_0_1> for Contract {
     fn from(old: ContractV1_0_1) -> Self {
-        let mut user_pending_unstake_validators: LookupMap<AccountId, Vec<ValidatorId>> =
-            LookupMap::new(StorageKeys::UserPendingUnstakeValidators);
+        let mut user_pending_unstake_validator_count =
+            LookupMap::new(StorageKeys::UserPendingUnstakeValidatorCount);
         for validator_id in old.validator_ids.iter() {
             if let Some(validator) = old.validators.get(validator_id) {
                 let validator: Validator = validator.clone().into();
                 for account_id in validator.accounts_with_pending_unstake {
-                    let mut validator_ids = user_pending_unstake_validators
+                    let next = user_pending_unstake_validator_count
                         .get(&account_id)
-                        .cloned()
-                        .unwrap_or_default();
-                    if !validator_ids.contains(validator_id) {
-                        validator_ids.push(validator_id.clone());
-                    }
-                    user_pending_unstake_validators.insert(account_id, validator_ids);
+                        .copied()
+                        .unwrap_or(0u32)
+                        .saturating_add(1);
+                    user_pending_unstake_validator_count.insert(account_id, next);
                 }
             }
         }
@@ -87,7 +85,7 @@ impl From<ContractV1_0_1> for Contract {
             locks: old.locks,
             user_validator_shares: old.user_validator_shares,
             user_pending_unstake: old.user_pending_unstake,
-            user_pending_unstake_validators,
+            user_pending_unstake_validator_count,
             user_lock_count: old.user_lock_count,
             user_farm_position_count: LookupMap::new(StorageKeys::UserFarmPositionCount),
             purchases: old.purchases,

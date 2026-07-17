@@ -199,10 +199,11 @@ impl Contract {
     }
 
     fn has_pending_unstake_tranches(&self, account_id: &AccountId) -> bool {
-        self.user_pending_unstake_validators
+        self.user_pending_unstake_validator_count
             .get(account_id)
-            .map(|validator_ids| !validator_ids.is_empty())
-            .unwrap_or(false)
+            .copied()
+            .unwrap_or(0)
+            > 0
     }
 
     pub(crate) fn set_user_pending_unstake_tranches(
@@ -211,7 +212,6 @@ impl Contract {
         tranches: Vec<PendingUnstakeTranche>,
     ) {
         let account_id = account_validator_key.0.clone();
-        let validator_id = account_validator_key.1.clone();
         let had_tranches = self
             .user_pending_unstake
             .get(&account_validator_key)
@@ -227,43 +227,38 @@ impl Contract {
         }
 
         match (had_tranches, has_tranches) {
-            (false, true) => self.add_pending_unstake_validator(&account_id, validator_id),
-            (true, false) => self.remove_pending_unstake_validator(&account_id, &validator_id),
+            (false, true) => self.increment_pending_unstake_validator_count(&account_id),
+            (true, false) => self.decrement_pending_unstake_validator_count(&account_id),
             _ => {}
         }
     }
 
-    fn add_pending_unstake_validator(&mut self, account_id: &AccountId, validator_id: ValidatorId) {
-        let mut validator_ids = self
-            .user_pending_unstake_validators
+    fn increment_pending_unstake_validator_count(&mut self, account_id: &AccountId) {
+        let next = self
+            .user_pending_unstake_validator_count
             .get(account_id)
-            .cloned()
-            .unwrap_or_default();
-        if !validator_ids.contains(&validator_id) {
-            validator_ids.push(validator_id);
-        }
-        self.user_pending_unstake_validators
-            .insert(account_id.clone(), validator_ids);
+            .copied()
+            .unwrap_or(0)
+            .checked_add(1)
+            .expect("pending unstake validator count overflow");
+        self.user_pending_unstake_validator_count
+            .insert(account_id.clone(), next);
     }
 
-    fn remove_pending_unstake_validator(
-        &mut self,
-        account_id: &AccountId,
-        validator_id: &ValidatorId,
-    ) {
-        let Some(mut validator_ids) = self
-            .user_pending_unstake_validators
+    fn decrement_pending_unstake_validator_count(&mut self, account_id: &AccountId) {
+        match self
+            .user_pending_unstake_validator_count
             .get(account_id)
-            .cloned()
-        else {
-            return;
-        };
-        validator_ids.retain(|id| id != validator_id);
-        if validator_ids.is_empty() {
-            self.user_pending_unstake_validators.remove(account_id);
-        } else {
-            self.user_pending_unstake_validators
-                .insert(account_id.clone(), validator_ids);
+            .copied()
+            .unwrap_or(0)
+        {
+            0 | 1 => {
+                self.user_pending_unstake_validator_count.remove(account_id);
+            }
+            count => {
+                self.user_pending_unstake_validator_count
+                    .insert(account_id.clone(), count - 1);
+            }
         }
     }
 
