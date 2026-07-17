@@ -346,11 +346,6 @@ impl Contract {
 
     // --- [Pipeline 3 / 3a] ---
 
-    fn promise_epoch_settlement_dispatch(&mut self, cont: UserAction) -> Promise {
-        // Same-contract dispatch continuation does not need an extra self-promise hop.
-        self.on_epoch_settlement_dispatch_continue(cont)
-    }
-
     /// **[Pipeline 3]** At most one pool `deposit_and_stake` or `unstake` per NEAR epoch (**3a** net-zero inline).
     /// Skip to **4** when nothing pending or slot used; else pool op → **3′** → **4**.
     pub(crate) fn try_epoch_stake_or_unstake(
@@ -370,13 +365,13 @@ impl Contract {
         let can_settle = validator.last_settlement_epoch < epoch_height();
 
         if !has_pending || !can_settle {
-            return self.promise_epoch_settlement_dispatch(dispatch_after);
+            return self.on_epoch_settlement_dispatch_continue(dispatch_after);
         }
 
         if pending_stake_yocto == pending_unstake_yocto && pending_stake_yocto > 0 {
             events::log_epoch_operation("epoch_settle_net_zero", &validator_id);
             let _ = self.apply_net_zero_pending_matched_clear(&validator_id, pending_stake_yocto);
-            return self.promise_epoch_settlement_dispatch(dispatch_after);
+            return self.on_epoch_settlement_dispatch_continue(dispatch_after);
         }
 
         let pool_settle = if pending_stake_yocto > pending_unstake_yocto {
@@ -395,7 +390,7 @@ impl Contract {
             if validator.last_unstake_epoch > 0 {
                 if !self.validator_unstake_waiting_finished(&validator) {
                     events::log_epoch_operation("epoch_settle_unstake_waiting", &validator_id);
-                    return self.promise_epoch_settlement_dispatch(dispatch_after);
+                    return self.on_epoch_settlement_dispatch_continue(dispatch_after);
                 }
             }
             let net = NearToken::from_yoctonear(pending_unstake_yocto - pending_stake_yocto);
