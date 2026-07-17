@@ -36,10 +36,9 @@ fn storage_deposit_returns_updated_balance() {
 
     assert_eq!(balance.total, NearToken::from_millinear(200));
     assert_eq!(balance.available, NearToken::from_millinear(100));
-    assert_eq!(
-        c.storage_balance_of(acct(BUYER)).expect("registered"),
-        balance
-    );
+    let stored = c.storage_balance_of(acct(BUYER)).expect("registered");
+    assert_eq!(stored.total, balance.total);
+    assert_eq!(stored.available, balance.available);
 }
 
 #[test]
