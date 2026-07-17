@@ -188,14 +188,9 @@ impl Contract {
             .map(|tranche| tranche.amount.as_yoctonear())
             .fold(0u128, |sum, yocto| sum.saturating_add(yocto));
         tranches.retain(|tranche| at_epoch < tranche.available_epoch_height);
-        if tranches.is_empty() {
-            self.user_pending_unstake.remove(account_validator_key);
-            (claimable_yocto, true)
-        } else {
-            self.user_pending_unstake
-                .insert(account_validator_key.clone(), tranches);
-            (claimable_yocto, false)
-        }
+        let user_done = tranches.is_empty();
+        self.set_user_pending_unstake_tranches(account_validator_key.clone(), tranches);
+        (claimable_yocto, user_done)
     }
 
     /// Drops all epoch-eligible tranches, debits the claim bucket by their sum, and returns that NEAR.

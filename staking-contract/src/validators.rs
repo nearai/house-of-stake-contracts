@@ -314,8 +314,10 @@ impl Contract {
             amount: near_token,
             available_epoch_height,
         });
-        self.user_pending_unstake
-            .insert(account_validator_shares_key, pending_unstake_tranches);
+        self.set_user_pending_unstake_tranches(
+            account_validator_shares_key,
+            pending_unstake_tranches,
+        );
 
         // Validator-level index of accounts that still have queued or claimable exit NEAR.
         if !validator
