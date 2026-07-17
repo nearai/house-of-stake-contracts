@@ -9,7 +9,6 @@ NEAR smart contract for pooled staking tied to NEAR AI **products** and **prices
 | [docs/API.md](docs/API.md) | Public contract methods (RPC-facing API) |
 | [docs/DESIGN.md](docs/DESIGN.md) | Readable architecture summary + pointers |
 | [docs/README.md](docs/README.md) | Documentation index |
-| [docs/operations/production-readiness.md](docs/operations/production-readiness.md) | Open work / backlog vs design |
 | [docs/review/core-features.md](docs/review/core-features.md) | Reviewer quick reference (features + file priority) |
 | [docs/features/lazy-epoch-pipeline.md](docs/features/lazy-epoch-pipeline.md) | Pool scheduling, settlement chain, callbacks (authoritative) |
 | [docs/review/code-review.md](docs/review/code-review.md) | Pre-merge review checklist |
@@ -56,8 +55,6 @@ Implemented in code:
 - Pool callbacks in [`epoch.rs`](src/epoch.rs); **`storage_withdraw`**
 - **EVENT_JSON** for lock/unlock, catalog, validators, epoch ops, claim/withdraw, pool withdraw-in ([`events.rs`](src/events.rs)) — `standard: "stake.dao"`, `version: "1.0.0"`, nested `data`
 - **`get_products`**, **`get_product_default_price`**, catalog **`unarchive_*`**, **`set_product_default_price`**; **`lock`** accepts explicit **`price_id`** or **`product_id`** (uses **`Product.default_price_id`**) ([`products.rs`](src/products.rs), [`lock.rs`](src/lock.rs))
-
-**Before mainnet:** see [docs/operations/production-readiness.md](docs/operations/production-readiness.md) for the production readiness checklist (audit, real-pool testnet validation, deploy runbook, E2E tests, and launch follow-ups).
 
 ## Workspace
 

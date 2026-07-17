@@ -1,6 +1,6 @@
 # Staking Contract — Detailed Design
 
-This document is the design reference for `stake.dao` (the `staking-contract` crate). Implementation may evolve; see [README.md](../README.md), [features/lazy-epoch-pipeline.md](features/lazy-epoch-pipeline.md) (authoritative for validator pool scheduling), and [operations/production-readiness.md](operations/production-readiness.md) for scope and status.
+This document is the design reference for `stake.dao` (the `staking-contract` crate). Implementation may evolve; see [README.md](../README.md) and [features/lazy-epoch-pipeline.md](features/lazy-epoch-pipeline.md) (authoritative for validator pool scheduling).
 
 ---
 
