@@ -1,6 +1,6 @@
 use crate::*;
 use near_sdk::env;
-use near_sdk::store::{LookupMap, Vector};
+use near_sdk::store::{IterableMap, LookupMap, Vector};
 
 #[cfg(target_arch = "wasm32")]
 use near_sdk::{Gas, sys};
@@ -72,6 +72,11 @@ impl From<ContractV1_0_1> for Contract {
             }
         }
 
+        let mut subscription_ids = IterableMap::new(StorageKeys::SubscriptionIds);
+        for subscription_id in old.subscription_ids.iter() {
+            subscription_ids.insert(subscription_id.clone(), ());
+        }
+
         Self {
             config: Config::from(old.config).into(),
             paused: old.paused,
@@ -102,7 +107,7 @@ impl From<ContractV1_0_1> for Contract {
             farm_accounts: LookupMap::new(StorageKeys::FarmAccounts),
             subscription_by_account_product: old.subscription_by_account_product,
             subscriptions_by_account: old.subscriptions_by_account,
-            subscription_ids: old.subscription_ids,
+            subscription_ids,
             pending_update_target_price_counts: old.pending_update_target_price_counts,
             pending_update_target_product_counts: old.pending_update_target_product_counts,
             id_nonce: old.id_nonce,
