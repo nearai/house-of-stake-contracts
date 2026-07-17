@@ -190,13 +190,13 @@ impl Contract {
 }
 
 impl Contract {
-    pub(crate) fn internal_get_purchase(&self, id: &PurchaseId) -> Option<Purchase> {
-        self.purchases.get(id).cloned().map(Into::into)
-    }
-
-    pub(crate) fn internal_set_purchase(&mut self, id: PurchaseId, purchase: Purchase) {
-        self.purchases.insert(id, purchase.into());
-    }
+    impl_versioned_lookup_accessors!(
+        internal_get_purchase,
+        internal_set_purchase,
+        purchases,
+        PurchaseId,
+        Purchase
+    );
 
     fn add_purchase_to_account_index(&mut self, account_id: &AccountId, purchase_id: &PurchaseId) {
         let mut ids = self

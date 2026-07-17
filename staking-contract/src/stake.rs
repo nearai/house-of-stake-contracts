@@ -202,13 +202,13 @@ impl Contract {
 }
 
 impl Contract {
-    pub(crate) fn internal_get_farm_pool(&self, id: &PriceId) -> Option<FarmPool> {
-        self.farm_pools.get(id).cloned().map(Into::into)
-    }
-
-    pub(crate) fn internal_set_farm_pool(&mut self, id: PriceId, pool: FarmPool) {
-        self.farm_pools.insert(id, pool.into());
-    }
+    impl_versioned_lookup_accessors!(
+        internal_get_farm_pool,
+        internal_set_farm_pool,
+        farm_pools,
+        PriceId,
+        FarmPool
+    );
 
     pub(crate) fn require_farm_pool(&self, price_id: &PriceId) -> FarmPool {
         self.internal_get_farm_pool(price_id)
@@ -233,17 +233,13 @@ impl Contract {
         );
     }
 
-    pub(crate) fn internal_get_farm_account(&self, account_id: &AccountId) -> Option<FarmAccount> {
-        self.farm_accounts.get(account_id).cloned().map(Into::into)
-    }
-
-    pub(crate) fn internal_set_farm_account(
-        &mut self,
-        account_id: AccountId,
-        account: FarmAccount,
-    ) {
-        self.farm_accounts.insert(account_id, account.into());
-    }
+    impl_versioned_lookup_accessors!(
+        internal_get_farm_account,
+        internal_set_farm_account,
+        farm_accounts,
+        AccountId,
+        FarmAccount
+    );
 
     pub(crate) fn require_no_active_farm_price_for_product(&self, product: &Product) {
         for price_id in &product.price_ids {

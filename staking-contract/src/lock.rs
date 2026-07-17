@@ -285,13 +285,7 @@ impl Contract {
 }
 
 impl Contract {
-    pub(crate) fn internal_get_lock(&self, id: &LockId) -> Option<Lock> {
-        self.locks.get(id).cloned().map(Into::into)
-    }
-
-    pub(crate) fn internal_set_lock(&mut self, id: LockId, lock: Lock) {
-        self.locks.insert(id, lock.into());
-    }
+    impl_versioned_lookup_accessors!(internal_get_lock, internal_set_lock, locks, LockId, Lock);
 
     pub(crate) fn lock_entry_preamble(&self) -> (AccountId, NearToken) {
         self.assert_not_paused();

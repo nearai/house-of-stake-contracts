@@ -1,5 +1,8 @@
 #![allow(clippy::too_many_arguments)]
 
+#[macro_use]
+mod macros;
+
 pub mod accounts;
 pub mod config;
 pub mod epoch;

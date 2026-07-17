@@ -361,13 +361,13 @@ impl Contract {
 }
 
 impl Contract {
-    pub(crate) fn internal_get_price(&self, id: &PriceId) -> Option<Price> {
-        self.prices.get(id).cloned().map(Into::into)
-    }
-
-    pub(crate) fn internal_set_price(&mut self, id: PriceId, price: Price) {
-        self.prices.insert(id, price.into());
-    }
+    impl_versioned_lookup_accessors!(
+        internal_get_price,
+        internal_set_price,
+        prices,
+        PriceId,
+        Price
+    );
 
     pub(crate) fn require_price(&self, price_id: &PriceId) -> Price {
         self.internal_get_price(price_id)

@@ -723,19 +723,7 @@ pub enum VValidator {
     V0(Validator),
 }
 
-impl From<Validator> for VValidator {
-    fn from(value: Validator) -> Self {
-        Self::V0(value)
-    }
-}
-
-impl From<VValidator> for Validator {
-    fn from(value: VValidator) -> Self {
-        match value {
-            VValidator::V0(inner) => inner,
-        }
-    }
-}
+impl_versioned_value!(VValidator, Validator, V0, [V0]);
 
 #[derive(Clone)]
 #[near(serializers = [borsh])]
@@ -743,19 +731,7 @@ pub enum VProduct {
     V0(Product),
 }
 
-impl From<Product> for VProduct {
-    fn from(value: Product) -> Self {
-        Self::V0(value)
-    }
-}
-
-impl From<VProduct> for Product {
-    fn from(value: VProduct) -> Self {
-        match value {
-            VProduct::V0(inner) => inner,
-        }
-    }
-}
+impl_versioned_value!(VProduct, Product, V0, [V0]);
 
 #[derive(Clone)]
 pub enum VPrice {
@@ -763,20 +739,7 @@ pub enum VPrice {
     V1(Price),
 }
 
-impl From<Price> for VPrice {
-    fn from(value: Price) -> Self {
-        Self::V1(value)
-    }
-}
-
-impl From<VPrice> for Price {
-    fn from(value: VPrice) -> Self {
-        match value {
-            VPrice::V0(inner) => inner,
-            VPrice::V1(inner) => inner,
-        }
-    }
-}
+impl_versioned_value!(VPrice, Price, V1, [V0, V1]);
 
 impl BorshSerialize for VPrice {
     fn serialize<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
@@ -825,19 +788,7 @@ pub enum VAccount {
     V0(Account),
 }
 
-impl From<Account> for VAccount {
-    fn from(value: Account) -> Self {
-        Self::V0(value)
-    }
-}
-
-impl From<VAccount> for Account {
-    fn from(value: VAccount) -> Self {
-        match value {
-            VAccount::V0(inner) => inner,
-        }
-    }
-}
+impl_versioned_value!(VAccount, Account, V0, [V0]);
 
 #[derive(Clone)]
 #[near(serializers = [borsh])]
@@ -845,19 +796,7 @@ pub enum VSubscription {
     V0(Subscription),
 }
 
-impl From<Subscription> for VSubscription {
-    fn from(value: Subscription) -> Self {
-        Self::V0(value)
-    }
-}
-
-impl From<VSubscription> for Subscription {
-    fn from(value: VSubscription) -> Self {
-        match value {
-            VSubscription::V0(inner) => inner,
-        }
-    }
-}
+impl_versioned_value!(VSubscription, Subscription, V0, [V0]);
 
 #[derive(Clone)]
 #[near(serializers = [borsh])]
@@ -865,19 +804,7 @@ pub enum VLock {
     V0(Lock),
 }
 
-impl From<Lock> for VLock {
-    fn from(value: Lock) -> Self {
-        Self::V0(value)
-    }
-}
-
-impl From<VLock> for Lock {
-    fn from(value: VLock) -> Self {
-        match value {
-            VLock::V0(inner) => inner,
-        }
-    }
-}
+impl_versioned_value!(VLock, Lock, V0, [V0]);
 
 #[derive(Clone)]
 #[near(serializers = [borsh])]
@@ -885,25 +812,15 @@ pub enum VPurchase {
     V0(Purchase),
 }
 
+impl_versioned_value!(VPurchase, Purchase, V0, [V0]);
+
 #[derive(Clone)]
 #[near(serializers = [borsh])]
 pub enum VFarmPool {
     V0(FarmPool),
 }
 
-impl From<FarmPool> for VFarmPool {
-    fn from(value: FarmPool) -> Self {
-        Self::V0(value)
-    }
-}
-
-impl From<VFarmPool> for FarmPool {
-    fn from(value: VFarmPool) -> Self {
-        match value {
-            VFarmPool::V0(inner) => inner,
-        }
-    }
-}
+impl_versioned_value!(VFarmPool, FarmPool, V0, [V0]);
 
 #[derive(Clone)]
 #[near(serializers = [borsh])]
@@ -911,19 +828,7 @@ pub enum VFarmPosition {
     V0(FarmPosition),
 }
 
-impl From<FarmPosition> for VFarmPosition {
-    fn from(value: FarmPosition) -> Self {
-        Self::V0(value)
-    }
-}
-
-impl From<VFarmPosition> for FarmPosition {
-    fn from(value: VFarmPosition) -> Self {
-        match value {
-            VFarmPosition::V0(inner) => inner,
-        }
-    }
-}
+impl_versioned_value!(VFarmPosition, FarmPosition, V0, [V0]);
 
 #[derive(Clone)]
 #[near(serializers = [borsh])]
@@ -931,19 +836,7 @@ pub enum VFarmAccount {
     V0(FarmAccount),
 }
 
-impl From<FarmAccount> for VFarmAccount {
-    fn from(value: FarmAccount) -> Self {
-        Self::V0(value)
-    }
-}
-
-impl From<VFarmAccount> for FarmAccount {
-    fn from(value: VFarmAccount) -> Self {
-        match value {
-            VFarmAccount::V0(inner) => inner,
-        }
-    }
-}
+impl_versioned_value!(VFarmAccount, FarmAccount, V0, [V0]);
 
 #[cfg(test)]
 mod tests {
@@ -1025,20 +918,6 @@ mod tests {
             decoded.metadata.as_ref().unwrap().farm_reward_rate,
             Some(U128(7))
         );
-    }
-}
-
-impl From<Purchase> for VPurchase {
-    fn from(value: Purchase) -> Self {
-        Self::V0(value)
-    }
-}
-
-impl From<VPurchase> for Purchase {
-    fn from(value: VPurchase) -> Self {
-        match value {
-            VPurchase::V0(inner) => inner,
-        }
     }
 }
 
