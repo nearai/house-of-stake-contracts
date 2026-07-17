@@ -63,7 +63,7 @@ Backlog for taking **`stake.dao`** (`staking-contract`) from **implemented v1** 
 
 ### Product / economics
 
-- [ ] **Automatic period-end updates** — Due subscription updates are projected in views after `apply_ns` and lazily committed by later mutations. Decide whether v1 also needs an off-chain keeper for exact-at-boundary storage commits.
+- [x] **Automatic period-end updates** — Due subscription updates are projected in views after `apply_ns` and lazily committed by later mutations. The off-chain staking routine handles the keeper role by periodically touching due subscriptions through public contract flows; no separate on-chain keeper ABI is required for v1.
 - [ ] **Calendar-accurate billing** — Replace linear [`add_months_stripe_style`](../../src/subscriptions.rs) with true calendar month / anchor-day end dates (anchor_day is stored; logic is approximate today).
 - [ ] **Stranded `pending_to_withdraw` dust** — Rounding can leave bucket balance with zero user liability ([DESIGN.md](../DESIGN.md) §7). Either implement owner-only **`sweep_stranded_withdraw_bucket`**, or accept dust and document for governance.
 
@@ -111,7 +111,7 @@ Backlog for taking **`stake.dao`** (`staking-contract`) from **implemented v1** 
 | Topic | Location / doc |
 |--------|----------------|
 | Linear-month subscription periods | [`subscriptions.rs`](../../src/subscriptions.rs) |
-| Exact-at-boundary subscription storage commits | Due updates are projected in views, then lazily committed by later mutations |
+| Exact-at-boundary subscription storage commits | Due updates are projected in views, then lazily committed by later mutations; the off-chain staking routine is expected to trigger those public flows after `apply_ns` |
 | Stranded withdraw bucket dust | [DESIGN.md](../DESIGN.md) §7, [API.md](../API.md) withdraw note |
 | Host tests use sync lock path | [`tests/README.md`](../../tests/README.md) |
 
