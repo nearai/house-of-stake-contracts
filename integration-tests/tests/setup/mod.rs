@@ -25,7 +25,7 @@ pub const DEFAULT_BOND_AMOUNT: NearToken = NearToken::from_millinear(100);
 
 pub const LOCKUP_WASM_FILEPATH: &str = "../res/local/lockup_contract.wasm";
 pub const VENEAR_WASM_FILEPATH: &str = "../res/local/venear_contract.wasm";
-pub const VOTING_WASM_FILEPATH: &str = "../res/local/voting_contract_sandbox.wasm";
+pub const VOTING_WASM_FILEPATH: &str = "../res/local/voting_contract.wasm";
 pub const SANDBOX_CONTRACT_WASM_FILEPATH: &str =
     "../res/local/sandbox_staking_whitelist_contract.wasm";
 

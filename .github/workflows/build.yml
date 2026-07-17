@@ -32,4 +32,4 @@ jobs:
           cargo near --version
 
       - name: Build contract wasm
-        run: make all-contracts voting-contract-sandbox staking-contract-test
+        run: make all-contracts staking-contract-test

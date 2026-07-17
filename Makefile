@@ -3,7 +3,7 @@
 .DEFAULT_GOAL := help
 
 .PHONY: help all-contracts \
-	sandbox-staking-whitelist-contract venear-contract lockup-contract voting-contract voting-contract-sandbox \
+	sandbox-staking-whitelist-contract venear-contract lockup-contract voting-contract \
 	staking-contract staking-contract-test mock-staking-pool-contract \
 	whitelist venear lockup voting staking staking-test mock-pool \
 	check-sandbox-staking-whitelist-contract check-venear-contract check-lockup-contract \
@@ -21,8 +21,7 @@ help:
 	@echo "  make sandbox-staking-whitelist-contract   (alias: make whitelist)"
 	@echo "  make venear-contract                      (alias: make venear)"
 	@echo "  make lockup-contract                      (alias: make lockup)"
-	@echo "  make voting-contract                      (alias: make voting)"
-	@echo "  make voting-contract-sandbox              build sandbox-feature voting WASM for integration tests"
+	@echo "  make voting-contract                      (alias: make voting; sandbox feature for integration tests)"
 	@echo "  make staking-contract                     (alias: make staking)"
 	@echo "  make staking-contract-test                build test-feature WASM with mocked clock"
 	@echo "  make mock-staking-pool-contract           (alias: make mock-pool) for staking-contract sandbox tests"
@@ -53,14 +52,9 @@ lockup-contract:
 	cp "$(ROOT)target/near/lockup_contract/lockup_contract.wasm" "$(RES_LOCAL)/"
 
 voting-contract:
-	cd "$(ROOT)voting-contract" && cargo near build non-reproducible-wasm
-	mkdir -p "$(RES_LOCAL)"
-	cp "$(ROOT)target/near/voting_contract/voting_contract.wasm" "$(RES_LOCAL)/"
-
-voting-contract-sandbox:
 	cd "$(ROOT)voting-contract" && cargo near build non-reproducible-wasm --features sandbox
 	mkdir -p "$(RES_LOCAL)"
-	cp "$(ROOT)target/near/voting_contract/voting_contract.wasm" "$(RES_LOCAL)/voting_contract_sandbox.wasm"
+	cp "$(ROOT)target/near/voting_contract/voting_contract.wasm" "$(RES_LOCAL)/"
 
 staking-contract:
 	cd "$(ROOT)staking-contract" && cargo near build non-reproducible-wasm
@@ -110,7 +104,7 @@ test-staking-contract test-staking:
 	cd "$(ROOT)" && cargo test -p staking-contract
 
 test:
-	$(MAKE) all-contracts voting-contract-sandbox staking-contract-test
+	$(MAKE) all-contracts staking-contract-test
 	cd "$(ROOT)" && cargo test --workspace --exclude integration-tests
 	$(MAKE) test-integration
 
