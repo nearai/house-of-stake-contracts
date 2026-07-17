@@ -7,8 +7,9 @@ use common::{
     setup_catalog_near_oneoff,
 };
 use near_sdk::json_types::U64;
-use near_sdk::{NearToken, testing_env};
+use near_sdk::{AccountId, NearToken, testing_env};
 use staking_contract::types::ValidatorStatus;
+use staking_contract::validators::MAX_VALIDATORS;
 
 #[test]
 fn get_validators_includes_registered_pool() {
@@ -48,4 +49,19 @@ fn remove_validator_fails_while_pending_stake_exists() {
 
     testing_env!(ctx(acct(OWNER), one_yocto()));
     c.remove_validator(acct(POOL));
+}
+
+#[test]
+#[should_panic(expected = "Validator limit reached")]
+fn add_validator_rejects_after_max_validators() {
+    let mut c = deploy();
+
+    for index in 0..MAX_VALIDATORS {
+        let validator_id: AccountId = format!("pool-{index}.testnet").parse().unwrap();
+        testing_env!(ctx(acct(OWNER), one_yocto()));
+        c.add_validator(validator_id);
+    }
+
+    testing_env!(ctx(acct(OWNER), one_yocto()));
+    c.add_validator("pool-over-limit.testnet".parse().unwrap());
 }

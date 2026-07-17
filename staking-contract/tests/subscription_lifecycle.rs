@@ -35,6 +35,7 @@ fn cancel_then_renew_after_period_opens_fresh_subscription() {
         .get_subscription_for_product(acct(BUYER), product_id.clone())
         .expect("subscription");
     assert!(sub.cancel_at_period_end);
+    assert_eq!(c.subscription_ids.len(), 1);
 
     let renew_ts = sub.end_ns.0.saturating_add(1);
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), renew_ts));
@@ -52,6 +53,58 @@ fn cancel_then_renew_after_period_opens_fresh_subscription() {
         "new billing period should clear cancel-at-end"
     );
     assert_eq!(sub_after.status, SubscriptionStatus::Active);
+    assert_ne!(
+        sub_after.subscription_id, sub.subscription_id,
+        "cancelled renewal should replace the stale subscription"
+    );
+    assert_eq!(
+        c.subscription_ids.len(),
+        1,
+        "global index should replace the stale subscription, not grow"
+    );
+    assert_eq!(
+        c.subscriptions_by_account
+            .get(&acct(BUYER))
+            .cloned()
+            .unwrap_or_default(),
+        vec![sub_after.subscription_id]
+    );
+}
+
+#[test]
+fn active_renewal_reuses_subscription_indexes() {
+    let mut c = deploy();
+    let (product_id, price_id) = setup_catalog_near_subscription(&mut c);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let first_lock = unwrap_sync_lock_id(c.lock(Some(price_id.clone()), None, None));
+    let sub_before = c
+        .get_subscription_for_product(acct(BUYER), product_id.clone())
+        .expect("subscription");
+    assert_eq!(c.subscription_ids.len(), 1);
+
+    let renew_ts = sub_before.end_ns.0.saturating_add(1);
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), renew_ts));
+    let second_lock = unwrap_sync_lock_id(c.lock(Some(price_id), None, None));
+    assert_ne!(first_lock, second_lock);
+
+    let sub_after = c
+        .get_subscription_for_product(acct(BUYER), product_id)
+        .expect("subscription");
+    assert_eq!(sub_after.subscription_id, sub_before.subscription_id);
+    assert_eq!(
+        c.subscription_ids.len(),
+        1,
+        "renewing an active subscription must not duplicate the global index"
+    );
+    assert_eq!(
+        c.subscriptions_by_account
+            .get(&acct(BUYER))
+            .cloned()
+            .unwrap_or_default(),
+        vec![sub_after.subscription_id]
+    );
 }
 
 #[test]

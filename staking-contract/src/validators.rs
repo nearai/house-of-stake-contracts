@@ -5,6 +5,8 @@ use near_sdk::{
     AccountId, NearToken, Promise, assert_one_yocto, env, is_promise_success, near, require,
 };
 
+pub const MAX_VALIDATORS: u32 = 1_000;
+
 #[near]
 impl Contract {
     /// Contract owner: add a validator pool to the allowlist. Pool ownership for catalog operations is
@@ -16,6 +18,10 @@ impl Contract {
         require!(
             self.internal_get_validator(&validator_id).is_none(),
             "Validator already exists"
+        );
+        require!(
+            self.validator_ids.len() < MAX_VALIDATORS,
+            "Validator limit reached"
         );
 
         let new_validator = Validator {
