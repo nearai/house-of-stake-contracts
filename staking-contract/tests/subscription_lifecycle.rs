@@ -1273,6 +1273,8 @@ fn cancelled_subscription_view_does_not_project_after_period_end() {
         .get_subscription_for_product(acct(BUYER), product_id.clone())
         .expect("subscription");
     let cancelled_end = cancelled.end_ns.0;
+    let subscription_id = cancelled.subscription_id.clone();
+    assert_eq!(cancelled.status, SubscriptionStatus::Active);
 
     testing_env!(ctx_ts(
         acct(BUYER),
@@ -1285,10 +1287,22 @@ fn cancelled_subscription_view_does_not_project_after_period_end() {
     let after_by_price = c
         .get_subscription_for_price(acct(BUYER), price_id)
         .expect("subscription");
+    let after_by_id = c
+        .get_subscription(subscription_id.clone())
+        .expect("subscription");
+    let after_for_account = c
+        .get_subscriptions_for_account(acct(BUYER), 0, 10)
+        .into_iter()
+        .find(|sub| sub.subscription_id == subscription_id)
+        .expect("subscription listed for account");
 
     assert!(after.cancel_at_period_end);
     assert_eq!(after.end_ns.0, cancelled_end);
     assert_eq!(after_by_price.end_ns.0, cancelled_end);
+    assert_eq!(after.status, SubscriptionStatus::Expired);
+    assert_eq!(after_by_price.status, SubscriptionStatus::Expired);
+    assert_eq!(after_by_id.status, SubscriptionStatus::Expired);
+    assert_eq!(after_for_account.status, SubscriptionStatus::Expired);
 }
 
 #[test]
