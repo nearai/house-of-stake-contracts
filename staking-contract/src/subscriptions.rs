@@ -1081,11 +1081,18 @@ impl Contract {
     }
 
     pub(crate) fn project_subscription_view_now(&self, mut sub: Subscription) -> Subscription {
-        if sub.status != SubscriptionStatus::Active || sub.cancel_at_period_end {
+        if sub.status != SubscriptionStatus::Active {
             return sub;
         }
 
         let now = self.subscription_now(&sub.subscription_id);
+        if sub.cancel_at_period_end {
+            if now >= sub.end_ns.0 {
+                sub.status = SubscriptionStatus::Expired;
+            }
+            return sub;
+        }
+
         let mut projection_start_ns = sub.start_ns.0;
         if let Some(pending) = sub.pending_update.clone() {
             if now >= pending.apply_ns.0 {
