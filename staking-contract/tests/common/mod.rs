@@ -8,7 +8,9 @@ use near_sdk::{
     AccountId, NearToken, PromiseOrValue, PromiseResult, RuntimeFeesConfig, VMContext, serde_json,
     test_vm_config, testing_env,
 };
-use staking_contract::types::{BillingPeriod, PriceId, PriceMetadata, PriceType, ProductId};
+use staking_contract::types::{
+    BillingPeriod, PriceId, PriceMetadata, PriceType, ProductId, SubscriptionId,
+};
 use staking_contract::utils::LOCK_FACTOR_DENOM;
 use staking_contract::{Config, Contract, LockId};
 use std::collections::HashMap;
@@ -45,6 +47,17 @@ pub fn unwrap_sync_lock_id(r: PromiseOrValue<LockId>) -> LockId {
             panic!("unit tests expect synchronous lock (PromiseOrValue::Value)")
         }
     }
+}
+
+pub fn subscription_id_for_product(
+    contract: &Contract,
+    account_id: AccountId,
+    product_id: ProductId,
+) -> SubscriptionId {
+    contract
+        .get_subscription_for_product(account_id, product_id)
+        .expect("subscription")
+        .subscription_id
 }
 
 /// Baseline config; override fields in tests as needed.

@@ -106,7 +106,7 @@ fn unlock_rejects_cancelled_subscription_until_projected_period_end() {
         .0
         .saturating_add((AVG_MONTH_NS.saturating_mul(2)) as u64);
     testing_env!(ctx_ts(acct(BUYER), one_yocto(), late_ts));
-    c.cancel_subscription(product_id);
+    c.cancel_subscription(sub.subscription_id);
     c.unlock(lock_id);
 }
 

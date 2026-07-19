@@ -5,8 +5,8 @@ mod common;
 use common::{
     BUYER, POOL, VALIDATOR_OWNER_ACCOUNT, acct, add_subscription_price,
     add_subscription_price_with_metadata, add_subscription_product, ctx, ctx_ts, deploy,
-    register_buyer, setup_catalog_near_subscription, testing_env_catalog_callback,
-    unwrap_sync_lock_id,
+    register_buyer, setup_catalog_near_subscription, subscription_id_for_product,
+    testing_env_catalog_callback, unwrap_sync_lock_id,
 };
 use near_sdk::NearToken;
 use near_sdk::PromiseOrValue;
@@ -29,7 +29,8 @@ fn cancel_then_renew_after_period_opens_fresh_subscription() {
     let lock_first = unwrap_sync_lock_id(c.lock(Some(price_id.clone()), None, None));
 
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
-    c.cancel_subscription(product_id.clone());
+    let subscription_id = subscription_id_for_product(&c, acct(BUYER), product_id.clone());
+    c.cancel_subscription(subscription_id);
 
     let sub = c
         .get_subscription_for_product(acct(BUYER), product_id.clone())
@@ -117,7 +118,8 @@ fn resume_subscription_clears_cancel_before_period_end() {
     let _lock_first = unwrap_sync_lock_id(c.lock(Some(price_id.clone()), None, None));
 
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
-    c.cancel_subscription(product_id.clone());
+    let subscription_id = subscription_id_for_product(&c, acct(BUYER), product_id.clone());
+    c.cancel_subscription(subscription_id.clone());
 
     let sub_cancelled = c
         .get_subscription_for_product(acct(BUYER), product_id.clone())
@@ -126,7 +128,7 @@ fn resume_subscription_clears_cancel_before_period_end() {
     let period_end_before = sub_cancelled.end_ns.0;
 
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
-    c.resume_subscription(product_id.clone());
+    c.resume_subscription(subscription_id);
 
     let sub_resumed = c
         .get_subscription_for_product(acct(BUYER), product_id)
@@ -150,7 +152,8 @@ fn resume_subscription_fails_after_period_end() {
     let _ = unwrap_sync_lock_id(c.lock(Some(price_id), None, None));
 
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
-    c.cancel_subscription(product_id.clone());
+    let subscription_id = subscription_id_for_product(&c, acct(BUYER), product_id.clone());
+    c.cancel_subscription(subscription_id.clone());
 
     let sub = c
         .get_subscription_for_product(acct(BUYER), product_id.clone())
@@ -162,7 +165,7 @@ fn resume_subscription_fails_after_period_end() {
         NearToken::from_yoctonear(1),
         after_period_ts
     ));
-    c.resume_subscription(product_id);
+    c.resume_subscription(subscription_id);
 }
 
 #[test]
@@ -665,7 +668,8 @@ fn pending_update_projects_after_apply_time_without_manual_lock() {
         NearToken::from_yoctonear(1),
         apply_ns.0.saturating_add(1),
     ));
-    c.cancel_subscription(product_id.clone());
+    let subscription_id = subscription_id_for_product(&c, acct(BUYER), product_id.clone());
+    c.cancel_subscription(subscription_id);
     let applied = c
         .get_subscription_for_product(acct(BUYER), product_id)
         .expect("subscription");
@@ -1067,7 +1071,8 @@ fn cancel_clears_pending_update_without_applying_stake_decrease() {
         NearToken::from_yoctonear(1),
         pending.apply_ns.0.saturating_add(1),
     ));
-    c.cancel_subscription(product_id.clone());
+    let subscription_id = subscription_id_for_product(&c, acct(BUYER), product_id.clone());
+    c.cancel_subscription(subscription_id);
 
     let cancelled = c
         .get_subscription_for_product(acct(BUYER), product_id)
@@ -1212,14 +1217,14 @@ fn pending_update_target_product_blocks_archive() {
 }
 
 #[test]
-#[should_panic(expected = "No subscription for this product; subscribe first")]
+#[should_panic(expected = "Subscription not found")]
 fn cancel_subscription_fails_without_subscription() {
     let mut c = deploy();
-    let (product_id, _) = setup_catalog_near_subscription(&mut c);
+    let (_product_id, _) = setup_catalog_near_subscription(&mut c);
     register_buyer(&mut c);
 
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
-    c.cancel_subscription(product_id);
+    c.cancel_subscription("sub_missing".into());
 }
 
 #[test]
@@ -1267,7 +1272,8 @@ fn cancelled_subscription_view_does_not_project_after_period_end() {
     let _ = unwrap_sync_lock_id(c.lock(Some(price_id.clone()), None, None));
 
     testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
-    c.cancel_subscription(product_id.clone());
+    let subscription_id = subscription_id_for_product(&c, acct(BUYER), product_id.clone());
+    c.cancel_subscription(subscription_id);
 
     let cancelled = c
         .get_subscription_for_product(acct(BUYER), product_id.clone())
@@ -1322,7 +1328,7 @@ fn cancel_subscription_normalizes_stale_window_before_marking_cancel_at_end() {
         .0
         .saturating_add((AVG_MONTH_NS.saturating_mul(2)) as u64);
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_yoctonear(1), late_ts));
-    c.cancel_subscription(product_id.clone());
+    c.cancel_subscription(initial.subscription_id);
 
     let after = c
         .get_subscription_for_product(acct(BUYER), product_id)
