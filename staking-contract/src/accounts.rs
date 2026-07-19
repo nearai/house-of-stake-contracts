@@ -199,12 +199,67 @@ impl Contract {
     }
 
     fn has_pending_unstake_tranches(&self, account_id: &AccountId) -> bool {
-        self.validator_ids.iter().any(|validator_id| {
+        self.user_pending_unstake_validator_count
+            .get(account_id)
+            .copied()
+            .unwrap_or(0)
+            > 0
+    }
+
+    pub(crate) fn set_user_pending_unstake_tranches(
+        &mut self,
+        account_validator_key: (AccountId, ValidatorId),
+        tranches: Vec<PendingUnstakeTranche>,
+    ) {
+        let account_id = account_validator_key.0.clone();
+        let had_tranches = self
+            .user_pending_unstake
+            .get(&account_validator_key)
+            .map(|existing| !existing.is_empty())
+            .unwrap_or(false);
+        let has_tranches = !tranches.is_empty();
+
+        if has_tranches {
             self.user_pending_unstake
-                .get(&(account_id.clone(), validator_id.clone()))
-                .map(|tranches| !tranches.is_empty())
-                .unwrap_or(false)
-        })
+                .insert(account_validator_key, tranches);
+        } else {
+            self.user_pending_unstake.remove(&account_validator_key);
+        }
+
+        match (had_tranches, has_tranches) {
+            (false, true) => self.increment_pending_unstake_validator_count(&account_id),
+            (true, false) => self.decrement_pending_unstake_validator_count(&account_id),
+            _ => {}
+        }
+    }
+
+    fn increment_pending_unstake_validator_count(&mut self, account_id: &AccountId) {
+        let next = self
+            .user_pending_unstake_validator_count
+            .get(account_id)
+            .copied()
+            .unwrap_or(0)
+            .checked_add(1)
+            .expect("pending unstake validator count overflow");
+        self.user_pending_unstake_validator_count
+            .insert(account_id.clone(), next);
+    }
+
+    fn decrement_pending_unstake_validator_count(&mut self, account_id: &AccountId) {
+        match self
+            .user_pending_unstake_validator_count
+            .get(account_id)
+            .copied()
+            .unwrap_or(0)
+        {
+            0 | 1 => {
+                self.user_pending_unstake_validator_count.remove(account_id);
+            }
+            count => {
+                self.user_pending_unstake_validator_count
+                    .insert(account_id.clone(), count - 1);
+            }
+        }
     }
 
     fn require_registered_account(&self, account_id: &AccountId) -> Account {

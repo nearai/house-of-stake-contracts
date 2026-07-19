@@ -6,7 +6,6 @@ use near_sdk::{
     AccountId, NearToken, Promise, PromiseOrValue, assert_one_yocto, env, near, require,
 };
 
-pub const FARM_REWARD_UNIT_24_DECIMAL: &str = "reward_unit_24";
 pub const FARM_REWARD_RATE_DENOM: u128 = 1;
 pub const FARM_ACC_REWARD_PER_SHARE_DENOM: u128 = 1_000_000_000_000_000_000_000_000;
 pub const YOCTO_PER_NEAR: u128 = 1_000_000_000_000_000_000_000_000;

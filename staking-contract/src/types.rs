@@ -64,8 +64,11 @@ pub enum CatalogStatus {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[near(serializers = [borsh, json])]
 pub enum SubscriptionStatus {
+    /// Current billing period is valid.
     Active,
+    /// Subscription was terminated before its natural period end.
     Cancelled,
+    /// Subscription reached its period end and did not renew.
     Expired,
 }
 

@@ -24,7 +24,7 @@ pub mod withdraw;
 pub use config::Config;
 pub use types::*;
 
-use near_sdk::store::{LookupMap, Vector};
+use near_sdk::store::{IterableMap, LookupMap, Vector};
 use near_sdk::{AccountId, BorshStorageKey, NearToken, PanicOnDefault, near};
 
 #[derive(BorshStorageKey)]
@@ -57,6 +57,7 @@ enum StorageKeys {
     FarmPositionProductsByAccount,
     FarmAccounts,
     UserFarmPositionCount,
+    UserPendingUnstakeValidatorCount,
 }
 
 #[derive(PanicOnDefault)]
@@ -89,6 +90,9 @@ pub struct Contract {
     /// After unlock, NEAR liability slices for this user on this pool until [`crate::Contract::withdraw`]
     /// (epoch-gated; paid from `pending_to_claim` once pool funds are in the contract claim bucket).
     pub user_pending_unstake: LookupMap<(AccountId, ValidatorId), Vec<PendingUnstakeTranche>>,
+    /// Number of validator pools for which an account has at least one pending unstake tranche.
+    /// This keeps `storage_unregister` bounded by account state instead of scanning every validator.
+    pub user_pending_unstake_validator_count: LookupMap<AccountId, u32>,
     /// Monotonic count of locks created per account; multiplied by [`Config::per_lock_storage_stake`] for prepaid lock storage.
     pub user_lock_count: LookupMap<AccountId, u32>,
     /// Direct one-off payment records keyed by [`Purchase::purchase_id`] (`pay_*`).
@@ -118,8 +122,8 @@ pub struct Contract {
     /// Secondary index: `subscriber` → owned subscription ids. Used for account-level listing and
     /// subscription-specific plan changes without scanning the full catalog.
     pub subscriptions_by_account: LookupMap<AccountId, Vec<SubscriptionId>>,
-    /// Creation order of subscription ids. Used by catalog admin guards to detect pending references.
-    pub subscription_ids: Vector<SubscriptionId>,
+    /// Subscription ids keyed for efficient membership and removal while remaining iterable for views.
+    pub subscription_ids: IterableMap<SubscriptionId, ()>,
     /// Pending subscription-update target price reference counts, used by bounded catalog guards.
     pub pending_update_target_price_counts: LookupMap<PriceId, u32>,
     /// Pending subscription-update target product reference counts, used by bounded catalog guards.
@@ -146,6 +150,9 @@ impl Contract {
             locks: LookupMap::new(StorageKeys::Locks),
             user_validator_shares: LookupMap::new(StorageKeys::UserValidatorShares),
             user_pending_unstake: LookupMap::new(StorageKeys::UserPendingUnstake),
+            user_pending_unstake_validator_count: LookupMap::new(
+                StorageKeys::UserPendingUnstakeValidatorCount,
+            ),
             user_lock_count: LookupMap::new(StorageKeys::UserLockCount),
             purchases: LookupMap::new(StorageKeys::Purchases),
             purchase_ids: Vector::new(StorageKeys::PurchaseIds),
@@ -164,7 +171,7 @@ impl Contract {
                 StorageKeys::SubscriptionByAccountProduct,
             ),
             subscriptions_by_account: LookupMap::new(StorageKeys::SubscriptionsByAccount),
-            subscription_ids: Vector::new(StorageKeys::SubscriptionIds),
+            subscription_ids: IterableMap::new(StorageKeys::SubscriptionIds),
             pending_update_target_price_counts: LookupMap::new(
                 StorageKeys::PendingUpdateTargetPriceCounts,
             ),

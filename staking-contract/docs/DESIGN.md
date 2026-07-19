@@ -76,12 +76,12 @@ No HoS staking-pool whitelist cross-call — stake.dao allowlist is internal.
 
 ## 7. Withdraw bucket: stranded remainder (design only)
 
-Integer rounding on tranche claims can leave **`pending_to_withdraw`** positive after all `user_pending_unstake` tranches for that validator have been cleared. Users cannot claim further because there is no eligible liability.
+Integer rounding on tranche claims can leave **`pending_to_claim`** positive after all `user_pending_unstake` tranches for that validator have been cleared. Users cannot claim further because there is no eligible liability.
 
 **Intended future mitigation (not in the current contract):** an **owner-only** method such as **`sweep_stranded_withdraw_bucket(validator_id)`** that:
 
-- requires no remaining `user_pending_unstake` tranche liability for the validator and **`pending_to_withdraw > 0`** (and typically **not paused**, **1 yocto** attach),
-- zeros **`pending_to_withdraw`**,
+- requires no remaining `user_pending_unstake` tranche liability for the validator and **`pending_to_claim > 0`** (and typically **not paused**, **1 yocto** attach),
+- zeros **`pending_to_claim`**,
 - transfers the remainder to **`config.owner_account_id`** (or another fixed sink agreed by governance).
 
 Until that exists, any microscopic remainder stays on the contract balance for that pool row; amounts should be dust-scale if they appear at all.
