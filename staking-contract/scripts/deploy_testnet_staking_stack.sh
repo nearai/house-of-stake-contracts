@@ -138,6 +138,7 @@ echo "== Deploying staking-contract (init: new { config }) =="
 : "${EPOCH_UNSTAKE_SETTLE_EPOCHS:=1}"
 : "${MIN_STORAGE_DEPOSIT_YOCTO:=10000000000000000000000}"
 : "${PER_LOCK_STORAGE_STAKE_YOCTO:=0}"
+: "${PER_FARM_POSITION_STORAGE_STAKE_YOCTO:=0}"
 : "${MIN_LOCK_AMOUNT_YOCTO:=1000000000000000000000000}"
 
 staking_init=$(
@@ -148,6 +149,7 @@ staking_init=$(
     --argjson epoch_unstake "$EPOCH_UNSTAKE_SETTLE_EPOCHS" \
     --arg min_storage "$MIN_STORAGE_DEPOSIT_YOCTO" \
     --arg per_lock "$PER_LOCK_STORAGE_STAKE_YOCTO" \
+    --arg per_farm_position "$PER_FARM_POSITION_STORAGE_STAKE_YOCTO" \
     --arg per_purchase "0" \
     --arg min_lock_amt "$MIN_LOCK_AMOUNT_YOCTO" \
     '{
@@ -160,6 +162,7 @@ staking_init=$(
         epoch_unstake_settle_epochs: $epoch_unstake,
         min_storage_deposit: $min_storage,
         per_lock_storage_stake: $per_lock,
+        per_farm_position_storage_stake: $per_farm_position,
         per_purchase_storage_stake: $per_purchase,
         min_lock_amount: $min_lock_amt
       }
