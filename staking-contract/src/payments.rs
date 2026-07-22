@@ -5,6 +5,7 @@ use crate::utils::block_timestamp;
 use crate::*;
 use near_sdk::ext_contract;
 use near_sdk::json_types::U64;
+use near_sdk::store::Vector;
 use near_sdk::{AccountId, NearToken, Promise, assert_one_yocto, env, near, require};
 
 fn next_unique_purchase_id(contract: &mut Contract) -> PurchaseId {
@@ -161,10 +162,12 @@ impl Contract {
         from_index: u64,
         limit: u64,
     ) -> Vec<Purchase> {
-        let ids = self.purchase_ids_for_account_view(&account_id);
-        self.collect_paginated(from_index, limit, ids.len() as u64, |index| {
-            ids.get(index as usize)
-                .and_then(|id| self.internal_get_purchase(id))
+        let Some(ids) = self.purchases_by_account.get(&account_id) else {
+            return Vec::new();
+        };
+        let total_len = u64::from(ids.len());
+        self.collect_paginated(from_index, limit, total_len, |index| {
+            ids.get(index).and_then(|id| self.internal_get_purchase(id))
         })
     }
 
@@ -174,10 +177,12 @@ impl Contract {
         from_index: u64,
         limit: u64,
     ) -> Vec<Purchase> {
-        let ids = self.purchase_ids_for_product_view(&product_id);
-        self.collect_paginated(from_index, limit, ids.len() as u64, |index| {
-            ids.get(index as usize)
-                .and_then(|id| self.internal_get_purchase(id))
+        let Some(ids) = self.purchases_by_product.get(&product_id) else {
+            return Vec::new();
+        };
+        let total_len = u64::from(ids.len());
+        self.collect_paginated(from_index, limit, total_len, |index| {
+            ids.get(index).and_then(|id| self.internal_get_purchase(id))
         })
     }
 
@@ -199,37 +204,37 @@ impl Contract {
     }
 
     fn add_purchase_to_account_index(&mut self, account_id: &AccountId, purchase_id: &PurchaseId) {
-        let mut ids = self
-            .purchases_by_account
-            .get(account_id)
-            .cloned()
-            .unwrap_or_default();
+        if let Some(ids) = self.purchases_by_account.get_mut(account_id) {
+            ids.push(purchase_id.clone());
+            return;
+        }
+
+        let mut ids = Vector::new(Self::purchases_by_account_vector_key(account_id));
         ids.push(purchase_id.clone());
         self.purchases_by_account.insert(account_id.clone(), ids);
     }
 
     fn add_purchase_to_product_index(&mut self, product_id: &ProductId, purchase_id: &PurchaseId) {
-        let mut ids = self
-            .purchases_by_product
-            .get(product_id)
-            .cloned()
-            .unwrap_or_default();
+        if let Some(ids) = self.purchases_by_product.get_mut(product_id) {
+            ids.push(purchase_id.clone());
+            return;
+        }
+
+        let mut ids = Vector::new(Self::purchases_by_product_vector_key(product_id));
         ids.push(purchase_id.clone());
         self.purchases_by_product.insert(product_id.clone(), ids);
     }
 
-    fn purchase_ids_for_account_view(&self, account_id: &AccountId) -> Vec<PurchaseId> {
-        self.purchases_by_account
-            .get(account_id)
-            .cloned()
-            .unwrap_or_default()
+    pub(crate) fn purchases_by_account_vector_key(account_id: &AccountId) -> StorageKeys {
+        StorageKeys::PurchasesByAccountVector {
+            account_hash: env::sha256(account_id.as_bytes()),
+        }
     }
 
-    fn purchase_ids_for_product_view(&self, product_id: &ProductId) -> Vec<PurchaseId> {
-        self.purchases_by_product
-            .get(product_id)
-            .cloned()
-            .unwrap_or_default()
+    pub(crate) fn purchases_by_product_vector_key(product_id: &ProductId) -> StorageKeys {
+        StorageKeys::PurchasesByProductVector {
+            product_hash: env::sha256(product_id.as_bytes()),
+        }
     }
 
     fn add_revenue_to_validator(&mut self, validator_id: &ValidatorId, amount: NearToken) {

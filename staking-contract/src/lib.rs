@@ -58,6 +58,8 @@ enum StorageKeys {
     FarmAccounts,
     UserFarmPositionCount,
     UserPendingUnstakeValidatorCount,
+    PurchasesByAccountVector { account_hash: Vec<u8> },
+    PurchasesByProductVector { product_hash: Vec<u8> },
 }
 
 #[derive(PanicOnDefault)]
@@ -99,10 +101,10 @@ pub struct Contract {
     pub purchases: LookupMap<PurchaseId, VPurchase>,
     /// Creation order of direct payment records; drives paginated purchase views.
     pub purchase_ids: Vector<PurchaseId>,
-    /// Secondary index: purchaser account → purchase ids.
-    pub purchases_by_account: LookupMap<AccountId, Vec<PurchaseId>>,
-    /// Secondary index: product id → purchase ids.
-    pub purchases_by_product: LookupMap<ProductId, Vec<PurchaseId>>,
+    /// Secondary index: purchaser account -> paginated purchase ids.
+    pub purchases_by_account: LookupMap<AccountId, Vector<PurchaseId>>,
+    /// Secondary index: product id -> paginated purchase ids.
+    pub purchases_by_product: LookupMap<ProductId, Vector<PurchaseId>>,
     /// Monotonic count of direct purchases created per account; multiplied by [`Config::per_purchase_storage_stake`].
     pub user_purchase_count: LookupMap<AccountId, u32>,
     /// Withdrawable direct-payment revenue aggregated by validator pool account.

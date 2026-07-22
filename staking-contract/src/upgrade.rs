@@ -77,6 +77,33 @@ impl From<ContractV1_0_1> for Contract {
             subscription_ids.insert(subscription_id.clone(), ());
         }
 
+        let mut purchases_by_account: LookupMap<AccountId, Vector<PurchaseId>> =
+            LookupMap::new(StorageKeys::PurchasesByAccount);
+        let mut purchases_by_product: LookupMap<ProductId, Vector<PurchaseId>> =
+            LookupMap::new(StorageKeys::PurchasesByProduct);
+        for purchase_id in old.purchase_ids.iter() {
+            if let Some(purchase) = old.purchases.get(purchase_id) {
+                let purchase: Purchase = purchase.clone().into();
+                if let Some(ids) = purchases_by_account.get_mut(&purchase.account_id) {
+                    ids.push(purchase_id.clone());
+                } else {
+                    let mut ids =
+                        Vector::new(Self::purchases_by_account_vector_key(&purchase.account_id));
+                    ids.push(purchase_id.clone());
+                    purchases_by_account.insert(purchase.account_id.clone(), ids);
+                }
+
+                if let Some(ids) = purchases_by_product.get_mut(&purchase.product_id) {
+                    ids.push(purchase_id.clone());
+                } else {
+                    let mut ids =
+                        Vector::new(Self::purchases_by_product_vector_key(&purchase.product_id));
+                    ids.push(purchase_id.clone());
+                    purchases_by_product.insert(purchase.product_id.clone(), ids);
+                }
+            }
+        }
+
         Self {
             config: Config::from(old.config).into(),
             paused: old.paused,
@@ -95,8 +122,8 @@ impl From<ContractV1_0_1> for Contract {
             user_farm_position_count: LookupMap::new(StorageKeys::UserFarmPositionCount),
             purchases: old.purchases,
             purchase_ids: old.purchase_ids,
-            purchases_by_account: old.purchases_by_account,
-            purchases_by_product: old.purchases_by_product,
+            purchases_by_account,
+            purchases_by_product,
             user_purchase_count: old.user_purchase_count,
             revenue_by_validator: old.revenue_by_validator,
             farm_pools: LookupMap::new(StorageKeys::FarmPools),
