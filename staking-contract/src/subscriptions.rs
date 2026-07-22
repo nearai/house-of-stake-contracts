@@ -51,7 +51,6 @@ impl SubscriptionUpdateDecision {
 
 pub(crate) struct ProjectedSubscriptionLookup {
     pub(crate) subscription_id: SubscriptionId,
-    pub(crate) stored: Subscription,
     projected: Subscription,
 }
 
@@ -60,11 +59,11 @@ impl Contract {
     /// Stop renewing after the current billing period. The active lock remains until `lock.end_ns`; use
     /// [`crate::unlock::Contract::unlock`] afterwards. Attach 1 yocto.
     #[payable]
-    pub fn cancel_subscription(&mut self, product_id: ProductId) {
+    pub fn cancel_subscription(&mut self, subscription_id: SubscriptionId) {
         assert_one_yocto();
         self.assert_not_paused();
         let buyer = env::predecessor_account_id();
-        let (sid, sub) = self.require_subscription_owned_by(&buyer, &product_id);
+        let sub = self.require_subscription_owned_by_id(&buyer, &subscription_id);
         let old_product_id = sub.product_id.clone();
         // Normalize stale active windows before marking cancel-at-end so stored `end_ns`
         // represents the current virtual billing period boundary.
@@ -73,32 +72,39 @@ impl Contract {
         Self::clear_pending_update(&mut sub);
         self.sync_subscription_lock_window(&sub);
         if old_product_id != sub.product_id {
-            self.move_subscription_product_index(&buyer, &sid, &old_product_id, &sub.product_id);
+            self.move_subscription_product_index(
+                &buyer,
+                &subscription_id,
+                &old_product_id,
+                &sub.product_id,
+            );
         }
+        let product_id = sub.product_id.clone();
         sub.cancel_at_period_end = true;
-        self.internal_set_subscription(sid.clone(), sub.clone());
+        self.internal_set_subscription(subscription_id, sub.clone());
         crate::events::log_subscription_cancel(&buyer, &product_id);
     }
 
     /// Undo [`Contract::cancel_subscription`] before the current billing period ends: clear `cancel_at_period_end`
     /// so renewals resume normally after `end_ns`. Attach 1 yocto.
     #[payable]
-    pub fn resume_subscription(&mut self, product_id: ProductId) {
+    pub fn resume_subscription(&mut self, subscription_id: SubscriptionId) {
         assert_one_yocto();
         self.assert_not_paused();
         let buyer = env::predecessor_account_id();
-        let (sid, mut sub) = self.require_subscription_owned_by(&buyer, &product_id);
+        let mut sub = self.require_subscription_owned_by_id(&buyer, &subscription_id);
+        let product_id = sub.product_id.clone();
         Self::assert_subscription_active(&sub);
         require!(
             sub.cancel_at_period_end,
             "Subscription is not scheduled to cancel at period end"
         );
         require!(
-            self.subscription_now(&sid) < sub.end_ns.0,
+            self.subscription_now(&subscription_id) < sub.end_ns.0,
             "Current billing period has ended; subscribe again with lock instead"
         );
         sub.cancel_at_period_end = false;
-        self.internal_set_subscription(sid.clone(), sub.clone());
+        self.internal_set_subscription(subscription_id, sub.clone());
         crate::events::log_subscription_resume(&buyer, &product_id);
     }
 
@@ -396,18 +402,6 @@ impl Contract {
             .unwrap_or_default()
     }
 
-    /// Resolve `(account, product)` index, load subscription, verify caller ownership. Panics with stable user-facing messages.
-    pub(crate) fn require_subscription_owned_by(
-        &self,
-        buyer: &AccountId,
-        product_id: &ProductId,
-    ) -> (SubscriptionId, Subscription) {
-        let found = self
-            .find_subscription_by_projected_product(buyer, product_id)
-            .unwrap_or_else(|| env::panic_str("No subscription for this product; subscribe first"));
-        (found.subscription_id, found.stored)
-    }
-
     pub(crate) fn find_subscription_by_projected_product(
         &self,
         buyer: &AccountId,
@@ -427,7 +421,6 @@ impl Contract {
             if projected.product_id == *product_id {
                 return Some(ProjectedSubscriptionLookup {
                     subscription_id: sid,
-                    stored,
                     projected,
                 });
             }
@@ -443,7 +436,6 @@ impl Contract {
                 let projected = self.project_subscription_view_now(stored.clone());
                 (projected.product_id == *product_id).then_some(ProjectedSubscriptionLookup {
                     subscription_id: sid,
-                    stored,
                     projected,
                 })
             })
@@ -1185,7 +1177,10 @@ impl Contract {
         target_timestamp_ns: U64,
     ) {
         let account_id = env::predecessor_account_id();
-        let (subscription_id, _) = self.require_subscription_owned_by(&account_id, &product_id);
+        let subscription_id = self
+            .find_subscription_by_projected_product(&account_id, &product_id)
+            .unwrap_or_else(|| env::panic_str("No subscription for this product; subscribe first"))
+            .subscription_id;
         self.test_fast_forward_subscription_to(subscription_id, target_timestamp_ns);
     }
 

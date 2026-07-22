@@ -644,7 +644,7 @@ async fn cancel_subscription_after_long_idle_normalizes_end_and_renews_from_fres
     set_mock_timestamp(&buyer, staking.id(), late_ts).await?;
     eprintln!("[timing] first mock timestamp set: {:?}", t_step.elapsed());
 
-    buyer_cancel_subscription(&buyer, staking.id(), &sub_product_id).await?;
+    buyer_cancel_subscription(&buyer, staking.id(), &sid_initial).await?;
 
     let sub_after_cancel: serde_json::Value = worker
         .view(staking.id(), "get_subscription_for_product")
@@ -718,6 +718,10 @@ async fn cancel_subscription_after_long_idle_then_unlock_requests_unstake()
         }))
         .await?
         .json()?;
+    let sid_initial = sub_initial["subscription_id"]
+        .as_str()
+        .expect("subscription_id")
+        .to_string();
     let start_ns = json_u64_field(&sub_initial["start_ns"]).expect("start_ns");
     let end_ns = json_u64_field(&sub_initial["end_ns"]).expect("end_ns");
     let period_ns = end_ns.saturating_sub(start_ns);
@@ -726,7 +730,7 @@ async fn cancel_subscription_after_long_idle_then_unlock_requests_unstake()
         .saturating_add(1);
     set_mock_timestamp(&buyer, staking.id(), late_ts).await?;
 
-    buyer_cancel_subscription(&buyer, staking.id(), &sub_product_id).await?;
+    buyer_cancel_subscription(&buyer, staking.id(), &sid_initial).await?;
     let sub_after_cancel: serde_json::Value = worker
         .view(staking.id(), "get_subscription_for_product")
         .args_json(json!({

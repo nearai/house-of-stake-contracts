@@ -51,7 +51,7 @@ Implemented in code:
 - Validator-owner **catalog** (`create_product`, `create_price`, …)
 - Stripe-like deterministic IDs (`prod_*`, `price_*`, `lock_*`, `sub_*`)
 - Share minting and lock pricing helpers ([`utils.rs`](src/utils.rs)) and NEAR-denominated `lock`
-- Subscriptions keyed by `(account_id, product_id)` with tier = [`Subscription::price_id`](src/types.rs): **`cancel_subscription`**, **`update_subscription`** ([`subscriptions.rs`](src/subscriptions.rs)). On renewal with a scheduled decrease, **Phase B prorate** releases stake above the target amount into the normal unstake queue ([`subscriptions.rs`](src/subscriptions.rs) / [`lock.rs`](src/lock.rs) / [`unlock.rs`](src/unlock.rs)).
+- Subscriptions keyed by `subscription_id`, with `(account_id, product_id)` as the active-product lookup and tier = [`Subscription::price_id`](src/types.rs): **`cancel_subscription`**, **`resume_subscription`**, **`update_subscription`** ([`subscriptions.rs`](src/subscriptions.rs)). On renewal with a scheduled decrease, **Phase B prorate** releases stake above the target amount into the normal unstake queue ([`subscriptions.rs`](src/subscriptions.rs) / [`lock.rs`](src/lock.rs) / [`unlock.rs`](src/unlock.rs)).
 - `unlock` (user-driven pool unstake path); **`lock`** schedules refresh + net pool settle; **`withdraw`** may chain pool withdraw then pro-rata payout; **`epoch_settle`** retries settlement
 - Pool callbacks in [`epoch.rs`](src/epoch.rs); **`storage_withdraw`**
 - **EVENT_JSON** for lock/unlock, catalog, validators, epoch ops, claim/withdraw, pool withdraw-in ([`events.rs`](src/events.rs)) — `standard: "stake.dao"`, `version: "1.0.0"`, nested `data`

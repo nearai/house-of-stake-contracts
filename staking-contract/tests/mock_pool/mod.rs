@@ -482,11 +482,11 @@ pub async fn buyer_unstake_farm(
 pub async fn buyer_cancel_subscription(
     buyer: &near_workspaces::Account,
     staking_id: &near_workspaces::AccountId,
-    product_id: &str,
+    subscription_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     buyer
         .call(staking_id, "cancel_subscription")
-        .args_json(json!({ "product_id": product_id }))
+        .args_json(json!({ "subscription_id": subscription_id }))
         .deposit(NearToken::from_yoctonear(1))
         .gas(WsGas::from_tgas(50))
         .transact()
