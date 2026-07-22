@@ -687,6 +687,10 @@ impl Contract {
 
         let sub = self.require_subscription_owned_by_id(buyer, subscription_id);
         Self::assert_subscription_active(&sub);
+        require!(
+            !sub.cancel_at_period_end,
+            "Resume subscription before updating"
+        );
         if target_product.product_id != sub.product_id {
             let target_key = (buyer.clone(), target_product.product_id.clone());
             if let Some(existing) = self.subscription_by_account_product.get(&target_key) {
