@@ -169,6 +169,29 @@ fn resume_subscription_fails_after_period_end() {
 }
 
 #[test]
+#[should_panic(expected = "Resume subscription before updating")]
+fn update_subscription_rejects_cancel_at_period_end_subscription() {
+    let mut c = deploy();
+    let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
+    let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 10);
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
+    let _ = unwrap_sync_lock_id(c.lock(Some(price_high), None, None));
+    let subscription_id = subscription_id_for_product(&c, acct(BUYER), product_id);
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    c.cancel_subscription(subscription_id.clone());
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    c.update_subscription(
+        subscription_id,
+        price_low,
+        U128(NearToken::from_near(25).as_yoctonear()),
+    );
+}
+
+#[test]
 fn update_subscription_updates_tier_and_lock_amount() {
     let mut c = deploy();
     let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
