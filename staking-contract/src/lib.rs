@@ -58,6 +58,8 @@ enum StorageKeys {
     FarmAccounts,
     UserFarmPositionCount,
     UserPendingUnstakeValidatorCount,
+    PurchaseCountByAccount,
+    PurchaseCountByProduct,
 }
 
 #[derive(PanicOnDefault)]
@@ -99,10 +101,14 @@ pub struct Contract {
     pub purchases: LookupMap<PurchaseId, VPurchase>,
     /// Creation order of direct payment records; drives paginated purchase views.
     pub purchase_ids: Vector<PurchaseId>,
-    /// Secondary index: purchaser account → purchase ids.
-    pub purchases_by_account: LookupMap<AccountId, Vec<PurchaseId>>,
-    /// Secondary index: product id → purchase ids.
-    pub purchases_by_product: LookupMap<ProductId, Vec<PurchaseId>>,
+    /// Secondary index: `(purchaser account, account purchase ordinal)` → purchase id.
+    pub purchases_by_account: LookupMap<(AccountId, u64), PurchaseId>,
+    /// Secondary index: `(product id, product purchase ordinal)` → purchase id.
+    pub purchases_by_product: LookupMap<(ProductId, u64), PurchaseId>,
+    /// Number of direct purchases indexed for each purchaser account.
+    pub purchase_count_by_account: LookupMap<AccountId, u64>,
+    /// Number of direct purchases indexed for each product.
+    pub purchase_count_by_product: LookupMap<ProductId, u64>,
     /// Monotonic count of direct purchases created per account; multiplied by [`Config::per_purchase_storage_stake`].
     pub user_purchase_count: LookupMap<AccountId, u32>,
     /// Withdrawable direct-payment revenue aggregated by validator pool account.
@@ -158,6 +164,8 @@ impl Contract {
             purchase_ids: Vector::new(StorageKeys::PurchaseIds),
             purchases_by_account: LookupMap::new(StorageKeys::PurchasesByAccount),
             purchases_by_product: LookupMap::new(StorageKeys::PurchasesByProduct),
+            purchase_count_by_account: LookupMap::new(StorageKeys::PurchaseCountByAccount),
+            purchase_count_by_product: LookupMap::new(StorageKeys::PurchaseCountByProduct),
             user_purchase_count: LookupMap::new(StorageKeys::UserPurchaseCount),
             revenue_by_validator: LookupMap::new(StorageKeys::RevenueByValidator),
             farm_pools: LookupMap::new(StorageKeys::FarmPools),

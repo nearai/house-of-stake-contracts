@@ -161,9 +161,10 @@ impl Contract {
         from_index: u64,
         limit: u64,
     ) -> Vec<Purchase> {
-        let ids = self.purchase_ids_for_account_view(&account_id);
-        self.collect_paginated(from_index, limit, ids.len() as u64, |index| {
-            ids.get(index as usize)
+        let total_len = self.purchase_count_by_account(&account_id);
+        self.collect_paginated(from_index, limit, total_len, |index| {
+            self.purchases_by_account
+                .get(&(account_id.clone(), u64::from(index)))
                 .and_then(|id| self.internal_get_purchase(id))
         })
     }
@@ -174,9 +175,10 @@ impl Contract {
         from_index: u64,
         limit: u64,
     ) -> Vec<Purchase> {
-        let ids = self.purchase_ids_for_product_view(&product_id);
-        self.collect_paginated(from_index, limit, ids.len() as u64, |index| {
-            ids.get(index as usize)
+        let total_len = self.purchase_count_by_product(&product_id);
+        self.collect_paginated(from_index, limit, total_len, |index| {
+            self.purchases_by_product
+                .get(&(product_id.clone(), u64::from(index)))
                 .and_then(|id| self.internal_get_purchase(id))
         })
     }
@@ -199,36 +201,32 @@ impl Contract {
     }
 
     fn add_purchase_to_account_index(&mut self, account_id: &AccountId, purchase_id: &PurchaseId) {
-        let mut ids = self
-            .purchases_by_account
-            .get(account_id)
-            .cloned()
-            .unwrap_or_default();
-        ids.push(purchase_id.clone());
-        self.purchases_by_account.insert(account_id.clone(), ids);
+        let index = self.purchase_count_by_account(account_id);
+        self.purchases_by_account
+            .insert((account_id.clone(), index), purchase_id.clone());
+        self.purchase_count_by_account
+            .insert(account_id.clone(), index.saturating_add(1));
     }
 
     fn add_purchase_to_product_index(&mut self, product_id: &ProductId, purchase_id: &PurchaseId) {
-        let mut ids = self
-            .purchases_by_product
-            .get(product_id)
-            .cloned()
-            .unwrap_or_default();
-        ids.push(purchase_id.clone());
-        self.purchases_by_product.insert(product_id.clone(), ids);
+        let index = self.purchase_count_by_product(product_id);
+        self.purchases_by_product
+            .insert((product_id.clone(), index), purchase_id.clone());
+        self.purchase_count_by_product
+            .insert(product_id.clone(), index.saturating_add(1));
     }
 
-    fn purchase_ids_for_account_view(&self, account_id: &AccountId) -> Vec<PurchaseId> {
-        self.purchases_by_account
+    pub(crate) fn purchase_count_by_account(&self, account_id: &AccountId) -> u64 {
+        self.purchase_count_by_account
             .get(account_id)
-            .cloned()
+            .copied()
             .unwrap_or_default()
     }
 
-    fn purchase_ids_for_product_view(&self, product_id: &ProductId) -> Vec<PurchaseId> {
-        self.purchases_by_product
+    pub(crate) fn purchase_count_by_product(&self, product_id: &ProductId) -> u64 {
+        self.purchase_count_by_product
             .get(product_id)
-            .cloned()
+            .copied()
             .unwrap_or_default()
     }
 
