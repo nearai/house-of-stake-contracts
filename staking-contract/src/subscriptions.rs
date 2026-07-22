@@ -242,9 +242,12 @@ impl Contract {
 }
 
 impl Contract {
-    pub(crate) fn internal_get_subscription(&self, id: &SubscriptionId) -> Option<Subscription> {
-        self.subscriptions.get(id).cloned().map(Into::into)
-    }
+    impl_versioned_lookup_getter!(
+        internal_get_subscription,
+        subscriptions,
+        SubscriptionId,
+        Subscription
+    );
 
     pub(crate) fn internal_set_subscription(
         &mut self,

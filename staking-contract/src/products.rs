@@ -314,13 +314,13 @@ impl Contract {
 // Internal helpers (also used from [`crate::prices`]).
 
 impl Contract {
-    pub(crate) fn internal_get_product(&self, id: &ProductId) -> Option<Product> {
-        self.products.get(id).cloned().map(Into::into)
-    }
-
-    pub(crate) fn internal_set_product(&mut self, id: ProductId, product: Product) {
-        self.products.insert(id, product.into());
-    }
+    impl_versioned_lookup_accessors!(
+        internal_get_product,
+        internal_set_product,
+        products,
+        ProductId,
+        Product
+    );
 
     pub(crate) fn require_product(&self, product_id: &ProductId) -> Product {
         self.internal_get_product(product_id)

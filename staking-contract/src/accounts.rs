@@ -143,13 +143,13 @@ impl Contract {
 }
 
 impl Contract {
-    pub(crate) fn internal_get_account(&self, id: &AccountId) -> Option<Account> {
-        self.accounts.get(id).cloned().map(Into::into)
-    }
-
-    pub(crate) fn internal_set_account(&mut self, id: AccountId, account: Account) {
-        self.accounts.insert(id, account.into());
-    }
+    impl_versioned_lookup_accessors!(
+        internal_get_account,
+        internal_set_account,
+        accounts,
+        AccountId,
+        Account
+    );
 
     fn internal_storage_balance_of(&self, account_id: &AccountId) -> Option<StorageBalance> {
         let account = self.internal_get_account(account_id)?;

@@ -90,13 +90,13 @@ impl Contract {
 }
 
 impl Contract {
-    pub(crate) fn internal_get_validator(&self, id: &ValidatorId) -> Option<Validator> {
-        self.validators.get(id).cloned().map(Into::into)
-    }
-
-    pub(crate) fn internal_set_validator(&mut self, id: ValidatorId, validator: Validator) {
-        self.validators.insert(id, validator.into());
-    }
+    impl_versioned_lookup_accessors!(
+        internal_get_validator,
+        internal_set_validator,
+        validators,
+        ValidatorId,
+        Validator
+    );
 
     /// Preamble for pool-owner catalog RPCs: 1 yocto, not paused, validator allowlisted.
     pub(crate) fn catalog_admin_entry_for_pool(
