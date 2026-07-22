@@ -49,6 +49,46 @@ fn pay_one_off_happy_path_records_purchase_and_revenue() {
 }
 
 #[test]
+fn pay_indexes_purchases_with_nested_vectors() {
+    let mut c = deploy();
+    let (product_id, price_id) = setup_catalog_near_oneoff(&mut c);
+    register_buyer(&mut c);
+
+    let mut purchase_ids = Vec::new();
+    for _ in 0..3 {
+        testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+        purchase_ids.push(c.pay(Some(price_id.clone()), None, U64(1)));
+    }
+
+    let product_ids = c
+        .purchases_by_product
+        .get(&product_id)
+        .expect("product purchase index");
+    let account_ids = c
+        .purchases_by_account
+        .get(&acct(BUYER))
+        .expect("account purchase index");
+    assert_eq!(product_ids.len(), 3);
+    assert_eq!(account_ids.len(), 3);
+    assert_eq!(
+        product_ids.get(0).expect("first product purchase"),
+        &purchase_ids[0]
+    );
+    assert_eq!(
+        product_ids.get(2).expect("third product purchase"),
+        &purchase_ids[2]
+    );
+    assert_eq!(
+        c.get_purchases_for_product(product_id, 1, 1)[0].purchase_id,
+        purchase_ids[1]
+    );
+    assert_eq!(
+        c.get_purchases_for_account(acct(BUYER), 2, 1)[0].purchase_id,
+        purchase_ids[2]
+    );
+}
+
+#[test]
 fn pay_resolves_product_default_price() {
     let mut c = deploy();
     let (product_id, price_id) = setup_catalog_near_oneoff(&mut c);
