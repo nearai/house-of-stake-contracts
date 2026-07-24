@@ -22,6 +22,26 @@ pub fn log_validator_added(validator_id: &ValidatorId) {
     );
 }
 
+pub fn log_validator_operator_add(validator_id: &ValidatorId, operator_account_id: &AccountId) {
+    emit(
+        "validator_operator_add",
+        serde_json::json!({
+            "validator_id": validator_id.to_string(),
+            "operator_account_id": operator_account_id.to_string(),
+        }),
+    );
+}
+
+pub fn log_validator_operator_remove(validator_id: &ValidatorId, operator_account_id: &AccountId) {
+    emit(
+        "validator_operator_remove",
+        serde_json::json!({
+            "validator_id": validator_id.to_string(),
+            "operator_account_id": operator_account_id.to_string(),
+        }),
+    );
+}
+
 pub fn log_product_created(product_id: &str, validator_id: &ValidatorId) {
     emit(
         "product_create",
