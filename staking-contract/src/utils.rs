@@ -64,15 +64,13 @@ pub fn min_locked_yocto_for_duration(price: &Price, duration_ns: u128) -> u128 {
     if duration_ns == 0 {
         return 0;
     }
-    let required_nm = price
-        .amount
-        .0
-        .saturating_mul(price.lock_factor_near_months.0)
-        / LOCK_FACTOR_DENOM;
-    let rhs = U256::from(required_nm) * U256::from(AVG_MONTH_NS);
+    let rhs = required_near_months(price) * U256::from(AVG_MONTH_NS);
     let duration_u256 = U256::from(duration_ns);
     let quotient = rhs / duration_u256;
     let remainder = rhs % duration_u256;
+    if quotient > U256::from(u128::MAX) {
+        return u128::MAX;
+    }
     let mut min_locked_yocto = quotient.as_u128();
     if !remainder.is_zero() {
         min_locked_yocto = min_locked_yocto.saturating_add(1);
@@ -85,18 +83,18 @@ pub fn check_near_price_lock(
     locked_yocto: u128,
     duration_ns: u128,
 ) -> Result<(), &'static str> {
-    let required_nm = price
-        .amount
-        .0
-        .saturating_mul(price.lock_factor_near_months.0)
-        / LOCK_FACTOR_DENOM;
     let lhs = U256::from(locked_yocto) * U256::from(duration_ns);
-    let rhs = U256::from(required_nm) * U256::from(AVG_MONTH_NS);
+    let rhs = required_near_months(price) * U256::from(AVG_MONTH_NS);
     if lhs >= rhs {
         Ok(())
     } else {
         Err("Locked NEAR or lock duration is too low for this catalog price")
     }
+}
+
+fn required_near_months(price: &Price) -> U256 {
+    U256::from(price.amount.0) * U256::from(price.lock_factor_near_months.0)
+        / U256::from(LOCK_FACTOR_DENOM)
 }
 
 // =============================================================================
@@ -268,27 +266,49 @@ mod tests {
 
     #[test]
     fn min_locked_matches_price_check_boundary() {
-        use crate::types::{BillingPeriod, CatalogStatus, Price, PriceType};
-        use near_sdk::json_types::U128;
-        let price = Price {
-            price_id: "price_x".into(),
-            product_id: "prod_x".into(),
-            name: "".into(),
-            description: "".into(),
-            amount: U128(100),
-            price_type: PriceType::Recurring,
-            billing_period: Some(BillingPeriod::Monthly),
-            lock_factor_near_months: U128(LOCK_FACTOR_DENOM),
-            metadata: None,
-            status: CatalogStatus::Active,
-            usage_count: 0,
-        };
+        let price = test_price(100, LOCK_FACTOR_DENOM);
         let d: u128 = 1_000_000_000_000;
         let m = min_locked_yocto_for_duration(&price, d);
         assert!(check_near_price_lock(&price, m, d).is_ok());
         assert!(m > 0);
         if m > 1 {
             assert!(check_near_price_lock(&price, m - 1, d).is_err());
+        }
+    }
+
+    #[test]
+    fn price_lock_check_does_not_saturate_required_near_months() {
+        let one_near = 1_000_000_000_000_000_000_000_000;
+        let one_month = AVG_MONTH_NS;
+        let lock_factor = u128::MAX;
+
+        let low_price = test_price(one_near, lock_factor);
+        let high_price = test_price(one_near.saturating_mul(100), lock_factor);
+
+        assert!(check_near_price_lock(&low_price, one_near, one_month).is_err());
+        assert!(check_near_price_lock(&high_price, one_near, one_month).is_err());
+
+        let low_required = required_near_months(&low_price);
+        let high_required = required_near_months(&high_price);
+        assert!(high_required > low_required);
+    }
+
+    fn test_price(amount: u128, lock_factor_near_months: u128) -> Price {
+        use crate::types::{BillingPeriod, CatalogStatus, PriceType};
+        use near_sdk::json_types::U128;
+
+        Price {
+            price_id: "price_x".into(),
+            product_id: "prod_x".into(),
+            name: "".into(),
+            description: "".into(),
+            amount: U128(amount),
+            price_type: PriceType::Recurring,
+            billing_period: Some(BillingPeriod::Monthly),
+            lock_factor_near_months: U128(lock_factor_near_months),
+            metadata: None,
+            status: CatalogStatus::Active,
+            usage_count: 0,
         }
     }
 }
