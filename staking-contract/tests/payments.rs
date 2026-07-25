@@ -3,7 +3,7 @@
 mod common;
 
 use common::{
-    BUYER, OPERATOR, OWNER, POOL, VALIDATOR_OWNER_ACCOUNT, acct, base_config, ctx, deploy,
+    BUYER, CATALOG_MANAGER, OWNER, POOL, VALIDATOR_OWNER_ACCOUNT, acct, base_config, ctx, deploy,
     register_buyer, set_default_price_for_product, setup_catalog_near_oneoff,
     setup_catalog_near_subscription, testing_env_catalog_callback,
 };
@@ -264,16 +264,16 @@ fn revenue_withdraw_rejects_non_owner() {
 
 #[test]
 #[should_panic(expected = "Only the validator owner can call this method")]
-fn validator_operator_cannot_withdraw_revenue() {
+fn validator_catalog_manager_cannot_withdraw_revenue() {
     let mut c = deploy();
     let (_product_id, price_id) = setup_catalog_near_oneoff(&mut c);
     register_buyer(&mut c);
 
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
-    c.add_validator_operator_after_get_owner(
+    c.add_validator_catalog_manager_after_get_owner(
         acct(VALIDATOR_OWNER_ACCOUNT),
         acct(POOL),
-        acct(OPERATOR),
+        acct(CATALOG_MANAGER),
         acct(VALIDATOR_OWNER_ACCOUNT),
     );
 
@@ -284,7 +284,7 @@ fn validator_operator_cannot_withdraw_revenue() {
     let _ = c.withdraw_revenue_after_get_owner(
         acct(VALIDATOR_OWNER_ACCOUNT),
         acct(POOL),
-        acct(OPERATOR),
+        acct(CATALOG_MANAGER),
     );
 }
 

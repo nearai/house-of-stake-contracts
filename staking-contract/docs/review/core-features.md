@@ -5,7 +5,7 @@ Quick reference for reviewers: what the contract does on-chain, and which source
 ## Core features
 
 1. **Validator allowlist** — Owner adds/pauses/removes staking pools; each row holds pool accounting (`validators.rs`, `governance.rs`).
-2. **Catalog (NEAR-only)** — Validator owners and their configured catalog operators manage **products** and **prices** (yocto amounts, recurring vs one-off, billing hints) via pool-owner/owner-delegated callbacks (`products.rs`, `prices.rs`, `types.rs`).
+2. **Catalog (NEAR-only)** — Validator owners and their configured catalog managers manage **products** and **prices** (yocto amounts, recurring vs one-off, billing hints) via pool-owner/owner-delegated callbacks (`products.rs`, `prices.rs`, `types.rs`).
 3. **Locks** — Users call **`lock`**: mint internal shares, queue stake, enforce price vs locked amount × duration (`lock.rs`, `utils.rs`).
 4. **Subscriptions** — One subscription per `(account, product)`; cancel, resume, update, getters (`subscriptions.rs`); **`lock`** and renewal prorate hook (`lock.rs`); unlock path (`unlock.rs`).
 5. **Lazy pool pipeline** — No settlement operator role: **`deposit_and_stake` / `unstake` / withdraw** and balance refresh are driven from lock, unlock, claim, plus manual settle/retry as documented. **One** successful stake **or** unstake per pool per NEAR epoch; net settle on pending buckets (`epoch.rs`).

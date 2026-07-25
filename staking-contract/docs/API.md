@@ -6,7 +6,7 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 
 - **`#[payable]` + “attach 1 yocto”**: method calls [`near_sdk::assert_one_yocto()`](https://docs.rs/near-sdk/latest/near_sdk/fn.assert_one_yocto.html); attach exactly **1 yoctoNEAR**.
 - **Other `#[payable]`**: attach the stated NEAR (e.g. storage, lock stake).
-- **Catalog auth**: mutating catalog methods assert the caller is either the staking pool’s **`get_owner_id()`** for that validator’s pool (cross-contract view) or a catalog operator configured by that pool owner.
+- **Catalog auth**: mutating catalog methods assert the caller is either the staking pool’s **`get_owner_id()`** for that validator’s pool (cross-contract view) or a catalog manager configured by that pool owner.
 - **Pause**: when `paused == true`, most mutating user paths revert (see individual methods).
 
 ---
@@ -69,8 +69,8 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 | Method | Deposit | Description |
 |--------|---------|-------------|
 | `add_validator` | **1 yocto** | Allowlist a **`validator_id`** (staking pool contract account). Fails if that validator row already exists. |
-| `add_validator_operator` | **1 yocto** | Validator pool owner only. Grant product/price catalog management rights for that validator to **`operator_account_id`**. Duplicate grants are no-ops. |
-| `remove_validator_operator` | **1 yocto** | Validator pool owner only. Revoke catalog management rights for **`operator_account_id`**. Removing an absent operator is a no-op. |
+| `add_validator_catalog_manager` | **1 yocto** | Validator pool owner only. Grant product/price catalog management rights for that validator to **`catalog_manager_account_id`**. Duplicate grants are no-ops. |
+| `remove_validator_catalog_manager` | **1 yocto** | Validator pool owner only. Revoke catalog management rights for **`catalog_manager_account_id`**. Removing an absent catalog manager is a no-op. |
 | `pause_validator` | **1 yocto** | Set validator **`ValidatorStatus::Paused`** (blocks **new** locks for that pool). |
 | `remove_validator` | **1 yocto** | Mark **`Removed`** when no shares / pending stake / unstake / withdraw buckets (see contract checks). |
 
@@ -78,7 +78,7 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 
 ## Catalog — products & prices (`products.rs`)
 
-All mutation entrypoints attach **1 yocto**, require contract **not paused**, validator **allowlisted**, then **`Promise`** chain: pool **`get_owner_id()`** → **`#[private]`** callback verifies the predecessor of the **original** call is either `pool_owner` or one of that validator's **`operator_account_ids`**.
+All mutation entrypoints attach **1 yocto**, require contract **not paused**, validator **allowlisted**, then **`Promise`** chain: pool **`get_owner_id()`** → **`#[private]`** callback verifies the predecessor of the **original** call is either `pool_owner` or one of that validator's **`catalog_manager_account_ids`**.
 
 **Returns:** most return **`Promise`** (async completion of catalog write).
 
@@ -118,7 +118,7 @@ Farm rewards are non-transferable accounting units. `FarmPool.reward_rate` is 24
 | Method | Access | Deposit | Returns | Description |
 |--------|--------|---------|---------|-------------|
 | `pay` | Buyer | **Attach exact NEAR price × quantity** | `PurchaseId` | Direct one-off payment for `price_id` or a product default price. Requires prepaid storage for one additional purchase, an active one-off price with no billing period, and an active validator. Creates a `pay_*` purchase record, increments product/price usage, and accrues validator revenue. Does not create a lock or touch pool staking. |
-| `withdraw_revenue` | Validator owner | **1 yocto** | `Promise` | `validator_id`. Verifies ownership through pool `get_owner_id()`, then transfers all direct-payment revenue for that validator to the validator owner. Catalog operators are not authorized. |
+| `withdraw_revenue` | Validator owner | **1 yocto** | `Promise` | `validator_id`. Verifies ownership through pool `get_owner_id()`, then transfers all direct-payment revenue for that validator to the validator owner. Catalog managers are not authorized. |
 | `get_revenue_balance_for_validator` | Anyone | 0 | `NearToken` | `validator_id`. Returns currently withdrawable direct-payment revenue for the validator. |
 | `get_purchase` | Anyone | 0 | `Purchase \| null` | `purchase_id`. Returns a direct payment purchase record. |
 | `get_purchases` | Anyone | 0 | `Purchase[]` | `from_index`, `limit`. Lists direct payment purchases. |

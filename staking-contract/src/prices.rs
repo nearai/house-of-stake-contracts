@@ -1,5 +1,5 @@
 //! Catalog prices: CRUD + archive lifecycle for product tiers.
-//! Mutating RPCs are gated via `get_owner_id` plus validator owner-or-operator authorization.
+//! Mutating RPCs are gated via `get_owner_id` plus validator owner-or-catalog-manager authorization.
 //! Archiving/deleting a default tier clears [`Product::default_price_id`] through product helpers.
 
 use crate::gas::callbacks;
@@ -69,7 +69,7 @@ impl Contract {
     // Public catalog admin (pool-owner auth via promise chain)
     // -------------------------------------------------------------------------
 
-    /// Add a price tier under an active product. Validator owner or operator; attach 1 yocto.
+    /// Add a price tier under an active product. Validator owner or catalog manager; attach 1 yocto.
     #[payable]
     pub fn create_price(
         &mut self,

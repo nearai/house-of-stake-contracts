@@ -7,22 +7,22 @@ use near_sdk::{
 };
 
 pub const MAX_VALIDATORS: u32 = 1_000;
-pub const MAX_VALIDATOR_OPERATORS: usize = 16;
+pub const MAX_VALIDATOR_CATALOG_MANAGERS: usize = 16;
 
 #[ext_contract(ext_self_validators)]
 pub trait ExtSelfValidators {
-    fn add_validator_operator_after_get_owner(
+    fn add_validator_catalog_manager_after_get_owner(
         &mut self,
         #[callback] pool_owner: AccountId,
         validator_id: ValidatorId,
-        operator_account_id: AccountId,
+        catalog_manager_account_id: AccountId,
         expected_caller: AccountId,
     );
-    fn remove_validator_operator_after_get_owner(
+    fn remove_validator_catalog_manager_after_get_owner(
         &mut self,
         #[callback] pool_owner: AccountId,
         validator_id: ValidatorId,
-        operator_account_id: AccountId,
+        catalog_manager_account_id: AccountId,
         expected_caller: AccountId,
     );
 }
@@ -46,7 +46,7 @@ impl Contract {
 
         let new_validator = Validator {
             validator_id: validator_id.clone(),
-            operator_account_ids: Vec::new(),
+            catalog_manager_account_ids: Vec::new(),
             status: ValidatorStatus::Active,
             total_shares: U128(0),
             total_staked_balance: NearToken::from_near(0),
@@ -65,94 +65,100 @@ impl Contract {
         crate::events::log_validator_added(&validator_id);
     }
 
-    /// Pool owner: grant catalog product/price management rights for this validator to `operator_account_id`.
+    /// Pool owner: grant catalog product/price management rights for this validator to `catalog_manager_account_id`.
     /// Attach 1 yocto. Duplicate grants are no-ops.
     #[payable]
-    pub fn add_validator_operator(
+    pub fn add_validator_catalog_manager(
         &mut self,
         validator_id: ValidatorId,
-        operator_account_id: AccountId,
+        catalog_manager_account_id: AccountId,
     ) -> Promise {
         let (validator_id, expected_caller) = self.catalog_admin_entry_for_pool(&validator_id);
         Self::promise_pool_get_owner_id_then(
             validator_id.clone(),
             ext_self_validators::ext(env::current_account_id())
                 .with_static_gas(crate::gas::callbacks::ON_VALIDATOR_OWNER_CHECK)
-                .add_validator_operator_after_get_owner(
+                .add_validator_catalog_manager_after_get_owner(
                     validator_id,
-                    operator_account_id,
+                    catalog_manager_account_id,
                     expected_caller,
                 ),
         )
     }
 
-    /// Pool owner: revoke catalog product/price management rights for this validator from `operator_account_id`.
-    /// Attach 1 yocto. Removing an absent operator is a no-op.
+    /// Pool owner: revoke catalog product/price management rights for this validator from `catalog_manager_account_id`.
+    /// Attach 1 yocto. Removing an absent catalog manager is a no-op.
     #[payable]
-    pub fn remove_validator_operator(
+    pub fn remove_validator_catalog_manager(
         &mut self,
         validator_id: ValidatorId,
-        operator_account_id: AccountId,
+        catalog_manager_account_id: AccountId,
     ) -> Promise {
         let (validator_id, expected_caller) = self.catalog_admin_entry_for_pool(&validator_id);
         Self::promise_pool_get_owner_id_then(
             validator_id.clone(),
             ext_self_validators::ext(env::current_account_id())
                 .with_static_gas(crate::gas::callbacks::ON_VALIDATOR_OWNER_CHECK)
-                .remove_validator_operator_after_get_owner(
+                .remove_validator_catalog_manager_after_get_owner(
                     validator_id,
-                    operator_account_id,
+                    catalog_manager_account_id,
                     expected_caller,
                 ),
         )
     }
 
     #[private]
-    pub fn add_validator_operator_after_get_owner(
+    pub fn add_validator_catalog_manager_after_get_owner(
         &mut self,
         #[callback] pool_owner: AccountId,
         validator_id: ValidatorId,
-        operator_account_id: AccountId,
+        catalog_manager_account_id: AccountId,
         expected_caller: AccountId,
     ) {
         self.assert_validator_owner(pool_owner, &expected_caller);
         let mut validator = self.require_validator(&validator_id);
         if validator
-            .operator_account_ids
-            .contains(&operator_account_id)
+            .catalog_manager_account_ids
+            .contains(&catalog_manager_account_id)
         {
             return;
         }
         require!(
-            validator.operator_account_ids.len() < MAX_VALIDATOR_OPERATORS,
-            "Validator operator limit reached"
+            validator.catalog_manager_account_ids.len() < MAX_VALIDATOR_CATALOG_MANAGERS,
+            "Validator catalog manager limit reached"
         );
         validator
-            .operator_account_ids
-            .push(operator_account_id.clone());
+            .catalog_manager_account_ids
+            .push(catalog_manager_account_id.clone());
         self.internal_set_validator(validator_id.clone(), validator);
-        crate::events::log_validator_operator_add(&validator_id, &operator_account_id);
+        crate::events::log_validator_catalog_manager_add(
+            &validator_id,
+            &catalog_manager_account_id,
+        );
     }
 
     #[private]
-    pub fn remove_validator_operator_after_get_owner(
+    pub fn remove_validator_catalog_manager_after_get_owner(
         &mut self,
         #[callback] pool_owner: AccountId,
         validator_id: ValidatorId,
-        operator_account_id: AccountId,
+        catalog_manager_account_id: AccountId,
         expected_caller: AccountId,
     ) {
         self.assert_validator_owner(pool_owner, &expected_caller);
         let mut validator = self.require_validator(&validator_id);
-        let before = validator.operator_account_ids.len();
+        let before = validator.catalog_manager_account_ids.len();
         validator
-            .operator_account_ids
-            .retain(|id| id != &operator_account_id);
-        if validator.operator_account_ids.len() == before {
+            .catalog_manager_account_ids
+            .retain(|id| id != &catalog_manager_account_id);
+        if validator.catalog_manager_account_ids.len() == before {
             return;
         }
         self.internal_set_validator(validator_id.clone(), validator);
-        crate::events::log_validator_operator_remove(&validator_id, &operator_account_id);
+        crate::events::log_validator_catalog_manager_remove(
+            &validator_id,
+            &catalog_manager_account_id,
+        );
     }
 
     #[payable]
@@ -463,7 +469,7 @@ impl Contract {
         );
     }
 
-    /// After pool `get_owner_id`: promise ok, not paused, caller is pool owner or a catalog operator.
+    /// After pool `get_owner_id`: promise ok, not paused, caller is pool owner or a catalog manager.
     pub(crate) fn assert_validator_catalog_admin(
         &self,
         pool_owner: AccountId,
@@ -480,8 +486,8 @@ impl Contract {
         }
         let validator = self.require_validator(validator_id);
         require!(
-            validator.operator_account_ids.contains(caller),
-            "Only the validator owner or operator can call this method"
+            validator.catalog_manager_account_ids.contains(caller),
+            "Only the validator owner or catalog manager can call this method"
         );
     }
 }

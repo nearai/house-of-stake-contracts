@@ -109,8 +109,8 @@ impl Default for Account {
 pub struct Validator {
     /// Staking pool contract account (= catalog `validator_id` / lock `validator_id`).
     pub validator_id: ValidatorId,
-    /// Optional bounded list of catalog operators allowed to manage products and prices for this validator.
-    pub operator_account_ids: Vec<AccountId>,
+    /// Optional bounded list of catalog managers allowed to manage products and prices for this validator.
+    pub catalog_manager_account_ids: Vec<AccountId>,
     /// Whether new locks are allowed (**`Active`**) or blocked (**`Paused`**), or this pool is **`Removed`**.
     pub status: ValidatorStatus,
 
@@ -151,7 +151,7 @@ pub struct Validator {
     pub tx_status: TransactionStatus,
 }
 
-/// Validator layout before catalog operator support.
+/// Validator layout before catalog manager support.
 #[derive(Clone)]
 #[near(serializers = [borsh])]
 pub struct ValidatorV0 {
@@ -174,7 +174,7 @@ impl From<ValidatorV0> for Validator {
     fn from(value: ValidatorV0) -> Self {
         Self {
             validator_id: value.validator_id,
-            operator_account_ids: Vec::new(),
+            catalog_manager_account_ids: Vec::new(),
             status: value.status,
             total_shares: value.total_shares,
             total_staked_balance: value.total_staked_balance,

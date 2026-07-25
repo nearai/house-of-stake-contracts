@@ -11,7 +11,7 @@ Implementation: [`src/epoch.rs`](../../src/epoch.rs). Entrypoints: [`lock.rs`](.
 | Topic | Decision |
 |--------|-----------|
 | Public `epoch_stake` / `epoch_unstake` / `epoch_withdraw` / `refresh_validator_balance` | **Removed** from the contract ABI. |
-| Settlement `operators` / `set_operators` | **Removed** (no live deployments with old `Config`). Catalog operators are stored per validator and do not drive pool settlement. |
+| Settlement `operators` / `set_operators` | **Removed** (no live deployments with old `Config`). Catalog managers are stored per validator and do not drive pool settlement. |
 | Balance before mint / unlock | **`get_account`** when **`last_settlement_epoch` < `epoch_height`** (then withdraw-if-ready and **`try_epoch_stake_or_unstake`** on existing pending). When **`last_settlement_epoch` ≥ `epoch_height`**, **skip** that pre-user pipeline and mint / unlock using cached **`total_staked_balance`**. |
 | Withdraw before new unstake | If settle allows and the pool has withdrawable unstaked NEAR, **pull from pool first**, then `unstake`. |
 | First delegation to an empty validator | Same **`min_lock_amount`** gate as any lock (never below 1 NEAR — [`PROTOCOL_MIN_LOCK_AMOUNT_YOCTO`](../../src/config.rs)). |

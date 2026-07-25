@@ -3,13 +3,14 @@
 mod common;
 
 use common::{
-    BUYER, OPERATOR, OWNER, POOL, VALIDATOR_OWNER_ACCOUNT, acct, add_validator_allowlisted, ctx,
-    deploy, one_yocto, register_buyer, setup_catalog_near_oneoff, testing_env_catalog_callback,
+    BUYER, CATALOG_MANAGER, OWNER, POOL, VALIDATOR_OWNER_ACCOUNT, acct, add_validator_allowlisted,
+    ctx, deploy, one_yocto, register_buyer, setup_catalog_near_oneoff,
+    testing_env_catalog_callback,
 };
 use near_sdk::json_types::U64;
 use near_sdk::{AccountId, NearToken, testing_env};
 use staking_contract::types::ValidatorStatus;
-use staking_contract::validators::{MAX_VALIDATOR_OPERATORS, MAX_VALIDATORS};
+use staking_contract::validators::{MAX_VALIDATOR_CATALOG_MANAGERS, MAX_VALIDATORS};
 
 #[test]
 fn get_validators_includes_registered_pool() {
@@ -21,7 +22,7 @@ fn get_validators_includes_registered_pool() {
     assert_eq!(vs.len(), 1);
     assert_eq!(vs[0].validator_id, acct(POOL));
     assert_eq!(vs[0].status, ValidatorStatus::Active);
-    assert!(vs[0].operator_account_ids.is_empty());
+    assert!(vs[0].catalog_manager_account_ids.is_empty());
 }
 
 #[test]
@@ -68,119 +69,119 @@ fn add_validator_rejects_after_max_validators() {
 }
 
 #[test]
-fn validator_owner_can_add_and_remove_multiple_catalog_operators() {
+fn validator_owner_can_add_and_remove_multiple_catalog_managers() {
     let mut c = deploy();
     add_validator_allowlisted(&mut c);
 
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
-    c.add_validator_operator_after_get_owner(
+    c.add_validator_catalog_manager_after_get_owner(
         acct(VALIDATOR_OWNER_ACCOUNT),
         acct(POOL),
-        acct(OPERATOR),
+        acct(CATALOG_MANAGER),
         acct(VALIDATOR_OWNER_ACCOUNT),
     );
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
-    c.add_validator_operator_after_get_owner(
+    c.add_validator_catalog_manager_after_get_owner(
         acct(VALIDATOR_OWNER_ACCOUNT),
         acct(POOL),
-        acct("operator-two.near"),
+        acct("manager-two.near"),
         acct(VALIDATOR_OWNER_ACCOUNT),
     );
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
-    c.add_validator_operator_after_get_owner(
+    c.add_validator_catalog_manager_after_get_owner(
         acct(VALIDATOR_OWNER_ACCOUNT),
         acct(POOL),
-        acct(OPERATOR),
+        acct(CATALOG_MANAGER),
         acct(VALIDATOR_OWNER_ACCOUNT),
     );
 
     let validator = c.get_validator(acct(POOL)).expect("validator");
     assert_eq!(
-        validator.operator_account_ids,
-        vec![acct(OPERATOR), acct("operator-two.near")]
+        validator.catalog_manager_account_ids,
+        vec![acct(CATALOG_MANAGER), acct("manager-two.near")]
     );
 
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
-    c.remove_validator_operator_after_get_owner(
+    c.remove_validator_catalog_manager_after_get_owner(
         acct(VALIDATOR_OWNER_ACCOUNT),
         acct(POOL),
-        acct(OPERATOR),
+        acct(CATALOG_MANAGER),
         acct(VALIDATOR_OWNER_ACCOUNT),
     );
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
-    c.remove_validator_operator_after_get_owner(
+    c.remove_validator_catalog_manager_after_get_owner(
         acct(VALIDATOR_OWNER_ACCOUNT),
         acct(POOL),
-        acct("operator-missing.near"),
+        acct("manager-missing.near"),
         acct(VALIDATOR_OWNER_ACCOUNT),
     );
 
     let validator = c.get_validator(acct(POOL)).expect("validator");
     assert_eq!(
-        validator.operator_account_ids,
-        vec![acct("operator-two.near")]
+        validator.catalog_manager_account_ids,
+        vec![acct("manager-two.near")]
     );
 }
 
 #[test]
 #[should_panic(expected = "Only the validator owner can call this method")]
-fn non_owner_cannot_add_validator_operator() {
+fn non_owner_cannot_add_validator_catalog_manager() {
     let mut c = deploy();
     add_validator_allowlisted(&mut c);
 
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
-    c.add_validator_operator_after_get_owner(
+    c.add_validator_catalog_manager_after_get_owner(
         acct(VALIDATOR_OWNER_ACCOUNT),
         acct(POOL),
-        acct(OPERATOR),
-        acct(OPERATOR),
+        acct(CATALOG_MANAGER),
+        acct(CATALOG_MANAGER),
     );
 }
 
 #[test]
 #[should_panic(expected = "Only the validator owner can call this method")]
-fn operator_cannot_remove_validator_operator() {
+fn catalog_manager_cannot_remove_validator_catalog_manager() {
     let mut c = deploy();
     add_validator_allowlisted(&mut c);
 
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
-    c.add_validator_operator_after_get_owner(
+    c.add_validator_catalog_manager_after_get_owner(
         acct(VALIDATOR_OWNER_ACCOUNT),
         acct(POOL),
-        acct(OPERATOR),
+        acct(CATALOG_MANAGER),
         acct(VALIDATOR_OWNER_ACCOUNT),
     );
 
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
-    c.remove_validator_operator_after_get_owner(
+    c.remove_validator_catalog_manager_after_get_owner(
         acct(VALIDATOR_OWNER_ACCOUNT),
         acct(POOL),
-        acct(OPERATOR),
-        acct(OPERATOR),
+        acct(CATALOG_MANAGER),
+        acct(CATALOG_MANAGER),
     );
 }
 
 #[test]
-#[should_panic(expected = "Validator operator limit reached")]
-fn add_validator_operator_rejects_after_max_operators() {
+#[should_panic(expected = "Validator catalog manager limit reached")]
+fn add_validator_catalog_manager_rejects_after_max_managers() {
     let mut c = deploy();
     add_validator_allowlisted(&mut c);
 
-    for index in 0..MAX_VALIDATOR_OPERATORS {
+    for index in 0..MAX_VALIDATOR_CATALOG_MANAGERS {
         testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
-        c.add_validator_operator_after_get_owner(
+        c.add_validator_catalog_manager_after_get_owner(
             acct(VALIDATOR_OWNER_ACCOUNT),
             acct(POOL),
-            format!("operator-{index}.near").parse().unwrap(),
+            format!("manager-{index}.near").parse().unwrap(),
             acct(VALIDATOR_OWNER_ACCOUNT),
         );
     }
 
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
-    c.add_validator_operator_after_get_owner(
+    c.add_validator_catalog_manager_after_get_owner(
         acct(VALIDATOR_OWNER_ACCOUNT),
         acct(POOL),
-        acct("operator-over-limit.near"),
+        acct("manager-over-limit.near"),
         acct(VALIDATOR_OWNER_ACCOUNT),
     );
 }

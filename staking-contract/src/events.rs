@@ -22,22 +22,28 @@ pub fn log_validator_added(validator_id: &ValidatorId) {
     );
 }
 
-pub fn log_validator_operator_add(validator_id: &ValidatorId, operator_account_id: &AccountId) {
+pub fn log_validator_catalog_manager_add(
+    validator_id: &ValidatorId,
+    catalog_manager_account_id: &AccountId,
+) {
     emit(
-        "validator_operator_add",
+        "validator_catalog_manager_add",
         serde_json::json!({
             "validator_id": validator_id.to_string(),
-            "operator_account_id": operator_account_id.to_string(),
+            "catalog_manager_account_id": catalog_manager_account_id.to_string(),
         }),
     );
 }
 
-pub fn log_validator_operator_remove(validator_id: &ValidatorId, operator_account_id: &AccountId) {
+pub fn log_validator_catalog_manager_remove(
+    validator_id: &ValidatorId,
+    catalog_manager_account_id: &AccountId,
+) {
     emit(
-        "validator_operator_remove",
+        "validator_catalog_manager_remove",
         serde_json::json!({
             "validator_id": validator_id.to_string(),
-            "operator_account_id": operator_account_id.to_string(),
+            "catalog_manager_account_id": catalog_manager_account_id.to_string(),
         }),
     );
 }
