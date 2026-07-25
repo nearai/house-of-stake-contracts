@@ -57,27 +57,6 @@ pub fn near_from_shares(shares: u128, effective_total: u128, total_shares: u128)
 /// Enforces `locked_yocto * duration_ns >= required_near_months * AVG_MONTH_NS`
 /// where `required_near_months = amount * lock_factor / LOCK_FACTOR_DENOM`.
 ///
-/// [`Price::amount`] is **yoctoNEAR** for the catalog line item.
-/// Smallest integer `locked_yocto` such that [`check_near_price_lock`] passes for `(price, duration_ns)`.
-/// Used for tier-gap surplus when downgrading subscriptions (Phase B prorate).
-pub fn min_locked_yocto_for_duration(price: &Price, duration_ns: u128) -> u128 {
-    if duration_ns == 0 {
-        return 0;
-    }
-    let rhs = required_near_months(price) * U256::from(AVG_MONTH_NS);
-    let duration_u256 = U256::from(duration_ns);
-    let quotient = rhs / duration_u256;
-    let remainder = rhs % duration_u256;
-    if quotient > U256::from(u128::MAX) {
-        return u128::MAX;
-    }
-    let mut min_locked_yocto = quotient.as_u128();
-    if !remainder.is_zero() {
-        min_locked_yocto = min_locked_yocto.saturating_add(1);
-    }
-    min_locked_yocto
-}
-
 pub fn check_near_price_lock(
     price: &Price,
     locked_yocto: u128,
@@ -262,18 +241,6 @@ mod tests {
         let eff2 = gross.saturating_sub(user_liab1);
         let n2 = near_from_shares(sh, eff2, ts1);
         assert_eq!(n1.saturating_add(n2), gross);
-    }
-
-    #[test]
-    fn min_locked_matches_price_check_boundary() {
-        let price = test_price(100, LOCK_FACTOR_DENOM);
-        let d: u128 = 1_000_000_000_000;
-        let m = min_locked_yocto_for_duration(&price, d);
-        assert!(check_near_price_lock(&price, m, d).is_ok());
-        assert!(m > 0);
-        if m > 1 {
-            assert!(check_near_price_lock(&price, m - 1, d).is_err());
-        }
     }
 
     #[test]
