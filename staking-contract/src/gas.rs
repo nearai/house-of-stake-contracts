@@ -102,3 +102,35 @@ impl Contract {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::callbacks;
+
+    #[test]
+    fn epoch_dispatch_budget_leaves_margin_after_value_returning_tail_and_release() {
+        let max_value_returning_tail = [
+            callbacks::ON_LOCK_FINALLY_MINT,
+            callbacks::ON_SUBSCRIPTION_UPDATE_AFTER_SETTLE,
+            callbacks::ON_FARM_STAKE_AFTER_SETTLE,
+        ]
+        .into_iter()
+        .max_by_key(|gas| gas.as_gas())
+        .expect("at least one value-returning tail budget");
+        let max_value_returning_release = [
+            callbacks::ON_EPOCH_PIPELINE_RELEASE_WITH_LOCK_ID,
+            callbacks::ON_EPOCH_PIPELINE_RELEASE_WITH_SUBSCRIPTION_UPDATE_OUTCOME,
+            callbacks::ON_EPOCH_PIPELINE_RELEASE_WITH_FARM_POSITION,
+        ]
+        .into_iter()
+        .max_by_key(|gas| gas.as_gas())
+        .expect("at least one value-returning release budget");
+
+        let scheduled_child_gas =
+            max_value_returning_tail.as_gas() + max_value_returning_release.as_gas();
+        assert!(
+            callbacks::ON_EPOCH_SETTLEMENT_DISPATCH.as_gas() > scheduled_child_gas,
+            "dispatch callback needs explicit execution margin after scheduling value-returning tail and release"
+        );
+    }
+}
