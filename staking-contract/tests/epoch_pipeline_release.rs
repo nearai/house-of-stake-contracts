@@ -2,9 +2,12 @@
 
 mod common;
 
-use common::{BUYER, POOL, STAKING, acct, ctx, deploy, setup_catalog_near_oneoff};
+use common::{
+    BUYER, POOL, STAKING, acct, add_validator_allowlisted, ctx, deploy, setup_catalog_near_oneoff,
+};
+use near_sdk::json_types::U128;
 use near_sdk::{NearToken, PromiseError, PromiseOrValue, testing_env};
-use staking_contract::types::{OrderRef, TransactionStatus, UserAction};
+use staking_contract::types::{OrderRef, PoolAccountView, TransactionStatus, UserAction};
 
 #[test]
 fn lock_pipeline_tail_failure_releases_busy_and_schedules_refund() {
@@ -77,4 +80,40 @@ fn lock_pipeline_tail_success_releases_busy_and_returns_lock_id() {
 
     let v = c.get_validator(pool).expect("validator");
     assert_eq!(v.tx_status, TransactionStatus::Idle);
+}
+
+#[test]
+fn settle_only_no_pending_records_check_without_consuming_settlement_slot() {
+    let mut c = deploy();
+    add_validator_allowlisted(&mut c);
+    let pool = acct(POOL);
+
+    let mut validator = c.get_validator(pool.clone()).expect("validator").clone();
+    validator.tx_status = TransactionStatus::Busy;
+    validator.last_settlement_epoch = 99;
+    validator.last_settlement_check_epoch = 0;
+    c.validators.insert(pool.clone(), validator.into());
+
+    testing_env!(ctx(acct(STAKING), NearToken::from_near(0)));
+    let _ = c.on_epoch_settlement_after_pool_account(
+        Ok(PoolAccountView {
+            unstaked_balance: U128(0),
+            staked_balance: U128(0),
+            can_withdraw: false,
+        }),
+        pool.clone(),
+        UserAction::SettleOnly {
+            validator_id: pool.clone(),
+        },
+    );
+
+    let v = c.get_validator(pool).expect("validator");
+    assert_eq!(
+        v.last_settlement_epoch, 99,
+        "no-op epoch_settle must not consume the stake/unstake settlement slot"
+    );
+    assert_eq!(
+        v.last_settlement_check_epoch, 100,
+        "keeper-visible check marker should advance for successful no-op epoch_settle"
+    );
 }

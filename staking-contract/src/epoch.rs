@@ -364,7 +364,12 @@ impl Contract {
         let has_pending = pending_stake_yocto > 0 || pending_unstake_yocto > 0;
         let can_settle = validator.last_settlement_epoch < epoch_height();
 
-        if !has_pending || !can_settle {
+        if !has_pending {
+            self.mark_settle_only_check_epoch(&validator_id, &dispatch_after);
+            return self.on_epoch_settlement_dispatch_continue(dispatch_after);
+        }
+
+        if !can_settle {
             return self.on_epoch_settlement_dispatch_continue(dispatch_after);
         }
 
@@ -410,6 +415,19 @@ impl Contract {
                 .with_static_gas(callbacks::ON_EPOCH_SETTLEMENT_DISPATCH)
                 .on_epoch_settlement_dispatch_continue(dispatch_after),
         )
+    }
+
+    pub(crate) fn mark_settle_only_check_epoch(
+        &mut self,
+        validator_id: &ValidatorId,
+        cont: &UserAction,
+    ) {
+        if !matches!(cont, UserAction::SettleOnly { .. }) {
+            return;
+        }
+        let mut validator = self.require_validator(validator_id);
+        validator.last_settlement_check_epoch = epoch_height();
+        self.internal_set_validator(validator_id.clone(), validator);
     }
 
     // --- [Pipeline 3a] ---

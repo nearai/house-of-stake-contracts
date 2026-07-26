@@ -49,6 +49,7 @@ Withdraw-from-pool does **not** consume the stake/unstake epoch slot; only succe
 | `user_pending_unstake` tranches | Per-account pending unstake liabilities; after net-zero settle, `pending_to_unstake` is re-rooted to the sum of these tranches. |
 | `last_unstake_epoch` | NEAR epoch of last successful pool `unstake` callback. |
 | `last_settlement_epoch` | Last epoch that completed pre-user pipeline + net settle (or net-zero). **Mutex** for one stake/unstake per pool per NEAR epoch. |
+| `last_settlement_check_epoch` | Last epoch where public `epoch_settle` completed a no-op check without consuming the stake/unstake mutex. Keeper-facing marker for validators with no pending stake or unstake. |
 | `tx_status` | `Idle` vs `Busy` — at most one in-flight mutating pool pipeline per validator row. |
 
 Config **`epoch_unstake_settle_epochs`** gates further pool **`unstake`** via `validator_unstake_waiting_finished`. **Withdraw-from-pool** uses the pool’s **`can_withdraw`** from **`get_account`**.
@@ -160,7 +161,8 @@ try_epoch_withdraw_known_unstaked  [2a]
 
 | Condition | Action |
 |-----------|--------|
-| No pending or `last_settlement_epoch >= epoch_height` | → **4** |
+| No pending | Record `last_settlement_check_epoch` for `SettleOnly` → **4** |
+| `last_settlement_epoch >= epoch_height` | → **4** |
 | `pending_to_stake == pending_to_unstake > 0` | Inline **3a** net-zero → **4** |
 | Asymmetric pending, slot free | Pool op → **3b** / **3c** → **4** |
 

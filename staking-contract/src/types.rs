@@ -139,6 +139,10 @@ pub struct Validator {
     /// current epoch, user flows **skip** another pool `get_account` refresh for this validator until the
     /// next NEAR epoch.
     pub last_settlement_epoch: u64,
+    /// Last NEAR `epoch_height` where public `epoch_settle` completed a check without consuming the
+    /// stake/unstake settlement slot. This lets keepers distinguish a successful no-op check from a
+    /// transaction that failed to advance observable validator state.
+    pub last_settlement_check_epoch: u64,
     /// NEAR that has been unstaked on the pool side and is expected to be moved by pool `withdraw`
     /// into this contract.
     pub pending_to_withdraw: NearToken,
@@ -168,6 +172,25 @@ pub struct ValidatorV0 {
     pub tx_status: TransactionStatus,
 }
 
+/// Validator layout before the no-op epoch-settle check marker.
+#[derive(Clone)]
+#[near(serializers = [borsh])]
+pub struct ValidatorV1 {
+    pub validator_id: ValidatorId,
+    pub catalog_manager_account_ids: Vec<AccountId>,
+    pub status: ValidatorStatus,
+    pub total_shares: U128,
+    pub total_staked_balance: NearToken,
+    pub last_balance_refresh_ns: U64,
+    pub pending_to_stake: NearToken,
+    pub pending_to_unstake: NearToken,
+    pub last_unstake_epoch: u64,
+    pub last_settlement_epoch: u64,
+    pub pending_to_withdraw: NearToken,
+    pub pending_to_claim: NearToken,
+    pub tx_status: TransactionStatus,
+}
+
 impl From<ValidatorV0> for Validator {
     fn from(value: ValidatorV0) -> Self {
         Self {
@@ -181,6 +204,28 @@ impl From<ValidatorV0> for Validator {
             pending_to_unstake: value.pending_to_unstake,
             last_unstake_epoch: value.last_unstake_epoch,
             last_settlement_epoch: value.last_settlement_epoch,
+            last_settlement_check_epoch: 0,
+            pending_to_withdraw: value.pending_to_withdraw,
+            pending_to_claim: value.pending_to_claim,
+            tx_status: value.tx_status,
+        }
+    }
+}
+
+impl From<ValidatorV1> for Validator {
+    fn from(value: ValidatorV1) -> Self {
+        Self {
+            validator_id: value.validator_id,
+            catalog_manager_account_ids: value.catalog_manager_account_ids,
+            status: value.status,
+            total_shares: value.total_shares,
+            total_staked_balance: value.total_staked_balance,
+            last_balance_refresh_ns: value.last_balance_refresh_ns,
+            pending_to_stake: value.pending_to_stake,
+            pending_to_unstake: value.pending_to_unstake,
+            last_unstake_epoch: value.last_unstake_epoch,
+            last_settlement_epoch: value.last_settlement_epoch,
+            last_settlement_check_epoch: 0,
             pending_to_withdraw: value.pending_to_withdraw,
             pending_to_claim: value.pending_to_claim,
             tx_status: value.tx_status,
@@ -748,12 +793,13 @@ impl AsMut<Config> for VConfig {
 #[near(serializers = [borsh])]
 pub enum VValidator {
     V0(ValidatorV0),
-    V1(Validator),
+    V1(ValidatorV1),
+    V2(Validator),
 }
 
 impl From<Validator> for VValidator {
     fn from(value: Validator) -> Self {
-        Self::V1(value)
+        Self::V2(value)
     }
 }
 
@@ -761,7 +807,8 @@ impl From<VValidator> for Validator {
     fn from(value: VValidator) -> Self {
         match value {
             VValidator::V0(inner) => inner.into(),
-            VValidator::V1(inner) => inner,
+            VValidator::V1(inner) => inner.into(),
+            VValidator::V2(inner) => inner,
         }
     }
 }
@@ -770,7 +817,7 @@ impl VValidator {
     pub(crate) fn legacy_accounts_with_pending_unstake(&self) -> &[AccountId] {
         match self {
             VValidator::V0(inner) => &inner.accounts_with_pending_unstake,
-            VValidator::V1(_) => &[],
+            VValidator::V1(_) | VValidator::V2(_) => &[],
         }
     }
 }
@@ -1036,6 +1083,7 @@ mod tests {
             pending_to_unstake: NearToken::from_near(3),
             last_unstake_epoch: 4,
             last_settlement_epoch: 5,
+            last_settlement_check_epoch: 6,
             pending_to_withdraw: NearToken::from_near(6),
             pending_to_claim: NearToken::from_near(7),
             tx_status: TransactionStatus::Idle,
@@ -1057,6 +1105,25 @@ mod tests {
             pending_to_withdraw: current.pending_to_withdraw,
             pending_to_claim: current.pending_to_claim,
             accounts_with_pending_unstake: vec!["buyer.near".parse().unwrap()],
+            tx_status: current.tx_status,
+        }
+    }
+
+    fn validator_v1_without_check_epoch() -> ValidatorV1 {
+        let current = validator();
+        ValidatorV1 {
+            validator_id: current.validator_id,
+            catalog_manager_account_ids: current.catalog_manager_account_ids,
+            status: current.status,
+            total_shares: current.total_shares,
+            total_staked_balance: current.total_staked_balance,
+            last_balance_refresh_ns: current.last_balance_refresh_ns,
+            pending_to_stake: current.pending_to_stake,
+            pending_to_unstake: current.pending_to_unstake,
+            last_unstake_epoch: current.last_unstake_epoch,
+            last_settlement_epoch: current.last_settlement_epoch,
+            pending_to_withdraw: current.pending_to_withdraw,
+            pending_to_claim: current.pending_to_claim,
             tx_status: current.tx_status,
         }
     }
@@ -1103,15 +1170,16 @@ mod tests {
     }
 
     #[test]
-    fn vvalidator_writes_new_validators_as_variant_one_without_pending_account_vector() {
+    fn vvalidator_writes_new_validators_as_variant_two_with_check_epoch() {
         let mut bytes = Vec::new();
         VValidator::from(validator()).serialize(&mut bytes).unwrap();
 
-        assert_eq!(bytes.first().copied(), Some(1));
+        assert_eq!(bytes.first().copied(), Some(2));
         let decoded = VValidator::try_from_slice(&bytes).unwrap();
         assert!(decoded.legacy_accounts_with_pending_unstake().is_empty());
         let decoded: Validator = decoded.into();
         assert_eq!(decoded.validator_id.as_str(), "pool.near");
+        assert_eq!(decoded.last_settlement_check_epoch, 6);
     }
 
     #[test]
@@ -1129,6 +1197,20 @@ mod tests {
         let decoded: Validator = decoded.into();
         assert_eq!(decoded.validator_id.as_str(), "pool.near");
         assert!(decoded.catalog_manager_account_ids.is_empty());
+    }
+
+    #[test]
+    fn vvalidator_reads_variant_one_with_default_check_epoch() {
+        let mut bytes = Vec::new();
+        VValidator::V1(validator_v1_without_check_epoch())
+            .serialize(&mut bytes)
+            .unwrap();
+
+        assert_eq!(bytes.first().copied(), Some(1));
+        let decoded: Validator = VValidator::try_from_slice(&bytes).unwrap().into();
+        assert_eq!(decoded.validator_id.as_str(), "pool.near");
+        assert_eq!(decoded.last_settlement_epoch, 5);
+        assert_eq!(decoded.last_settlement_check_epoch, 0);
     }
 }
 

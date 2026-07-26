@@ -55,6 +55,7 @@ impl Contract {
             pending_to_unstake: NearToken::from_near(0),
             last_unstake_epoch: 0,
             last_settlement_epoch: 0,
+            last_settlement_check_epoch: 0,
             pending_to_withdraw: NearToken::from_near(0),
             pending_to_claim: NearToken::from_near(0),
             tx_status: TransactionStatus::Idle,

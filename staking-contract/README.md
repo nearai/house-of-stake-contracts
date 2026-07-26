@@ -39,6 +39,8 @@ Typical sequence after locks exist (no public `epoch_stake` / `epoch_unstake` / 
 
 **Per pool and NEAR epoch (matches the staking pool contract):** the pool accepts **at most one** successful **`deposit_and_stake`** **or** **`unstake`** per `epoch_height` for that pool account. The contract records the epoch of the last such success in **`Validator.last_settlement_epoch`**, so a second success in the **same** epoch is rejected.
 
+Successful public **`epoch_settle`** calls with no pending stake/unstake work record **`Validator.last_settlement_check_epoch`** instead of bumping **`last_settlement_epoch`**, so keepers can observe the no-op check without consuming the epoch's pool-operation slot.
+
 **Net settlement:** before calling the pool, the contract compares **`pending_to_stake`** and **`pending_to_unstake`** in yocto. It stakes only the excess stake, unstakes only the excess unstake, or (when the two are equal and non-zero) clears both buckets and user unstake liability **without** a pool mutating call, still bumping **`last_settlement_epoch`**. **`epoch_settle(validator_id)`** retries the same pipeline for manual advance. Withdraw-from-pool does **not** use this stake/unstake slot.
 
 ## Implementation status (snapshot)
