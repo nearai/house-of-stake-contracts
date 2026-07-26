@@ -170,6 +170,50 @@ async fn epoch_settle_noop_fresh_epoch_advances_last_settlement_epoch()
 }
 
 #[tokio::test]
+async fn lock_no_pending_fresh_epoch_marks_settlement_handled()
+-> Result<(), Box<dyn std::error::Error>> {
+    let worker = near_workspaces::sandbox().await?;
+    let (staking, pool, _owner, _product_id, price_id) = setup_staking_fixture(&worker).await?;
+    let buyer = worker.dev_create_account().await?;
+
+    buyer_storage_deposit(&buyer, staking.id()).await?;
+    fast_forward_until_epoch_delta(&worker, 1, Some(&buyer), Some(staking.id())).await?;
+    let current_epoch: u64 = buyer.view(staking.id(), "get_epoch_height").await?.json()?;
+
+    let v_before = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    assert_eq!(
+        json_near_token_yocto(&v_before["pending_to_stake"]).unwrap_or(0),
+        0,
+        "fixture should start without pending stake"
+    );
+    assert_eq!(
+        json_near_token_yocto(&v_before["pending_to_unstake"]).unwrap_or(0),
+        0,
+        "fixture should start without pending unstake"
+    );
+    assert!(
+        json_u64_field_any(&v_before["last_settlement_epoch"]).unwrap_or(0) < current_epoch,
+        "test must exercise a fresh-epoch pre-action settlement"
+    );
+
+    buyer_lock_one_off(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
+
+    let v_after = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    assert_eq!(json_tx_status(&v_after["tx_status"]), Some("Idle"));
+    assert_eq!(
+        json_u64_field_any(&v_after["last_settlement_epoch"]),
+        Some(current_epoch),
+        "successful no-pending pre-action settlement should mark the current epoch handled"
+    );
+    assert!(
+        json_near_token_yocto(&v_after["pending_to_stake"]).unwrap_or(0) > 0,
+        "the lock tail should still queue its own stake for a later epoch"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn epoch_settle_get_account_failure_releases_busy_and_allows_retry()
 -> Result<(), Box<dyn std::error::Error>> {
     let worker = near_workspaces::sandbox().await?;
@@ -481,6 +525,10 @@ async fn repeated_unstake_wait_window_does_not_wedge_busy() -> Result<(), Box<dy
         "[timing][wait-window] after third ff epoch_id={:?}",
         b.epoch_id()
     );
+    let current_epoch: u64 = buyer_b
+        .view(staking.id(), "get_epoch_height")
+        .await?
+        .json()?;
     call_epoch_settle(&buyer_b, staking.id(), pool.id())
         .await?
         .into_result()?;
@@ -495,6 +543,11 @@ async fn repeated_unstake_wait_window_does_not_wedge_busy() -> Result<(), Box<dy
     assert!(
         json_near_token_yocto(&v["pending_to_unstake"]).unwrap_or(0) > 0,
         "pending_to_unstake should remain queued until unstake wait window finishes"
+    );
+    assert_eq!(
+        json_u64_field_any(&v["last_settlement_epoch"]),
+        Some(current_epoch),
+        "unstake-waiting settlement should mark the current epoch handled"
     );
 
     Ok(())
