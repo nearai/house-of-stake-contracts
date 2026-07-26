@@ -17,7 +17,7 @@ Implementation: [`src/epoch.rs`](../../src/epoch.rs). Entrypoints: [`lock.rs`](.
 | First delegation to an empty validator | Same **`min_lock_amount`** gate as any lock (never below 1 NEAR — [`PROTOCOL_MIN_LOCK_AMOUNT_YOCTO`](../../src/config.rs)). |
 | Deferred subscription stake decrease | Queues surplus unstake only after the validator settlement preamble has run. Due updates that include a stake decrease are routed through the same settlement pipeline before calling the internal unstake path. |
 | `withdraw` | May chain pool withdraw when the on-contract bucket is empty but settlement allows. |
-| Pool mutating actions per NEAR epoch | Per allowlisted pool (`validator_id` = pool account), at most **one** successful **`deposit_and_stake`** **or** **`unstake`** per `epoch_height` (**`Validator.last_settlement_epoch`**). **`try_epoch_stake_or_unstake`** nets **`pending_to_stake`** vs **`pending_to_unstake`**: stake excess, unstake excess, or clear both without a pool call when equal (still bumps **`last_settlement_epoch`**). Fresh-epoch no-pending and unstake-waiting decisions also bump **`last_settlement_epoch`** after the pool account check succeeds, marking the epoch handled. Withdraw-from-pool does **not** consume that slot by itself. |
+| Pool mutating actions per NEAR epoch | Per allowlisted pool (`validator_id` = pool account), at most **one** successful **`deposit_and_stake`** **or** **`unstake`** per `epoch_height` (**`Validator.last_settlement_epoch`**). **`try_epoch_stake_or_unstake`** nets **`pending_to_stake`** vs **`pending_to_unstake`**: stake excess, unstake excess, or clear both without a pool call when equal (still bumps **`last_settlement_epoch`**). Fresh-epoch no-pending and unstake-waiting decisions also bump **`last_settlement_epoch`**, marking the epoch handled. A failed pool **`withdraw`** skips stake/unstake settlement and leaves the epoch retryable. Withdraw-from-pool does **not** consume that slot by itself. |
 
 **Pre-ship concerns:** prepaid gas on long promise chains (see [`API.md`](../API.md) and [`gas.rs`](../../src/gas.rs)); small `UserAction` callback payloads; **`tx_status == Busy`** retries; sandbox/deploy scripts must use user flows, not removed `epoch_*` batch methods.
 
@@ -32,7 +32,7 @@ Before a user-visible action (mint shares, queue unlock unstake, or pay out a cl
 3. **Net-settle** queued stake vs unstake (at most one pool `deposit_and_stake` or `unstake` per NEAR epoch).
 4. **Dispatch** the caller’s continuation (`UserAction`).
 
-Withdraw-from-pool does **not** consume the stake/unstake epoch slot by itself. Successful net stake, net unstake, net-zero clearance, no-pending settlement, or unstake-waiting settlement decisions bump **`last_settlement_epoch`**.
+Withdraw-from-pool does **not** consume the stake/unstake epoch slot by itself. Successful net stake, net unstake, net-zero clearance, no-pending settlement, or unstake-waiting settlement decisions bump **`last_settlement_epoch`**. A failed pool withdraw skips stake/unstake settlement and keeps `last_settlement_epoch` behind the current epoch so same-epoch retries can re-run the withdraw path first.
 
 ---
 

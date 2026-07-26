@@ -14,9 +14,9 @@ use mock_pool::{
     buyer_withdraw_result, call_epoch_settle, create_subscription_product_and_price,
     eprintln_wait_window_stage, fast_forward_blocks_chunked, fast_forward_until_epoch_delta,
     fast_forward_until_timestamp, fetch_validator, json_near_token_yocto, json_tx_status,
-    json_u64_field, json_u64_field_any, pool_set_fail_get_account, pool_total_balance_yocto,
-    set_mock_timestamp, setup_staking_fixture, setup_staking_fixture_with_unstake_settle_epochs,
-    top_up_buyer_near,
+    json_u64_field, json_u64_field_any, pool_set_fail_get_account, pool_set_fail_next_withdraw,
+    pool_total_balance_yocto, set_mock_timestamp, setup_staking_fixture,
+    setup_staking_fixture_with_unstake_settle_epochs, top_up_buyer_near,
 };
 use serde_json::json;
 use std::time::Instant;
@@ -670,6 +670,112 @@ async fn withdraw_runs_settlement_prefetch_before_payout() -> Result<(), Box<dyn
     assert!(
         balance_after > balance_before,
         "withdraw should transfer NEAR after settlement prefetch and tranche payout"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn failed_pool_withdraw_skips_settle_and_does_not_mark_epoch_handled()
+-> Result<(), Box<dyn std::error::Error>> {
+    let worker = near_workspaces::sandbox().await?;
+    let (staking, pool, owner, _product_id, price_id) = setup_staking_fixture(&worker).await?;
+    let buyer = worker.dev_create_account().await?;
+    let operator = worker.dev_create_account().await?;
+
+    buyer_storage_deposit(&buyer, staking.id()).await?;
+    let lock_id = buyer_lock_one_off(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
+
+    fast_forward_until_epoch_delta(&worker, 1, Some(&operator), Some(staking.id())).await?;
+    call_epoch_settle(&operator, staking.id(), pool.id())
+        .await?
+        .into_result()?;
+
+    let lock: serde_json::Value = worker
+        .view(staking.id(), "get_lock")
+        .args_json(json!({ "lock_id": lock_id }))
+        .await?
+        .json()?;
+    let end_ns = json_u64_field(&lock["end_ns"]).expect("lock.end_ns");
+    fast_forward_until_timestamp(
+        &worker,
+        end_ns.saturating_add(1),
+        Some(&buyer),
+        Some(staking.id()),
+    )
+    .await?;
+    buyer_unlock(&buyer, staking.id(), &lock_id).await?;
+
+    fast_forward_until_epoch_delta(&worker, 1, Some(&operator), Some(staking.id())).await?;
+    call_epoch_settle(&operator, staking.id(), pool.id())
+        .await?
+        .into_result()?;
+
+    let v_after_unstake = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    assert!(
+        json_near_token_yocto(&v_after_unstake["pending_to_withdraw"]).unwrap_or(0) > 0,
+        "pool unstake should queue pending_to_withdraw before the withdraw retry scenario"
+    );
+
+    top_up_buyer_near(&worker, &buyer, 50).await?;
+    buyer_lock_one_off(&buyer, staking.id(), &price_id, SHORT_LOCK_NS, 50).await?;
+    let v_after_second_lock = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    let pending_to_stake_before_fail =
+        json_near_token_yocto(&v_after_second_lock["pending_to_stake"]).unwrap_or(0);
+    assert!(
+        pending_to_stake_before_fail > 0,
+        "second lock should queue pending stake before the failed-withdraw scenario"
+    );
+
+    fast_forward_until_epoch_delta(&worker, 1, Some(&operator), Some(staking.id())).await?;
+    let current_epoch: u64 = operator
+        .view(staking.id(), "get_epoch_height")
+        .await?
+        .json()?;
+    pool_set_fail_next_withdraw(&owner, pool.id(), true).await?;
+
+    let _failed_withdraw_attempt = call_epoch_settle(&operator, staking.id(), pool.id()).await?;
+
+    let v_after_failed_withdraw = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    assert_eq!(
+        json_tx_status(&v_after_failed_withdraw["tx_status"]),
+        Some("Idle"),
+        "failed pool withdraw path must release Busy"
+    );
+    assert!(
+        json_near_token_yocto(&v_after_failed_withdraw["pending_to_withdraw"]).unwrap_or(0) > 0,
+        "failed pool withdraw must leave pending_to_withdraw queued"
+    );
+    assert_eq!(
+        json_near_token_yocto(&v_after_failed_withdraw["pending_to_stake"]).unwrap_or(0),
+        pending_to_stake_before_fail,
+        "failed pool withdraw must skip stake/unstake settlement"
+    );
+    assert!(
+        json_u64_field_any(&v_after_failed_withdraw["last_settlement_epoch"]).unwrap_or(0)
+            < current_epoch,
+        "failed pool withdraw must not mark the current epoch handled"
+    );
+
+    pool_set_fail_next_withdraw(&owner, pool.id(), false).await?;
+    call_epoch_settle(&operator, staking.id(), pool.id())
+        .await?
+        .into_result()?;
+
+    let v_after_retry = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    assert_eq!(
+        json_near_token_yocto(&v_after_retry["pending_to_withdraw"]).unwrap_or(0),
+        0,
+        "same-epoch retry should still reach pool withdraw"
+    );
+    assert!(
+        json_near_token_yocto(&v_after_retry["pending_to_claim"]).unwrap_or(0) > 0,
+        "successful retry should move pool funds into pending_to_claim"
+    );
+    assert_eq!(
+        json_u64_field_any(&v_after_retry["last_settlement_epoch"]),
+        Some(current_epoch),
+        "successful same-epoch retry can mark the epoch handled after withdraw succeeds"
     );
 
     Ok(())

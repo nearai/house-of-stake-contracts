@@ -40,6 +40,7 @@ pub trait ExtSelfEpoch {
     /// **[Pipeline 2c]** After pool `withdraw`: continue through settlement **3** + **4**.
     fn on_after_pool_withdraw_maybe_settle(
         &mut self,
+        #[callback_result] withdraw_result: Result<bool, PromiseError>,
         validator_id: ValidatorId,
         cont: UserAction,
     ) -> PromiseOrValue<bool>;
@@ -335,6 +336,7 @@ impl Contract {
     #[private]
     pub fn on_after_pool_withdraw_maybe_settle(
         &mut self,
+        #[callback_result] withdraw_result: Result<bool, PromiseError>,
         validator_id: ValidatorId,
         cont: UserAction,
     ) -> PromiseOrValue<bool> {
@@ -343,6 +345,11 @@ impl Contract {
             &validator,
             "Validator pool must be busy for post-withdraw settle",
         );
+        if !matches!(withdraw_result, Ok(true)) {
+            events::log_epoch_operation("epoch_withdraw_failed_skip_settle", &validator_id);
+            return self.on_epoch_settlement_dispatch_continue(cont).into();
+        }
+
         self.try_epoch_stake_or_unstake(validator_id, cont).into()
     }
 
@@ -350,8 +357,7 @@ impl Contract {
 
     /// **[Pipeline 3]** At most one pool `deposit_and_stake` or `unstake` per NEAR epoch (**3a** net-zero inline).
     /// Skip to **4** when nothing pending or slot used; fresh-epoch no-pending and unstake-waiting
-    /// decisions still mark the current epoch handled after the pool account check succeeds.
-    /// Otherwise pool op → **3′** → **4**.
+    /// decisions still mark the current epoch handled. Otherwise pool op → **3′** → **4**.
     pub(crate) fn try_epoch_stake_or_unstake(
         &mut self,
         validator_id: ValidatorId,
