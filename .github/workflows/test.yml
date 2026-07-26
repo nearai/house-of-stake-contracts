@@ -2,9 +2,9 @@ name: Test
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, feat/stake-dao]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, feat/stake-dao]
 
 env:
   CARGO_TERM_COLOR: always
