@@ -1,14 +1,15 @@
-# veNEAR integration for stake.dao locks
+# veNEAR integration for stake.dao locks and farms
 
 **Status:** Design (v2)  
 **Component:** `staking-contract` (`stake.dao`) + `venear-contract`  
 **Supersedes:** Deferred veNEAR item in [DESIGN.md](../DESIGN.md) (non-goals §1)
+**Tracking issue:** [#36](https://github.com/nearai/house-of-stake-contracts/issues/36)
 
 **Related code:**
 
 | Contract | Path |
 |----------|------|
-| stake.dao | [staking-contract/src/](../../src/) — `lock.rs`, `unlock.rs`, `subscriptions.rs`, `epoch.rs` |
+| stake.dao | [staking-contract/src/](../../src/) — `lock.rs`, `unlock.rs`, `subscriptions.rs`, `stake.rs`, `epoch.rs` |
 | veNEAR | [venear-contract/src/lockup.rs](../../../venear-contract/src/lockup.rs) — `on_lockup_update`, `internal_lockup_update` |
 | lockup (reference) | [lockup-contract/src/venear.rs](../../../lockup-contract/src/venear.rs) — `lock_near`, `begin_unlock_near`, `venear_lockup_update` |
 | shared types | [common/src/lockup_update.rs](../../../common/src/lockup_update.rs) — `LockupUpdateV1`, `VLockupUpdate` |
@@ -17,11 +18,16 @@
 
 ## 1. Summary
 
-This design grants **veNEAR voting power** to users who lock NEAR through the `stake.dao` catalog `lock` flow, using the **same economics** as NEAR locked via a user lockup account: base veNEAR from locked NEAR principal, time-based extra veNEAR accrual, and forfeiture of accumulated extra veNEAR when reported locked NEAR decreases.
+This design grants **veNEAR voting power** to users who lock or stake NEAR through the `stake.dao` catalog flows, using the **same economics** as NEAR locked via a user lockup account: base veNEAR from eligible locked/staked NEAR principal, time-based extra veNEAR accrual, and forfeiture of accumulated extra veNEAR when reported locked NEAR decreases.
 
 The integration is intentionally **minimal**: reuse `LockupUpdateV1` and mirror the lockup → veNEAR cross-contract call pattern; do not redesign the lazy epoch pipeline, share accounting, or voting contract.
 
-**Clarification:** In `stake.dao`, “staking NEAR” means **catalog lock** (NEAR attached on lock methods, delegated to a validator pool). There is no separate bare-stake entrypoint in v1.
+**Clarification:** In `stake.dao`, “staking NEAR” currently means one of the catalog-backed flows:
+
+- `lock` / subscription lock: NEAR attached on lock methods, delegated to a validator pool, represented by `Lock`.
+- `stake` for farm prices: NEAR attached to a farm product, delegated to a validator pool, represented by `FarmPosition`.
+
+There is no separate bare-validator stake entrypoint in v1.
 
 ---
 
@@ -29,14 +35,15 @@ The integration is intentionally **minimal**: reuse `LockupUpdateV1` and mirror 
 
 ### 2.1 In scope
 
-- veNEAR updates when a user creates or changes a **catalog lock** that opts in to veNEAR registration.
-- Lifecycle hooks: lock mint (`commit_catalog_lock` / `resolve_lock`), unlock (`resolve_unlock`), subscription **upgrade** (additional deposit on lock), subscription **downgrade prorate** (reduction of `Lock.amount_near`).
+- veNEAR updates when a user creates or changes an eligible **catalog lock** or **farm position** that opts in to veNEAR registration.
+- Lifecycle hooks: lock mint (`commit_catalog_lock` / `resolve_lock`), unlock (`resolve_unlock`), subscription **upgrade** (additional deposit on lock), subscription **downgrade prorate** (reduction of `Lock.amount_near`), farm stake (`resolve_farm_stake`), and farm unstake (`resolve_farm_unstake`).
 - veNEAR contract changes to accept a second allowlisted reporter (`stake.dao`) without breaking lockup updates.
 - Migration and rollout for both contracts.
 
 ### 2.2 Out of scope
 
-- veNEAR for NEAR that is only in `user_pending_unstake` or withdrawn but never catalog-locked.
+- veNEAR for NEAR that is only in `user_pending_unstake` or withdrawn.
+- veNEAR for farm reward units (`pending_reward_units`, `accumulated_reward_units`, or `total_earned_reward_units`). Farm rewards are not NEAR principal.
 - Generic liquid stake without catalog (future API would need its own design).
 - Fungible receipt / share tokens on `stake.dao`.
 - Changes to [voting-contract](../../../voting-contract/) (still consumes veNEAR snapshots).
@@ -100,14 +107,14 @@ sequenceDiagram
     participant Pool as validatorPool
     participant VeNEAR as venear.dao
 
-    User->>StakeDao: lock + NEAR
+    User->>StakeDao: lock/stake + NEAR
     StakeDao->>Pool: epoch pipeline deposit_and_stake
-    StakeDao->>StakeDao: commit_catalog_lock
+    StakeDao->>StakeDao: commit lock or farm position
     StakeDao->>VeNEAR: on_stake_dao_update
     Note over VeNEAR: near_balance = lockup_locked + stake_dao_locked + deposit
 
-    User->>StakeDao: unlock after end_ns
-    StakeDao->>StakeDao: internal_unstake UnlockRequested
+    User->>StakeDao: unlock/unstake
+    StakeDao->>StakeDao: internal_unstake + position update
     StakeDao->>VeNEAR: on_stake_dao_update lower total
     Note over VeNEAR: extra_venear forfeited if total decreased
 ```
@@ -120,57 +127,106 @@ sequenceDiagram
 | Payload type | Reuse `VLockupUpdate` / `LockupUpdateV1` — **no new common type** |
 | Reporter trust | veNEAR allowlists `stake.dao` account id in config |
 | Billing vs governance | Catalog `end_ns` gates **unlock**; veNEAR drop aligns with **`unlock()`** (like `begin_unlock_near`), not `withdraw()` |
-| Integration default | **Opt-in per lock** (`register_with_venear`, default `false`) for migration safety |
+| Eligible amount | Principal-like eligible NEAR, not validator-share mark-to-market |
+| Integration default | **Opt-in per lock/position** (`register_with_venear`, default `false`) for migration safety |
 
 Existing `lock_create` events remain for indexers; they are **not** sufficient for balance updates.
 
 ---
 
-## 5. Locked NEAR accounting (principal model)
+## 5. Eligible NEAR accounting (principal model)
 
-### 5.1 Definition
+### 5.1 Eligible sources
+
+This design separates two different concepts:
+
+- **Realtime staked value:** current mark-to-market NEAR represented by validator shares. This is useful for views and withdrawals.
+- **veNEAR-eligible principal:** NEAR amount reported to veNEAR. This should mirror lockup semantics and only change on user-level lock/stake/unlock/unstake transitions.
+
+| Source | Count toward veNEAR? | Notes |
+|--------|----------------------|-------|
+| One-off catalog `Lock` | Yes, if opted in and `Active` | Use `Lock.amount_near`. |
+| Recurring subscription `Lock` | Yes, if opted in and `Active` | Cancellation at period end does not reduce veNEAR until unlock/stake reduction. |
+| Subscription upgrade | Yes | Increase by the additional principal deposited. |
+| Subscription downgrade/prorate | Yes | Decrease by the principal removed from the lock. |
+| Farm `FarmPosition` | Open decision; recommended yes if user opts in | Requires explicit principal tracking because the stored position is share-based. |
+| Farm reward units | No | Reward units are not NEAR principal. |
+| `user_pending_unstake` / `pending_to_withdraw` / `pending_to_claim` | No | Same class as lockup pending unlock: no longer counted as locked veNEAR principal. |
+
+### 5.2 Definition
 
 For a user `account_id`:
 
 ```text
 stake_dao_locked(account_id) =
-  Σ lock.amount_near
-  for all locks where
-    lock.account_id == account_id
-    AND lock.status == Active
-    AND lock.register_with_venear == true
+  locked_principal(account_id)
+  + farm_principal(account_id)
+
+locked_principal(account_id) =
+  Σ lock.amount_near for active opt-in locks
+
+farm_principal(account_id) =
+  Σ tracked opt-in farm principal for active farm positions
 ```
 
 `stake.dao` reports `stake_dao_locked` to veNEAR on each material change.
 
-### 5.2 Principal vs mark-to-market
+### 5.3 Principal vs mark-to-market
 
 | Model | Pros | Cons |
 |-------|------|------|
-| **Principal** (`Lock.amount_near`) | Matches lockup’s explicit `venear_locked_balance`; O(1) aggregate; no extra pool views | Ignores slash-induced share value loss (already documented for locks) |
-| Mark-to-market (`near_for(shares)` per lock) | Economically “true” staked value | Extra `get_account` calls; async pipeline coupling; diverges from lockup semantics |
+| **Principal** (`Lock.amount_near`, plus tracked farm principal) | Matches lockup’s explicit `venear_locked_balance`; O(1) aggregate; no extra pool views | Ignores slash-induced share value loss; requires explicit farm principal tracking |
+| Mark-to-market (`near_from_shares(shares, validator.net_stake_yocto(), validator.total_shares)`) | Economically closer to current staked value | Cached until validator balance refresh; async pipeline coupling; diverges from lockup semantics; cannot be maintained in a per-user map without unbounded updates |
 
 **Decision:** use **principal** for veNEAR base NEAR.
 
-Slashing: locks keep share count; `near_for(shares)` can fall while `amount_near` is unchanged — same class of risk as lockup NEAR staked in pools without reducing `venear_locked_balance`.
+Slashing: locks and farm positions keep share count; `near_from_shares(...)` can fall while principal remains unchanged. This is the same class of risk as lockup NEAR staked in pools without reducing `venear_locked_balance`.
 
-### 5.3 On-chain aggregate (stake.dao)
+### 5.4 Realtime user staked balance view
+
+If product or analytics code needs a live-ish user stake value, it can be derived from validator shares:
+
+```text
+user_staked_near_balance(account_id) =
+  Σ near_from_shares(
+      user_validator_shares[(account_id, validator_id)],
+      validator.net_stake_yocto(),
+      validator.total_shares
+    )
+  for each validator where the user has shares
+```
+
+This is not suitable as a cached `LookupMap<AccountId, NearToken>` because validator share price changes globally when rewards accrue, slashing happens, or validator settlement refreshes `total_staked_balance`. Updating every affected user on each share-price change would be unbounded.
+
+If this view is needed, add a bounded index:
+
+```text
+user_validator_ids: LookupMap<AccountId, Vec<ValidatorId>>
+```
+
+and expose a view such as `get_user_staked_near_balance(account_id)`. Treat the result as based on the staking contract's latest cached validator state, not a direct realtime staking-pool query.
+
+### 5.5 On-chain aggregate (stake.dao)
 
 Maintain incrementally (avoid scanning all locks):
 
 ```text
-user_venear_locked: LookupMap<AccountId, u128>   // yoctoNEAR
-stake_dao_venear_nonce: LookupMap<AccountId, u64> // per-user nonce for veNEAR updates
+user_venear_eligible_principal: LookupMap<AccountId, u128> // yoctoNEAR
+stake_dao_venear_nonce: LookupMap<AccountId, u64>          // per-user nonce for veNEAR updates
 ```
 
-| Event | Delta to `user_venear_locked` |
+| Event | Delta to `user_venear_eligible_principal` |
 |-------|-------------------------------|
 | `commit_catalog_lock` with `register_with_venear` | `+ lock.amount_near` |
 | `resolve_unlock` for opt-in lock | `- lock.amount_near` |
 | Subscription upgrade (deposit on lock) | `+` top-up amount |
 | Downgrade prorate (reduces `lock.amount_near`) | `-` prorated reduction |
+| `resolve_farm_stake` with opt-in farm position | `+` added farm principal |
+| `resolve_farm_unstake` for opt-in farm position | `-` principal removed from the farm position |
 
 Locks in `UnlockRequested` or `Withdrawn` do not count (removed at unlock).
+
+Farm positions need one additional decision before implementation: either store per-position eligible principal directly, or maintain only the per-account aggregate and rely on carefully paired stake/unstake deltas. Storing per-position principal is easier to audit and repair.
 
 ---
 
@@ -187,9 +243,9 @@ pub venear_account_id: Option<AccountId>,
 - Set by contract owner after veNEAR deploy (`set_venear_account_id`).
 - If `None`, veNEAR integration is disabled (v1 behavior).
 
-### 6.2 Lock type
+### 6.2 Lock and farm position types
 
-[`types.rs`](../../src/types.rs) — extend `Lock`:
+[`types.rs`](../../src/types.rs) — extend `Lock` and `FarmPosition`:
 
 ```rust
 pub register_with_venear: bool,  // default false on migrate
@@ -198,8 +254,17 @@ pub register_with_venear: bool,  // default false on migrate
 Expose optional argument on:
 
 - `lock(..., register_with_venear: Option<bool>)`
+- `stake(product_id, price_id, register_with_venear: Option<bool>)`
 
 Default: `false` (recommended for rollout).
+
+For farms, also add explicit principal if farm positions count toward veNEAR:
+
+```rust
+pub venear_principal: NearToken, // or farm_principal_near
+```
+
+Current `FarmPosition` stores validator shares and the view derives `staked_near_amount` from share price. That is useful for current-value views, but veNEAR should not depend on a cached share-price conversion.
 
 ### 6.3 New module `venear.rs`
 
@@ -210,7 +275,7 @@ Patterned on [lockup-contract/src/venear.rs](../../../lockup-contract/src/venear
 - `fn venear_stake_dao_update(&mut self, owner: AccountId) -> Promise`
   - Increments per-user nonce in `stake_dao_venear_nonce`
   - Sends `VLockupUpdate::V1(LockupUpdateV1 { locked_near_balance, timestamp, lockup_update_nonce })`
-  - `locked_near_balance` = `user_venear_locked[owner]`
+  - `locked_near_balance` = `user_venear_eligible_principal[owner]`
 
 Register module in [`lib.rs`](../../src/lib.rs).
 
@@ -221,14 +286,17 @@ Register module in [`lib.rs`](../../src/lib.rs).
 | [`lock.rs`](../../src/lock.rs) — `resolve_lock` | After successful `commit_catalog_lock`, if lock opted in and `venear_account_id` set |
 | [`unlock.rs`](../../src/unlock.rs) — `resolve_unlock` | After `internal_unstake` + status `UnlockRequested`, if lock had opt-in |
 | [`subscriptions.rs`](../../src/subscriptions.rs) | Upgrade tail: increase aggregate by deposit delta; downgrade prorate: decrease by NEAR removed from lock |
+| [`stake.rs`](../../src/stake.rs) — `resolve_farm_stake` | After successful `commit_farm_stake`, if farm position opted in and `venear_account_id` set |
+| [`stake.rs`](../../src/stake.rs) — `resolve_farm_unstake` | After `commit_farm_unstake`, decrease aggregate by the principal removed from the farm position |
 
 Chain the veNEAR promise **after** the epoch pipeline tail succeeds (fire-and-forget, same as lockup’s `venear_lockup_update()` at end of `lock_near`). Extend [`gas.rs`](../../src/gas.rs) callback budgets (`ON_LOCK_FINALLY_MINT`, `ON_UNLOCK_TAIL_AFTER_PRE_USER`) if the promise is attached in the release callback chain.
 
-### 6.5 Unlock timing vs veNEAR
+### 6.5 Exit timing vs veNEAR
 
 | stake.dao step | veNEAR effect |
 |----------------|---------------|
 | `unlock()` at `now >= end_ns` | Report **lower** `stake_dao_locked` (like `begin_unlock_near`) |
+| Farm `unstake()` | Report **lower** `stake_dao_locked` when the farm position principal decreases |
 | Pool unstake / `withdraw()` | **No** additional veNEAR change (pending unstake not counted, like lockup pending) |
 
 ### 6.6 Failure policy
@@ -240,7 +308,7 @@ Chain the veNEAR promise **after** the epoch pipeline tail succeeds (fire-and-fo
 ### 6.7 User prerequisites
 
 1. Register on veNEAR: `storage_deposit` on `venear-contract`.
-2. Opt in on lock: `register_with_venear: true`.
+2. Opt in on lock or farm stake: `register_with_venear: true`.
 
 When (2) without (1): **require** at lock entry (cross-contract view or explicit check) — recommended to fail fast with a clear error rather than silent skip.
 
@@ -316,7 +384,7 @@ effective_locked_for_venear = lockup_locked_near + stake_dao_locked_near + depos
 ```
 
 - Lockup reports only `venear_locked_balance`.
-- stake.dao reports only catalog opt-in locks.
+- stake.dao reports only eligible opt-in locks and farm positions.
 - **Operational policy:** the same NEAR must not be intentionally locked in both systems for voting power; governance/docs should state this clearly.
 
 ---
@@ -325,14 +393,15 @@ effective_locked_for_venear = lockup_locked_near + stake_dao_locked_near + depos
 
 | Behavior | Lockup | stake.dao (this design) |
 |----------|--------|-------------------------|
-| Base veNEAR from | `venear_locked_balance` | Σ active opt-in `Lock.amount_near` |
+| Base veNEAR from | `venear_locked_balance` | Active opt-in lock principal + active opt-in farm principal |
 | Extra veNEAR growth | Global `VenearGrowthConfig` | Same |
-| Forfeit extra on decrease | `begin_unlock_near` (and any locked decrease) | `unlock()` |
+| Forfeit extra on decrease | `begin_unlock_near` (and any locked decrease) | `unlock()` or farm `unstake()` that lowers eligible principal |
 | Pending / unstaking NEAR | Not in veNEAR locked total | `user_pending_unstake` not counted |
 | Time gate before exit | `unlock_duration_ns` (veNEAR pending bucket) | Catalog `end_ns` (billing only) |
 | Reporter contract | User lockup subaccount | `stake.dao` allowlisted |
-| Pool staking | Optional inside lockup | Required for catalog lock |
-| Per-lock opt-in | N/A (whole lockup account) | `register_with_venear` per lock |
+| Pool staking | Optional inside lockup | Required for catalog locks and farm positions |
+| Per-position opt-in | N/A (whole lockup account) | `register_with_venear` per lock/farm position |
+| Rewards | Staking rewards do not auto-increase `venear_locked_balance` | Farm reward units do not count toward veNEAR |
 
 ---
 
@@ -347,8 +416,9 @@ effective_locked_for_venear = lockup_locked_near + stake_dao_locked_near + depos
 
 ### 9.2 stake.dao upgrade
 
-1. Add `venear_account_id`, `register_with_venear` (default false), maps `user_venear_locked`, `stake_dao_venear_nonce`.
+1. Add `venear_account_id`, `register_with_venear` (default false), maps `user_venear_eligible_principal`, `stake_dao_venear_nonce`, and any farm per-position principal field.
 2. veNEAR hooks no-op until `venear_account_id` is set.
+3. Existing locks and farm positions default to `register_with_venear = false`; do not backfill voting power unless governance explicitly approves a migration/import flow.
 
 ### 9.3 Linking (owner)
 
@@ -358,8 +428,8 @@ effective_locked_for_venear = lockup_locked_near + stake_dao_locked_near + depos
 ### 9.4 User-facing rollout
 
 1. Register on veNEAR (`storage_deposit`).
-2. Lock on stake.dao with `register_with_venear: true`.
-3. Unlock after `end_ns` to reduce veNEAR (same as beginning unlock on lockup).
+2. Lock or farm-stake on stake.dao with `register_with_venear: true`.
+3. Unlock/unstake to reduce veNEAR (same as beginning unlock on lockup).
 
 ---
 
@@ -367,8 +437,11 @@ effective_locked_for_venear = lockup_locked_near + stake_dao_locked_near + depos
 
 | Scenario | Expected |
 |----------|----------|
-| Lock with opt-in, registered on veNEAR | `user_venear_locked` increases; veNEAR base NEAR increases; extra accrues over time |
+| Lock with opt-in, registered on veNEAR | `user_venear_eligible_principal` increases; veNEAR base NEAR increases; extra accrues over time |
 | `unlock()` on opt-in lock | veNEAR base decreases; extra veNEAR forfeited |
+| Farm stake with opt-in | Farm principal increases `user_venear_eligible_principal`; farm reward units do not count |
+| Farm unstake | Farm principal decreases; pending unstake/withdraw buckets do not count |
+| Share price changes after rewards/slashing | `get_user_staked_near_balance` view may change after validator refresh; veNEAR principal does not auto-change |
 | User with lockup + stake.dao | Lockup update does not zero stake.dao component; totals additive |
 | Stale / replay nonce | veNEAR rejects update |
 | Opt-in lock, not registered on veNEAR | Lock fails at entry (if check enabled) |
@@ -382,9 +455,9 @@ Suggested locations: extend [integration-tests](../../../integration-tests/) (ve
 
 ## 11. Open questions (for review)
 
-1. **Opt-in default**  
-   - **Recommended:** per-lock `register_with_venear`, default `false`.  
-   - Alternatives: account-level `venear_enabled` on stake.dao `Account`; or default-on for all locks (stronger product signal, more registration friction).
+1. **Opt-in default**
+   - **Recommended:** per-lock/per-position `register_with_venear`, default `false`.
+   - Alternatives: account-level `venear_enabled` on stake.dao `Account`; or default-on for all eligible positions (stronger product signal, more registration friction).
 
 2. **Registration check timing**  
    - Fail at lock entry with cross-contract `get_account_info` vs allow lock and fail async on veNEAR (worse UX).
@@ -398,13 +471,28 @@ Suggested locations: extend [integration-tests](../../../integration-tests/) (ve
 5. **Governance disclosure**  
    - README/DESIGN slashing note: veNEAR principal may exceed pool mark-to-market after slash.
 
+6. **Farm eligibility**
+   - Recommended: allow farm positions to opt in, but report tracked farm principal, not reward units and not share-derived mark-to-market value.
+   - Alternative: exclude farms from the first veNEAR integration and add them after the lock/subscription path is stable.
+
+7. **Farm principal storage**
+   - Recommended: store per-position veNEAR principal for auditable repair and migration.
+   - Alternative: maintain only `user_venear_eligible_principal` with stake/unstake deltas; simpler storage but harder to repair after bugs.
+
+8. **Realtime user staked balance view**
+   - Useful as `get_user_staked_near_balance(account_id)` derived from validator shares.
+   - Should remain separate from veNEAR accounting because it depends on cached validator state and share price.
+
+9. **Existing positions**
+   - Decide whether existing locks/farm positions can be imported into veNEAR with an explicit user action, or whether only new opt-in positions count.
+
 ---
 
 ## 12. Implementation checklist (engineering)
 
 - [ ] `common`: no change (reuse `LockupUpdateV1`)
 - [ ] `venear-contract`: config, `AccountInternal`, migration, `on_stake_dao_update`, refactor `internal_lockup_update`
-- [ ] `staking-contract`: config, `Lock`, maps, `venear.rs`, hooks, gas, governance setter, tests
+- [ ] `staking-contract`: config, `Lock`, `FarmPosition`, maps, optional realtime stake view/index, `venear.rs`, hooks, gas, governance setter, tests
 - [ ] `docs`: update [DESIGN.md](../DESIGN.md) architecture diagram when implemented; [API.md](../API.md) new methods/args
 - [ ] Deploy scripts: link `stake_dao_account_id` / `venear_account_id` in [scripts/deploy_all.sh](../../../scripts/deploy_all.sh)
 
@@ -417,4 +505,4 @@ The earlier v1 notes only proposed:
 - `lock_create` / `unlock_settled` events for veNEAR consumption
 - `register_with_venear: bool` on `Lock`
 
-This design **keeps** `register_with_venear` and events for observability, but specifies **direct `on_stake_dao_update` calls** as the authoritative balance path, matching production lockup behavior.
+This design **keeps** `register_with_venear` and events for observability, extends the question to farm positions, and specifies **direct `on_stake_dao_update` calls** as the authoritative balance path, matching production lockup behavior.
