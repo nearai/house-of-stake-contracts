@@ -208,6 +208,33 @@ impl Contract {
                 .map(|sub| self.project_subscription_view_now(sub))
         })
     }
+
+    pub fn get_subscriptions(&self, from_index: u64, limit: u64) -> Vec<Subscription> {
+        let ids: Vec<SubscriptionId> = self.subscription_ids.keys().cloned().collect();
+        self.collect_paginated(from_index, limit, ids.len() as u64, |index| {
+            ids.get(index as usize)
+                .and_then(|id| self.internal_get_subscription(id))
+                .map(|sub| self.project_subscription_view_now(sub))
+        })
+    }
+
+    pub fn get_subscriptions_for_product(
+        &self,
+        product_id: ProductId,
+        from_index: u64,
+        limit: u64,
+    ) -> Vec<Subscription> {
+        let ids = self
+            .subscriptions_by_product
+            .get(&product_id)
+            .cloned()
+            .unwrap_or_default();
+        self.collect_paginated(from_index, limit, ids.len() as u64, |index| {
+            ids.get(index as usize)
+                .and_then(|id| self.internal_get_subscription(id))
+                .map(|sub| self.project_subscription_view_now(sub))
+        })
+    }
 }
 
 // Epoch pipeline: subscription update tail callback.
@@ -340,6 +367,7 @@ impl Contract {
         ids.push(subscription_id.clone());
         self.subscriptions_by_account
             .insert(account_id.clone(), ids);
+        self.add_subscription_to_product_index(account_id, subscription_id);
 
         if add_global {
             self.subscription_ids.insert(subscription_id.clone(), ());
@@ -367,12 +395,80 @@ impl Contract {
             self.subscriptions_by_account
                 .insert(account_id.clone(), ids);
         }
+        self.remove_subscription_from_product_index(subscription_id);
 
         if !remove_global {
             return;
         }
 
         self.subscription_ids.remove(subscription_id);
+    }
+
+    fn add_subscription_to_product_index(
+        &mut self,
+        account_id: &AccountId,
+        subscription_id: &SubscriptionId,
+    ) {
+        let Some(subscription) = self.internal_get_subscription(subscription_id) else {
+            return;
+        };
+        if subscription.account_id != *account_id {
+            return;
+        }
+
+        self.add_subscription_to_product_index_for_product(
+            &subscription.product_id,
+            subscription_id,
+        );
+    }
+
+    fn add_subscription_to_product_index_for_product(
+        &mut self,
+        product_id: &ProductId,
+        subscription_id: &SubscriptionId,
+    ) {
+        let mut ids = self
+            .subscriptions_by_product
+            .get(product_id)
+            .cloned()
+            .unwrap_or_default();
+        if ids.iter().any(|id| id == subscription_id) {
+            return;
+        }
+        ids.push(subscription_id.clone());
+        self.subscriptions_by_product
+            .insert(product_id.clone(), ids);
+    }
+
+    fn remove_subscription_from_product_index(&mut self, subscription_id: &SubscriptionId) {
+        let Some(subscription) = self.internal_get_subscription(subscription_id) else {
+            return;
+        };
+        self.remove_subscription_from_product_index_for_product(
+            &subscription.product_id,
+            subscription_id,
+        );
+    }
+
+    fn remove_subscription_from_product_index_for_product(
+        &mut self,
+        product_id: &ProductId,
+        subscription_id: &SubscriptionId,
+    ) {
+        let Some(mut ids) = self.subscriptions_by_product.get(product_id).cloned() else {
+            return;
+        };
+        let before = ids.len();
+        ids.retain(|id| id != subscription_id);
+        if ids.len() == before {
+            return;
+        }
+        if ids.is_empty() {
+            self.subscriptions_by_product.remove(product_id);
+        } else {
+            self.subscriptions_by_product
+                .insert(product_id.clone(), ids);
+        }
     }
 
     pub(crate) fn assert_no_pending_update_references_price(&self, price_id: &PriceId) {
@@ -471,6 +567,8 @@ impl Contract {
                 self.subscription_by_account_product.remove(&old_key);
             }
         }
+        self.remove_subscription_from_product_index_for_product(old_product_id, subscription_id);
+        self.add_subscription_to_product_index_for_product(new_product_id, subscription_id);
     }
 
     pub(crate) fn require_subscription_by_id(

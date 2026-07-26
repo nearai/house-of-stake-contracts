@@ -42,6 +42,38 @@ fn storage_deposit_returns_updated_balance() {
 }
 
 #[test]
+fn get_account_ids_lists_registered_accounts() {
+    let mut c = deploy_with_config(base_config());
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_millinear(100)));
+    c.storage_deposit(None, None);
+    testing_env!(ctx(acct("second.testnet"), NearToken::from_millinear(100)));
+    c.storage_deposit(None, None);
+
+    assert_eq!(
+        c.get_account_ids(0, 10),
+        vec![acct(BUYER), acct("second.testnet")]
+    );
+    assert_eq!(c.get_account_ids(1, 1), vec![acct("second.testnet")]);
+}
+
+#[test]
+fn get_account_ids_filters_unregistered_accounts_without_duplicates() {
+    let mut c = deploy_with_config(base_config());
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_millinear(100)));
+    c.storage_deposit(None, None);
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(1)));
+    assert!(c.storage_unregister(None));
+    assert!(c.get_account_ids(0, 10).is_empty());
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_millinear(100)));
+    c.storage_deposit(None, None);
+
+    assert_eq!(c.get_account_ids(0, 10), vec![acct(BUYER)]);
+}
+
+#[test]
 fn storage_deposit_registration_only_accepts_minimum_needed() {
     let mut c = deploy_with_config(base_config());
 
