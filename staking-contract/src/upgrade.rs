@@ -63,9 +63,9 @@ struct ContractV1_0_3 {
 impl From<ContractV1_0_3> for Contract {
     fn from(old: ContractV1_0_3) -> Self {
         let mut purchases_by_account: LookupMap<AccountId, Vector<PurchaseId>> =
-            LookupMap::new(StorageKeys::PurchasesByAccount);
+            LookupMap::new(StorageKeys::PurchasesByAccountV2);
         let mut purchases_by_product: LookupMap<ProductId, Vector<PurchaseId>> =
-            LookupMap::new(StorageKeys::PurchasesByProduct);
+            LookupMap::new(StorageKeys::PurchasesByProductV2);
         for purchase_id in old.purchase_ids.iter() {
             if let Some(purchase) = old.purchases.get(purchase_id) {
                 let purchase: Purchase = purchase.clone().into();
