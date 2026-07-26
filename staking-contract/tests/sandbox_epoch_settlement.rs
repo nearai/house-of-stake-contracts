@@ -14,8 +14,9 @@ use mock_pool::{
     buyer_withdraw_result, call_epoch_settle, create_subscription_product_and_price,
     eprintln_wait_window_stage, fast_forward_blocks_chunked, fast_forward_until_epoch_delta,
     fast_forward_until_timestamp, fetch_validator, json_near_token_yocto, json_tx_status,
-    json_u64_field, pool_set_fail_get_account, pool_total_balance_yocto, set_mock_timestamp,
-    setup_staking_fixture, setup_staking_fixture_with_unstake_settle_epochs, top_up_buyer_near,
+    json_u64_field, json_u64_field_any, pool_set_fail_get_account, pool_total_balance_yocto,
+    set_mock_timestamp, setup_staking_fixture, setup_staking_fixture_with_unstake_settle_epochs,
+    top_up_buyer_near,
 };
 use serde_json::json;
 use std::time::Instant;
@@ -112,6 +113,58 @@ async fn epoch_settle_fast_path_succeeds_when_slot_already_consumed()
 
     let v = fetch_validator(&worker, staking.id(), pool.id()).await?;
     assert_eq!(json_tx_status(&v["tx_status"]), Some("Idle"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn epoch_settle_noop_fresh_epoch_advances_last_settlement_epoch()
+-> Result<(), Box<dyn std::error::Error>> {
+    let worker = near_workspaces::sandbox().await?;
+    let (staking, pool, _owner, _product_id, _price_id) = setup_staking_fixture(&worker).await?;
+    let caller = worker.dev_create_account().await?;
+
+    fast_forward_until_epoch_delta(&worker, 1, Some(&caller), Some(staking.id())).await?;
+    let current_epoch: u64 = caller
+        .view(staking.id(), "get_epoch_height")
+        .await?
+        .json()?;
+
+    let v_before = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    assert_eq!(
+        json_near_token_yocto(&v_before["pending_to_stake"]).unwrap_or(0),
+        0,
+        "fixture should start without pending stake"
+    );
+    assert_eq!(
+        json_near_token_yocto(&v_before["pending_to_unstake"]).unwrap_or(0),
+        0,
+        "fixture should start without pending unstake"
+    );
+    assert!(
+        json_u64_field_any(&v_before["last_settlement_epoch"]).unwrap_or(0) < current_epoch,
+        "test must exercise a fresh-epoch settlement"
+    );
+
+    call_epoch_settle(&caller, staking.id(), pool.id())
+        .await?
+        .into_result()?;
+
+    let v_after = fetch_validator(&worker, staking.id(), pool.id()).await?;
+    assert_eq!(json_tx_status(&v_after["tx_status"]), Some("Idle"));
+    assert_eq!(
+        json_u64_field_any(&v_after["last_settlement_epoch"]),
+        Some(current_epoch),
+        "successful no-op epoch_settle should mark the current epoch handled"
+    );
+    assert_eq!(
+        json_near_token_yocto(&v_after["pending_to_stake"]).unwrap_or(0),
+        0
+    );
+    assert_eq!(
+        json_near_token_yocto(&v_after["pending_to_unstake"]).unwrap_or(0),
+        0
+    );
 
     Ok(())
 }

@@ -3,6 +3,8 @@
 //!
 //! **Entry:** [`Contract::promise_validator_per_epoch_settlement_then`] (**0**, sets **`Busy`**) — shared by `lock`, `unlock`, `withdraw`, `epoch_settle`.
 //! Fast path when [`Validator::last_settlement_epoch`] ≥ current epoch: **0** → **4** only.
+//! Public no-op `epoch_settle` advances [`Validator::last_settlement_epoch`] after a successful
+//! fresh-epoch pool account check, even when no stake/unstake work is pending.
 //! User tails **5a–5c** live in `lock.rs`, `unlock.rs`, `withdraw.rs`; **6** clears **`Idle`**.
 
 use crate::events;
@@ -347,7 +349,8 @@ impl Contract {
     // --- [Pipeline 3 / 3a] ---
 
     /// **[Pipeline 3]** At most one pool `deposit_and_stake` or `unstake` per NEAR epoch (**3a** net-zero inline).
-    /// Skip to **4** when nothing pending or slot used; else pool op → **3′** → **4**.
+    /// Skip to **4** when nothing pending or slot used; public `epoch_settle` no-ops still mark the
+    /// current epoch handled after the pool account check succeeds. Otherwise pool op → **3′** → **4**.
     pub(crate) fn try_epoch_stake_or_unstake(
         &mut self,
         validator_id: ValidatorId,
@@ -365,6 +368,12 @@ impl Contract {
         let can_settle = validator.last_settlement_epoch < epoch_height();
 
         if !has_pending || !can_settle {
+            if !has_pending
+                && can_settle
+                && matches!(&dispatch_after, UserAction::SettleOnly { .. })
+            {
+                self.advance_noop_settlement_epoch(&validator_id);
+            }
             return self.on_epoch_settlement_dispatch_continue(dispatch_after);
         }
 
@@ -413,6 +422,15 @@ impl Contract {
     }
 
     // --- [Pipeline 3a] ---
+
+    /// Public `epoch_settle` found no stake/unstake work after a successful fresh-epoch pool account
+    /// check. Mark the epoch as handled so keepers can distinguish a completed no-op from stale state.
+    pub(crate) fn advance_noop_settlement_epoch(&mut self, validator_id: &ValidatorId) {
+        let mut validator = self.require_validator(validator_id);
+        validator.last_settlement_epoch = epoch_height();
+        self.internal_set_validator(validator_id.clone(), validator);
+        events::log_epoch_operation("epoch_settle_noop", validator_id);
+    }
 
     /// **[Pipeline 3a]** Inline net-zero clear (no pool `deposit` / `unstake`).
     ///
