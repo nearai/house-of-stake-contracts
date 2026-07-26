@@ -366,12 +366,17 @@ impl Contract {
         let pending_stake_yocto = validator.pending_to_stake.as_yoctonear();
         let pending_unstake_yocto = validator.pending_to_unstake.as_yoctonear();
         let has_pending = pending_stake_yocto > 0 || pending_unstake_yocto > 0;
-        let can_settle = validator.last_settlement_epoch < epoch_height();
+        let is_fresh_epoch = validator.last_settlement_epoch < epoch_height();
+        let no_pending = !has_pending;
 
-        if !has_pending || !can_settle {
-            if !has_pending && can_settle {
-                self.mark_epoch_settlement_handled(&validator_id, "epoch_settle_noop");
+        if no_pending {
+            if is_fresh_epoch {
+                self.mark_no_pool_epoch_settlement_handled(&validator_id, "epoch_settle_noop");
             }
+            return self.on_epoch_settlement_dispatch_continue(dispatch_after);
+        }
+
+        if !is_fresh_epoch {
             return self.on_epoch_settlement_dispatch_continue(dispatch_after);
         }
 
@@ -396,7 +401,7 @@ impl Contract {
         } else {
             if validator.last_unstake_epoch > 0 {
                 if !self.validator_unstake_waiting_finished(&validator) {
-                    self.mark_epoch_settlement_handled(
+                    self.mark_no_pool_epoch_settlement_handled(
                         &validator_id,
                         "epoch_settle_unstake_waiting",
                     );
@@ -424,9 +429,11 @@ impl Contract {
 
     // --- [Pipeline 3a] ---
 
-    /// Settlement reached a fresh-epoch decision without making a pool stake/unstake call. Mark the
-    /// epoch handled so later user tails wait for the next epoch instead of re-opening this one.
-    pub(crate) fn mark_epoch_settlement_handled(
+    /// Settlement reached a fresh-epoch decision without making a pool stake/unstake call.
+    ///
+    /// Successful net-zero, stake, and unstake paths update `last_settlement_epoch` together with
+    /// their accounting changes instead of using this helper.
+    pub(crate) fn mark_no_pool_epoch_settlement_handled(
         &mut self,
         validator_id: &ValidatorId,
         epoch_action: &str,
