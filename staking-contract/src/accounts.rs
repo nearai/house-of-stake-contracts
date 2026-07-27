@@ -56,7 +56,6 @@ impl Contract {
         let mut account = current.unwrap_or_default();
         account.storage_deposit = NearToken::from_yoctonear(new_total);
         self.internal_set_account(account_id.clone(), account);
-        self.internal_index_account_id(&account_id);
 
         let refund_yocto = attached.as_yoctonear().saturating_sub(accepted_yocto);
         if refund_yocto > 0 {
@@ -105,7 +104,6 @@ impl Contract {
             .checked_sub(NearToken::from_yoctonear(withdraw_yocto))
             .expect("Internal error: storage withdraw amount was not bounded correctly");
         self.internal_set_account(account_id.clone(), account);
-        self.internal_index_account_id(&account_id);
 
         let _ =
             Promise::new(account_id.clone()).transfer(NearToken::from_yoctonear(withdraw_yocto));
@@ -134,6 +132,7 @@ impl Contract {
         }
 
         self.accounts.remove(&account_id);
+        self.legacy_accounts.remove(&account_id);
         if account.storage_deposit.as_yoctonear() > 0 {
             let _ = Promise::new(account_id).transfer(account.storage_deposit);
         }
@@ -145,36 +144,29 @@ impl Contract {
     }
 
     pub fn get_account_ids(&self, from_index: u64, limit: u64) -> Vec<AccountId> {
-        let total_len = self.account_ids.len() as u64;
-        self.collect_paginated(from_index, limit, total_len, |index| {
-            let account_id = self.account_ids.get(index)?;
-            self.internal_get_account(account_id)
-                .is_some()
-                .then(|| account_id.clone())
-        })
+        let skip = usize::try_from(from_index).unwrap_or(usize::MAX);
+        let take = usize::try_from(limit).unwrap_or(usize::MAX);
+        self.accounts
+            .keys()
+            .skip(skip)
+            .take(take)
+            .cloned()
+            .collect()
     }
 }
 
 impl Contract {
     pub(crate) fn internal_get_account(&self, id: &AccountId) -> Option<Account> {
-        self.accounts.get(id).cloned().map(Into::into)
+        self.accounts
+            .get(id)
+            .or_else(|| self.legacy_accounts.get(id))
+            .cloned()
+            .map(Into::into)
     }
 
     pub(crate) fn internal_set_account(&mut self, id: AccountId, account: Account) {
-        self.accounts.insert(id, account.into());
-    }
-
-    pub(crate) fn internal_index_account_id(&mut self, account_id: &AccountId) {
-        if self
-            .account_id_set
-            .get(account_id)
-            .copied()
-            .unwrap_or(false)
-        {
-            return;
-        }
-        self.account_ids.push(account_id.clone());
-        self.account_id_set.insert(account_id.clone(), true);
+        self.accounts.insert(id.clone(), account.into());
+        self.legacy_accounts.remove(&id);
     }
 
     fn internal_storage_balance_of(&self, account_id: &AccountId) -> Option<StorageBalance> {
