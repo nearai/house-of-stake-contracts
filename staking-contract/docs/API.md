@@ -27,6 +27,7 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 | `get_version` | — | `string` | Crate package version string. |
 | `is_paused` | — | `bool` | Global pause flag. |
 | `get_account` | `account_id: AccountId` | `Account \| null` | NEP-style prepaid **`storage_deposit`** only. |
+| `get_accounts` | `from_index: u64`, `limit: u64` | `AccountView[]` | Paginated registered accounts from the enumerable account map, including each row's account id. |
 | `get_account_ids` | `from_index: u64`, `limit: u64` | `AccountId[]` | Paginated registered account ids from the enumerable account map. |
 | `storage_balance_bounds` | — | `StorageBalanceBounds` | NEP-145 minimum registration balance; `max` is `null` because storage top-ups are unbounded. |
 | `storage_balance_of` | `account_id: AccountId` | `StorageBalance \| null` | NEP-145 storage balance; returns `null` for unregistered accounts. |
@@ -62,6 +63,7 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 | `storage_deposit` | Any | **Attach NEAR** | NEP-145 register/top-up: `account_id?: AccountId`, `registration_only?: bool`. With `registration_only=true`, only the amount needed to reach `min_storage_deposit` is retained and excess is refunded. Non-registration top-ups must satisfy retained storage for `min_storage_deposit + per_lock_storage_stake × user_lock_count + per_farm_position_storage_stake × user_farm_position_count + per_purchase_storage_stake × user_purchase_count`. |
 | `storage_withdraw` | Account owner | **1 yocto** + optional `amount: NearToken` | NEP-145 withdraw from `available`; omitting `amount` withdraws all available storage. |
 | `storage_unregister` | Account owner | **1 yocto** + optional `force: bool` | NEP-145 unregister/refund when the account has no retained per-lock, per-purchase, subscription, farm-position, or pending-unstake storage. `force=true` is rejected; without force the method returns `false` instead of deleting accounts that still own retained records. |
+| `get_accounts` | Anyone | 0 | `from_index`, `limit`. Lists registered account rows from the enumerable account map with `account_id` and storage fields. During upgrade, discoverable accounts from purchases, subscriptions, and legacy pending-unstake account references are backfilled; storage-only pre-upgrade accounts remain readable by `get_account` and appear in `get_accounts` after their next storage mutation. |
 | `get_account_ids` | Anyone | 0 | `from_index`, `limit`. Lists registered account ids from the enumerable account map. During upgrade, discoverable accounts from purchases, subscriptions, and legacy pending-unstake account references are backfilled; storage-only pre-upgrade accounts remain readable and appear after their next storage mutation. |
 
 ---

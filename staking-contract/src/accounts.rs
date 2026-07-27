@@ -153,6 +153,23 @@ impl Contract {
             .cloned()
             .collect()
     }
+
+    pub fn get_accounts(&self, from_index: u64, limit: u64) -> Vec<AccountView> {
+        let skip = usize::try_from(from_index).unwrap_or(usize::MAX);
+        let take = usize::try_from(limit).unwrap_or(usize::MAX);
+        self.accounts
+            .iter()
+            .skip(skip)
+            .take(take)
+            .map(|(account_id, account)| {
+                let account: Account = account.clone().into();
+                AccountView {
+                    account_id: account_id.clone(),
+                    storage_deposit: account.storage_deposit,
+                }
+            })
+            .collect()
+    }
 }
 
 impl Contract {

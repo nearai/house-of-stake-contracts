@@ -86,7 +86,8 @@ pub struct Contract {
     pub prices: LookupMap<PriceId, VPrice>,
     /// Per-user accounting: NEP-145-style registered storage (`storage_deposit`).
     pub accounts: IterableMap<AccountId, VAccount>,
-    /// Pre-upgrade account lookup storage for registered accounts that cannot be enumerated during migration.
+    /// Pre-upgrade account lookup storage. The previous `LookupMap` cannot be fully enumerated,
+    /// so upgraded storage-only accounts stay readable here until their next storage mutation.
     pub legacy_accounts: LookupMap<AccountId, VAccount>,
     /// Subscription records keyed by [`Subscription::subscription_id`] (`sub_*`).
     pub subscriptions: LookupMap<SubscriptionId, VSubscription>,
