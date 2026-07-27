@@ -1,6 +1,6 @@
 use crate::*;
 use near_sdk::env;
-use near_sdk::store::{IterableMap, LookupMap, Vector};
+use near_sdk::store::{IterableMap, IterableSet, LookupMap, Vector};
 
 #[cfg(target_arch = "wasm32")]
 use near_sdk::{Gas, sys};
@@ -62,14 +62,14 @@ struct ContractV1_1_1 {
 
 impl From<ContractV1_1_1> for Contract {
     fn from(old: ContractV1_1_1) -> Self {
-        let mut accounts = IterableMap::new(StorageKeys::IterableAccounts);
+        let mut account_ids = IterableSet::new(StorageKeys::AccountIds);
         let mut subscriptions_by_product = LookupMap::new(StorageKeys::SubscriptionsByProduct);
 
         for (subscription_id, _) in old.subscription_ids.iter() {
             if let Some(subscription) = old.subscriptions.get(subscription_id) {
                 let subscription: Subscription = subscription.clone().into();
-                migrate_account_if_discoverable(
-                    &mut accounts,
+                index_account_if_registered(
+                    &mut account_ids,
                     &old.accounts,
                     &subscription.account_id,
                 );
@@ -84,14 +84,14 @@ impl From<ContractV1_1_1> for Contract {
         for purchase_id in old.purchase_ids.iter() {
             if let Some(purchase) = old.purchases.get(purchase_id) {
                 let purchase: Purchase = purchase.clone().into();
-                migrate_account_if_discoverable(&mut accounts, &old.accounts, &purchase.account_id);
+                index_account_if_registered(&mut account_ids, &old.accounts, &purchase.account_id);
             }
         }
 
         for validator_id in old.validator_ids.iter() {
             if let Some(validator) = old.validators.get(validator_id) {
                 for account_id in validator.legacy_accounts_with_pending_unstake() {
-                    migrate_account_if_discoverable(&mut accounts, &old.accounts, account_id);
+                    index_account_if_registered(&mut account_ids, &old.accounts, account_id);
                 }
             }
         }
@@ -104,8 +104,8 @@ impl From<ContractV1_1_1> for Contract {
             product_ids: old.product_ids,
             products: old.products,
             prices: old.prices,
-            accounts,
-            legacy_accounts: old.accounts,
+            accounts: old.accounts,
+            account_ids,
             subscriptions: old.subscriptions,
             locks: old.locks,
             user_validator_shares: old.user_validator_shares,
@@ -134,31 +134,28 @@ impl From<ContractV1_1_1> for Contract {
     }
 }
 
-fn migrate_account_if_discoverable(
-    accounts: &mut IterableMap<AccountId, VAccount>,
+fn index_account_if_registered(
+    account_ids: &mut IterableSet<AccountId>,
     old_accounts: &LookupMap<AccountId, VAccount>,
     account_id: &AccountId,
 ) {
-    if accounts.contains_key(account_id) {
-        return;
-    }
-    if let Some(account) = old_accounts.get(account_id) {
-        accounts.insert(account_id.clone(), account.clone());
+    if old_accounts.get(account_id).is_some() {
+        account_ids.insert(account_id.clone());
     }
 }
 
 fn add_subscription_to_product_index_for_migration(
-    subscriptions_by_product: &mut LookupMap<ProductId, IterableMap<SubscriptionId, ()>>,
+    subscriptions_by_product: &mut LookupMap<ProductId, IterableSet<SubscriptionId>>,
     product_id: &ProductId,
     subscription_id: &SubscriptionId,
 ) {
     if let Some(ids) = subscriptions_by_product.get_mut(product_id) {
-        ids.insert(subscription_id.clone(), ());
+        ids.insert(subscription_id.clone());
         return;
     }
 
-    let mut ids = IterableMap::new(Contract::subscriptions_by_product_map_key(product_id));
-    ids.insert(subscription_id.clone(), ());
+    let mut ids = IterableSet::new(Contract::subscriptions_by_product_set_key(product_id));
+    ids.insert(subscription_id.clone());
     subscriptions_by_product.insert(product_id.clone(), ids);
 }
 

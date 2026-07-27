@@ -24,7 +24,7 @@ pub mod withdraw;
 pub use config::Config;
 pub use types::*;
 
-use near_sdk::store::{IterableMap, LookupMap, Vector};
+use near_sdk::store::{IterableMap, IterableSet, LookupMap, Vector};
 use near_sdk::{AccountId, BorshStorageKey, NearToken, PanicOnDefault, near};
 
 #[derive(BorshStorageKey)]
@@ -61,8 +61,8 @@ enum StorageKeys {
     PurchasesByAccountVector { account_hash: Vec<u8> },
     PurchasesByProductVector { product_hash: Vec<u8> },
     SubscriptionsByProduct,
-    SubscriptionsByProductMap { product_hash: Vec<u8> },
-    IterableAccounts,
+    SubscriptionsByProductSet { product_hash: Vec<u8> },
+    AccountIds,
 }
 
 #[derive(PanicOnDefault)]
@@ -85,10 +85,10 @@ pub struct Contract {
     /// Price lines (`price_*` ids); [`Price::product_id`](crate::types::Price::product_id) links to a product.
     pub prices: LookupMap<PriceId, VPrice>,
     /// Per-user accounting: NEP-145-style registered storage (`storage_deposit`).
-    pub accounts: IterableMap<AccountId, VAccount>,
-    /// Pre-upgrade account lookup storage. The previous `LookupMap` cannot be fully enumerated,
-    /// so upgraded storage-only accounts stay readable here until their next storage mutation.
-    pub legacy_accounts: LookupMap<AccountId, VAccount>,
+    pub accounts: LookupMap<AccountId, VAccount>,
+    /// Enumerable registered-account index. During migration this is backfilled for accounts
+    /// discoverable from existing enumerable records, and all later storage mutations maintain it.
+    pub account_ids: IterableSet<AccountId>,
     /// Subscription records keyed by [`Subscription::subscription_id`] (`sub_*`).
     pub subscriptions: LookupMap<SubscriptionId, VSubscription>,
     /// Active and historical locks keyed by [`Lock::lock_id`] (`lock_*`).
@@ -131,7 +131,7 @@ pub struct Contract {
     /// subscription-specific plan changes without scanning the full catalog.
     pub subscriptions_by_account: LookupMap<AccountId, Vec<SubscriptionId>>,
     /// Secondary index: product id -> subscription ids currently stored under that product.
-    pub subscriptions_by_product: LookupMap<ProductId, IterableMap<SubscriptionId, ()>>,
+    pub subscriptions_by_product: LookupMap<ProductId, IterableSet<SubscriptionId>>,
     /// Subscription ids keyed for efficient membership and removal while remaining iterable for views.
     pub subscription_ids: IterableMap<SubscriptionId, ()>,
     /// Pending subscription-update target price reference counts, used by bounded catalog guards.
@@ -155,8 +155,8 @@ impl Contract {
             product_ids: Vector::new(StorageKeys::ProductIds),
             products: LookupMap::new(StorageKeys::Products),
             prices: LookupMap::new(StorageKeys::Prices),
-            accounts: IterableMap::new(StorageKeys::IterableAccounts),
-            legacy_accounts: LookupMap::new(StorageKeys::Accounts),
+            accounts: LookupMap::new(StorageKeys::Accounts),
+            account_ids: IterableSet::new(StorageKeys::AccountIds),
             subscriptions: LookupMap::new(StorageKeys::Subscriptions),
             locks: LookupMap::new(StorageKeys::Locks),
             user_validator_shares: LookupMap::new(StorageKeys::UserValidatorShares),

@@ -7,7 +7,7 @@ use crate::*;
 use common::U256;
 use near_sdk::borsh::BorshSerialize;
 use near_sdk::json_types::{U64, U128};
-use near_sdk::store::{IterableMap, LookupMap};
+use near_sdk::store::{IterableSet, LookupMap};
 use near_sdk::{AccountId, NearToken, PromiseOrValue, assert_one_yocto, env, near, require};
 
 #[cfg(feature = "test")]
@@ -232,7 +232,7 @@ impl Contract {
         };
         let skip = usize::try_from(from_index).unwrap_or(usize::MAX);
         let take = usize::try_from(limit).unwrap_or(usize::MAX);
-        ids.keys()
+        ids.iter()
             .skip(skip)
             .take(take)
             .filter_map(|id| self.internal_get_subscription(id))
@@ -434,12 +434,12 @@ impl Contract {
         subscription_id: &SubscriptionId,
     ) {
         if let Some(ids) = self.subscriptions_by_product.get_mut(product_id) {
-            ids.insert(subscription_id.clone(), ());
+            ids.insert(subscription_id.clone());
             return;
         }
 
-        let mut ids = IterableMap::new(Self::subscriptions_by_product_map_key(product_id));
-        ids.insert(subscription_id.clone(), ());
+        let mut ids = IterableSet::new(Self::subscriptions_by_product_set_key(product_id));
+        ids.insert(subscription_id.clone());
         self.subscriptions_by_product
             .insert(product_id.clone(), ids);
     }
@@ -471,8 +471,8 @@ impl Contract {
         }
     }
 
-    pub(crate) fn subscriptions_by_product_map_key(product_id: &ProductId) -> StorageKeys {
-        StorageKeys::SubscriptionsByProductMap {
+    pub(crate) fn subscriptions_by_product_set_key(product_id: &ProductId) -> StorageKeys {
+        StorageKeys::SubscriptionsByProductSet {
             product_hash: env::sha256(product_id.as_bytes()),
         }
     }

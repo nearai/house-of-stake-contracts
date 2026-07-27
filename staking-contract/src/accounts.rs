@@ -132,7 +132,7 @@ impl Contract {
         }
 
         self.accounts.remove(&account_id);
-        self.legacy_accounts.remove(&account_id);
+        self.account_ids.remove(&account_id);
         if account.storage_deposit.as_yoctonear() > 0 {
             let _ = Promise::new(account_id).transfer(account.storage_deposit);
         }
@@ -146,8 +146,8 @@ impl Contract {
     pub fn get_account_ids(&self, from_index: u64, limit: u64) -> Vec<AccountId> {
         let skip = usize::try_from(from_index).unwrap_or(usize::MAX);
         let take = usize::try_from(limit).unwrap_or(usize::MAX);
-        self.accounts
-            .keys()
+        self.account_ids
+            .iter()
             .skip(skip)
             .take(take)
             .cloned()
@@ -157,16 +157,16 @@ impl Contract {
     pub fn get_accounts(&self, from_index: u64, limit: u64) -> Vec<AccountView> {
         let skip = usize::try_from(from_index).unwrap_or(usize::MAX);
         let take = usize::try_from(limit).unwrap_or(usize::MAX);
-        self.accounts
+        self.account_ids
             .iter()
             .skip(skip)
             .take(take)
-            .map(|(account_id, account)| {
-                let account: Account = account.clone().into();
-                AccountView {
+            .filter_map(|account_id| {
+                let account = self.internal_get_account(account_id)?;
+                Some(AccountView {
                     account_id: account_id.clone(),
                     storage_deposit: account.storage_deposit,
-                }
+                })
             })
             .collect()
     }
@@ -174,16 +174,12 @@ impl Contract {
 
 impl Contract {
     pub(crate) fn internal_get_account(&self, id: &AccountId) -> Option<Account> {
-        self.accounts
-            .get(id)
-            .or_else(|| self.legacy_accounts.get(id))
-            .cloned()
-            .map(Into::into)
+        self.accounts.get(id).cloned().map(Into::into)
     }
 
     pub(crate) fn internal_set_account(&mut self, id: AccountId, account: Account) {
         self.accounts.insert(id.clone(), account.into());
-        self.legacy_accounts.remove(&id);
+        self.account_ids.insert(id);
     }
 
     fn internal_storage_balance_of(&self, account_id: &AccountId) -> Option<StorageBalance> {
