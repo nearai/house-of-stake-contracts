@@ -15,7 +15,7 @@ impl Contract {
     #[private]
     #[init(ignore_state)]
     pub fn migrate_state() -> Self {
-        let old: ContractV1_0_1 = env::state_read().unwrap();
+        let old: ContractV1_0_3 = env::state_read().unwrap();
         old.into()
     }
 
@@ -26,7 +26,7 @@ impl Contract {
 
 #[allow(non_camel_case_types)]
 #[near(serializers = [borsh])]
-struct ContractV1_0_1 {
+struct ContractV1_0_3 {
     pub config: VConfig,
     pub paused: bool,
     pub validators: LookupMap<ValidatorId, VValidator>,
@@ -39,6 +39,7 @@ struct ContractV1_0_1 {
     pub locks: LookupMap<LockId, VLock>,
     pub user_validator_shares: LookupMap<(AccountId, ValidatorId), u128>,
     pub user_pending_unstake: LookupMap<(AccountId, ValidatorId), Vec<PendingUnstakeTranche>>,
+    pub user_pending_unstake_validator_count: LookupMap<AccountId, u32>,
     pub user_lock_count: LookupMap<AccountId, u32>,
     pub purchases: LookupMap<PurchaseId, VPurchase>,
     pub purchase_ids: Vector<PurchaseId>,
@@ -46,40 +47,25 @@ struct ContractV1_0_1 {
     pub purchases_by_product: LookupMap<ProductId, Vec<PurchaseId>>,
     pub user_purchase_count: LookupMap<AccountId, u32>,
     pub revenue_by_validator: LookupMap<ValidatorId, NearToken>,
+    pub farm_pools: LookupMap<PriceId, VFarmPool>,
+    pub farm_positions: LookupMap<(AccountId, ProductId), VFarmPosition>,
+    pub farm_position_products_by_account: LookupMap<AccountId, Vec<ProductId>>,
+    pub user_farm_position_count: LookupMap<AccountId, u32>,
+    pub farm_accounts: LookupMap<AccountId, VFarmAccount>,
     pub subscription_by_account_product: LookupMap<(AccountId, ProductId), SubscriptionId>,
     pub subscriptions_by_account: LookupMap<AccountId, Vec<SubscriptionId>>,
-    pub subscription_ids: Vector<SubscriptionId>,
+    pub subscription_ids: IterableMap<SubscriptionId, ()>,
     pub pending_update_target_price_counts: LookupMap<PriceId, u32>,
     pub pending_update_target_product_counts: LookupMap<ProductId, u32>,
     pub id_nonce: u64,
 }
 
-impl From<ContractV1_0_1> for Contract {
-    fn from(old: ContractV1_0_1) -> Self {
-        let mut user_pending_unstake_validator_count =
-            LookupMap::new(StorageKeys::UserPendingUnstakeValidatorCount);
-        for validator_id in old.validator_ids.iter() {
-            if let Some(validator) = old.validators.get(validator_id) {
-                for account_id in validator.legacy_accounts_with_pending_unstake() {
-                    let next = user_pending_unstake_validator_count
-                        .get(account_id)
-                        .copied()
-                        .unwrap_or(0u32)
-                        .saturating_add(1);
-                    user_pending_unstake_validator_count.insert(account_id.clone(), next);
-                }
-            }
-        }
-
-        let mut subscription_ids = IterableMap::new(StorageKeys::SubscriptionIds);
-        for subscription_id in old.subscription_ids.iter() {
-            subscription_ids.insert(subscription_id.clone(), ());
-        }
-
+impl From<ContractV1_0_3> for Contract {
+    fn from(old: ContractV1_0_3) -> Self {
         let mut purchases_by_account: LookupMap<AccountId, Vector<PurchaseId>> =
-            LookupMap::new(StorageKeys::PurchasesByAccount);
+            LookupMap::new(StorageKeys::PurchasesByAccountV2);
         let mut purchases_by_product: LookupMap<ProductId, Vector<PurchaseId>> =
-            LookupMap::new(StorageKeys::PurchasesByProduct);
+            LookupMap::new(StorageKeys::PurchasesByProductV2);
         for purchase_id in old.purchase_ids.iter() {
             if let Some(purchase) = old.purchases.get(purchase_id) {
                 let purchase: Purchase = purchase.clone().into();
@@ -116,24 +102,22 @@ impl From<ContractV1_0_1> for Contract {
             locks: old.locks,
             user_validator_shares: old.user_validator_shares,
             user_pending_unstake: old.user_pending_unstake,
-            user_pending_unstake_validator_count,
+            user_pending_unstake_validator_count: old.user_pending_unstake_validator_count,
             user_lock_count: old.user_lock_count,
-            user_farm_position_count: LookupMap::new(StorageKeys::UserFarmPositionCount),
+            user_farm_position_count: old.user_farm_position_count,
             purchases: old.purchases,
             purchase_ids: old.purchase_ids,
             purchases_by_account,
             purchases_by_product,
             user_purchase_count: old.user_purchase_count,
             revenue_by_validator: old.revenue_by_validator,
-            farm_pools: LookupMap::new(StorageKeys::FarmPools),
-            farm_positions: LookupMap::new(StorageKeys::FarmPositions),
-            farm_position_products_by_account: LookupMap::new(
-                StorageKeys::FarmPositionProductsByAccount,
-            ),
-            farm_accounts: LookupMap::new(StorageKeys::FarmAccounts),
+            farm_pools: old.farm_pools,
+            farm_positions: old.farm_positions,
+            farm_position_products_by_account: old.farm_position_products_by_account,
+            farm_accounts: old.farm_accounts,
             subscription_by_account_product: old.subscription_by_account_product,
             subscriptions_by_account: old.subscriptions_by_account,
-            subscription_ids,
+            subscription_ids: old.subscription_ids,
             pending_update_target_price_counts: old.pending_update_target_price_counts,
             pending_update_target_product_counts: old.pending_update_target_product_counts,
             id_nonce: old.id_nonce,

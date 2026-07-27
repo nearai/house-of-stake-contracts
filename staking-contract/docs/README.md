@@ -16,6 +16,14 @@ Start here when navigating the `stake.dao` contract documentation.
 | [features/lazy-epoch-pipeline.md](features/lazy-epoch-pipeline.md) | User-driven validator pool settlement pipeline. |
 | [features/venear-integration.md](features/venear-integration.md) | Future veNEAR integration design for stake.dao locks. |
 
+## Operations
+
+| Doc | Purpose |
+|-----|---------|
+| [operations/testnet-deploy.md](operations/testnet-deploy.md) | Testnet deploy and upgrade runbook. |
+| [operations/testnet-contract-snapshot.md](operations/testnet-contract-snapshot.md) | Shared testnet contract snapshot and PR 85 baseline state. |
+| [operations/production-readiness.md](operations/production-readiness.md) | Mainnet readiness checklist and launch follow-ups. |
+
 ## Review
 
 | Doc | Purpose |

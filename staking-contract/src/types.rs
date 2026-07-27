@@ -767,6 +767,7 @@ impl From<VValidator> for Validator {
     }
 }
 
+#[cfg(test)]
 impl VValidator {
     pub(crate) fn legacy_accounts_with_pending_unstake(&self) -> &[AccountId] {
         match self {
