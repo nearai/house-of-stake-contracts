@@ -406,11 +406,10 @@ fn configure(args: ConfigureArgs) -> Result<()> {
     }
 
     if ctx.common.send {
-        verify(VerifyArgs {
-            test_feature: config.verify.test_feature
-                || config.staking.test_feature.unwrap_or(false),
-            common: ctx.common.readonly,
-        })?;
+        let test_feature =
+            config.verify.test_feature || config.staking.test_feature.unwrap_or(false);
+        verify_deployment_health(ctx.common.readonly.network, &account_id, None, test_feature)?;
+        verify_configured_state(ctx.common.readonly.network, &account_id, &config)?;
     }
     Ok(())
 }
@@ -532,8 +531,7 @@ fn configure_validator(
         json!({ "validator_id": validator.validator_id }),
     )?;
     if !existing.is_null() {
-        println!("validator already exists: {}", validator.validator_id);
-        return Ok(());
+        assert_active_status(&existing, &validator.validator_id)?;
     }
 
     if validator.deploy_mock_pool {
@@ -566,6 +564,11 @@ fn configure_validator(
                 .arg("send");
             run_tx(ctx, cmd)?;
         }
+    }
+
+    if !existing.is_null() {
+        println!("validator already exists: {}", validator.validator_id);
+        return Ok(());
     }
 
     near_tx(
@@ -665,6 +668,7 @@ fn sync_product_by_id(
     if stored.get("validator_id").and_then(Value::as_str) != Some(product.validator_id.as_str()) {
         bail!("configured product_id {product_id} belongs to a different validator");
     }
+    assert_active_status(&stored, product_id)?;
 
     let current_name = stored.get("name").and_then(Value::as_str);
     let current_description = stored.get("description").and_then(Value::as_str);
@@ -779,6 +783,7 @@ fn sync_price_by_id(
     if stored.get("product_id").and_then(Value::as_str) != Some(product_id) {
         bail!("configured price_id {price_id} belongs to a different product");
     }
+    assert_active_status(&stored, price_id)?;
 
     assert_immutable_price_field(&stored, "amount", &price.amount, price_id)?;
     assert_immutable_price_field(&stored, "price_type", &price.price_type, price_id)?;
@@ -982,11 +987,14 @@ fn assert_metadata_field(stored: &Value, expected: Option<&Value>, id: &str) -> 
 }
 
 fn metadata_matches(stored: &Value, expected: Option<&Value>) -> bool {
-    match (
-        canonical_metadata_value(stored.get("metadata")),
-        canonical_metadata_value(expected),
-    ) {
-        (Ok(actual), Ok(expected)) => actual == expected,
+    match canonical_metadata_value(stored.get("metadata")) {
+        Ok(actual) => {
+            price_metadata_update(stored, expected, "<metadata>")
+                .ok()
+                .and_then(|value| canonical_metadata_value(Some(&value)).ok())
+                .flatten()
+                == actual
+        }
         _ => false,
     }
 }
@@ -997,11 +1005,24 @@ fn price_metadata_update(
     price_id: &str,
 ) -> Result<Value> {
     let actual = canonical_metadata_value(stored.get("metadata"))?;
-    let expected = canonical_metadata_value(expected)?;
+    let mut expected = canonical_metadata_value(expected)?;
     if actual.is_some() && expected.is_none() {
         bail!(
             "configured price_id {price_id} cannot clear metadata; edit_price treats null metadata as leave-unchanged"
         );
+    }
+    if let (Some(Value::Object(actual)), Some(Value::Object(expected))) =
+        (actual.as_ref(), expected.as_mut())
+    {
+        if expected.get("farm_reward_rate") == Some(&Value::Null) {
+            if let Some(reward_rate) = actual
+                .get("farm_reward_rate")
+                .filter(|value| !value.is_null())
+                .cloned()
+            {
+                expected.insert("farm_reward_rate".to_string(), reward_rate);
+            }
+        }
     }
     Ok(expected.unwrap_or(Value::Null))
 }
@@ -1010,6 +1031,11 @@ fn canonical_metadata_value(value: Option<&Value>) -> Result<Option<Value>> {
     match value {
         None | Some(Value::Null) => Ok(None),
         Some(Value::Object(raw)) => {
+            for key in raw.keys() {
+                if key != "max_amount" && key != "farm_reward_rate" {
+                    bail!("unsupported price metadata field: {key}");
+                }
+            }
             let mut normalized = serde_json::Map::new();
             normalized.insert(
                 "max_amount".to_string(),
@@ -1073,6 +1099,7 @@ fn set_default_price(
         "get_product",
         json!({ "product_id": product_id }),
     )?;
+    assert_active_status(&stored, product_id)?;
     if stored.get("default_price_id").and_then(Value::as_str) == Some(price_id) {
         println!("default price already set: {product_id} -> {price_id}");
         return Ok(());
@@ -1092,15 +1119,15 @@ fn set_default_price(
 fn catalog_signer<'a>(
     ctx: &'a MutContext,
     product: &'a ProductConfig,
-    validator_owners: &'a HashMap<String, String>,
+    _validator_owners: &'a HashMap<String, String>,
 ) -> &'a str {
+    if let Some(signer) = ctx.common.readonly.signer.as_deref() {
+        return signer;
+    }
     if let Some(owner) = non_empty(product.owner_account_id.as_deref()) {
         return owner;
     }
-    validator_owners
-        .get(&product.validator_id)
-        .map(String::as_str)
-        .unwrap_or(ctx.signer.as_str())
+    ctx.signer.as_str()
 }
 
 fn find_product(
@@ -1248,6 +1275,7 @@ fn is_missing_contract_view_error(err: &anyhow::Error) -> bool {
         || message.contains("wasm code is not deployed")
         || message.contains("code is not deployed")
         || message.contains("contract code is not deployed")
+        || message.contains("codedoesnotexist")
 }
 
 fn parse_near_json(output: &str) -> Result<Value> {
@@ -1379,6 +1407,14 @@ fn validate_config(config: &BootstrapConfig) -> Result<()> {
                 "product {} config has {default_count} default prices; mark at most one price with set_default",
                 product.name
             );
+        }
+        for price in &product.prices {
+            canonical_metadata_value(price.metadata.as_ref()).with_context(|| {
+                format!(
+                    "invalid metadata for price {} under product {}",
+                    price.name, product.name
+                )
+            })?;
         }
     }
     Ok(())
@@ -1541,6 +1577,64 @@ mod tests {
     }
 
     #[test]
+    fn metadata_validation_rejects_unknown_fields() {
+        let config: BootstrapConfig = serde_json::from_str(
+            r#"{
+                "products": [{
+                    "validator_id": "pool.testnet",
+                    "name": "Product",
+                    "prices": [{
+                        "name": "Price",
+                        "amount": "1",
+                        "metadata": { "max_amunt": "100" }
+                    }]
+                }]
+            }"#,
+        )
+        .unwrap();
+
+        let err = validate_config(&config).unwrap_err();
+        assert!(err.to_string().contains("invalid metadata"));
+        assert!(err.chain().any(|cause| {
+            cause
+                .to_string()
+                .contains("unsupported price metadata field")
+        }));
+    }
+
+    #[test]
+    fn farm_metadata_update_preserves_existing_reward_rate_when_omitted() {
+        let stored = json!({
+            "metadata": {
+                "max_amount": "100",
+                "farm_reward_rate": "5"
+            }
+        });
+        let update = price_metadata_update(
+            &stored,
+            Some(&json!({
+                "max_amount": "200"
+            })),
+            "price_1",
+        )
+        .unwrap();
+
+        assert_eq!(
+            update,
+            json!({
+                "max_amount": "200",
+                "farm_reward_rate": "5"
+            })
+        );
+        assert!(metadata_matches(
+            &stored,
+            Some(&json!({
+                "max_amount": "100"
+            }))
+        ));
+    }
+
+    #[test]
     fn metadata_clear_is_rejected_for_existing_metadata() {
         let stored = json!({
             "metadata": {
@@ -1598,5 +1692,44 @@ mod tests {
         let price_err =
             verify_price_matches(&archived_price, "price_1", "prod_1", &price).unwrap_err();
         assert!(price_err.to_string().contains("status"));
+    }
+
+    #[test]
+    fn missing_contract_detection_recognizes_code_does_not_exist() {
+        let err = anyhow!(
+            "near view failed for get_owner_id: CompilationError(CodeDoesNotExist {{ account_id: \"pool.testnet\" }})"
+        );
+
+        assert!(is_missing_contract_view_error(&err));
+    }
+
+    #[test]
+    fn explicit_catalog_signer_takes_precedence() {
+        let ctx = MutContext {
+            common: CommonArgs {
+                readonly: ReadOnlyCommonArgs {
+                    network: Network::Testnet,
+                    account: None,
+                    config: None,
+                    signer: Some("manager.testnet".to_string()),
+                },
+                send: false,
+                yes_mainnet: false,
+            },
+            signer: "config-signer.testnet".to_string(),
+        };
+        let product = ProductConfig {
+            product_id: None,
+            validator_id: "pool.testnet".to_string(),
+            owner_account_id: Some("pool-owner.testnet".to_string()),
+            name: "Product".to_string(),
+            description: String::new(),
+            prices: Vec::new(),
+        };
+
+        assert_eq!(
+            catalog_signer(&ctx, &product, &HashMap::new()),
+            "manager.testnet"
+        );
     }
 }
