@@ -301,6 +301,12 @@ impl Contract {
         let Some(stored_sub) = self.internal_get_subscription(&subscription_id) else {
             return lock;
         };
+        if stored_sub.last_lock_id != lock.lock_id
+            || stored_sub.account_id != lock.account_id
+            || lock.status != LockStatus::Active
+        {
+            return lock;
+        }
         if stored_sub.status != SubscriptionStatus::Active || stored_sub.cancel_at_period_end {
             return lock;
         }
@@ -314,7 +320,7 @@ impl Contract {
         }
 
         if let Some(target_amount) = pending.target_amount {
-            lock.amount_near = self.project_scheduled_stake_decrease_amount(&lock, target_amount);
+            self.project_scheduled_stake_decrease_lock(&mut lock, target_amount);
         }
 
         let (period_start_ns, period_end_ns) =
@@ -343,17 +349,13 @@ impl Contract {
         lock
     }
 
-    fn project_scheduled_stake_decrease_amount(
-        &self,
-        lock: &Lock,
-        target_amount: NearToken,
-    ) -> NearToken {
+    fn project_scheduled_stake_decrease_lock(&self, lock: &mut Lock, target_amount: NearToken) {
         let surplus_target = lock
             .amount_near
             .as_yoctonear()
             .saturating_sub(target_amount.as_yoctonear());
         if surplus_target == 0 {
-            return lock.amount_near;
+            return;
         }
 
         let validator = self.require_validator(&lock.validator_id);
@@ -361,7 +363,7 @@ impl Contract {
         let validator_total_shares = validator.total_shares.0;
         let lock_near_val = near_from_shares(lock.shares.0, net_stake, validator_total_shares);
         if lock_near_val == 0 {
-            return lock.amount_near;
+            return;
         }
 
         let surplus_near = surplus_target.min(lock_near_val);
@@ -370,11 +372,16 @@ impl Contract {
         .as_u128()
         .min(lock.shares.0);
         if shares_remove == 0 {
-            return lock.amount_near;
+            return;
         }
 
         let near_amt = near_from_shares(shares_remove, net_stake, validator_total_shares);
-        NearToken::from_yoctonear(lock.amount_near.as_yoctonear().saturating_sub(near_amt))
+        lock.shares = U128(lock.shares.0.saturating_sub(shares_remove));
+        lock.amount_near =
+            NearToken::from_yoctonear(lock.amount_near.as_yoctonear().saturating_sub(near_amt));
+        if lock.shares.0 == 0 {
+            lock.status = LockStatus::UnlockRequested;
+        }
     }
 
     pub(crate) fn internal_get_lock(&self, id: &LockId) -> Option<Lock> {
