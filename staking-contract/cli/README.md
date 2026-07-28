@@ -24,7 +24,7 @@ Build the test-feature contract WASM with the existing Makefile target:
 make staking-contract-test
 ```
 
-Normal deploys use `res/release/staking.wasm` by default. Build it with:
+Normal deploys use `res/release/staking_contract.wasm` by default. Build it with:
 
 ```bash
 make build-release
