@@ -394,22 +394,31 @@ fn verify(args: VerifyArgs) -> Result<()> {
             .unwrap_or("<missing>")
     );
 
-    let validators = view_json(
-        network,
-        &account_id,
-        "get_validators",
-        json!({ "from_index": 0, "limit": limit }),
-    )?;
-    println!("validators: {}", validators.as_array().map_or(0, Vec::len));
+    if config.validators.is_empty() && config.products.is_empty() {
+        let validators = view_json(
+            network,
+            &account_id,
+            "get_validators",
+            json!({ "from_index": 0, "limit": limit }),
+        )?;
+        println!(
+            "listed validators: {}",
+            validators.as_array().map_or(0, Vec::len)
+        );
 
-    let products = view_json(
-        network,
-        &account_id,
-        "get_products",
-        json!({ "from_index": 0, "limit": limit }),
-    )?;
-    println!("products:   {}", products.as_array().map_or(0, Vec::len));
-    verify_configured_state(network, &account_id, &config)?;
+        let products = view_json(
+            network,
+            &account_id,
+            "get_products",
+            json!({ "from_index": 0, "limit": limit }),
+        )?;
+        println!(
+            "listed products:   {}",
+            products.as_array().map_or(0, Vec::len)
+        );
+    } else {
+        verify_configured_state(network, &account_id, &config)?;
+    }
 
     let bounds = view_json(network, &account_id, "storage_balance_bounds", json!({}))?;
     println!("storage balance bounds: {bounds}");
@@ -434,26 +443,30 @@ fn configure_validator(
             .owner_account_id
             .as_deref()
             .unwrap_or(ctx.signer.as_str());
-        let init_args = json!({ "owner_id": owner });
-        let mut cmd = NearCommand::new(ctx.common.readonly.network);
-        cmd.arg("contract")
-            .arg("deploy")
-            .arg(&validator.validator_id)
-            .arg("use-file")
-            .arg(path_arg(mock_pool_wasm))
-            .arg("with-init-call")
-            .arg("new")
-            .arg("json-args")
-            .arg(init_args.to_string())
-            .arg("prepaid-gas")
-            .arg("50.0 Tgas")
-            .arg("attached-deposit")
-            .arg("0 NEAR")
-            .arg("network-config")
-            .arg(ctx.common.readonly.network.as_near_network())
-            .arg("sign-with-keychain")
-            .arg("send");
-        run_tx(ctx, cmd)?;
+        if mock_pool_has_owner(ctx.common.readonly.network, &validator.validator_id, owner)? {
+            println!("mock pool already deployed: {}", validator.validator_id);
+        } else {
+            let init_args = json!({ "owner_id": owner });
+            let mut cmd = NearCommand::new(ctx.common.readonly.network);
+            cmd.arg("contract")
+                .arg("deploy")
+                .arg(&validator.validator_id)
+                .arg("use-file")
+                .arg(path_arg(mock_pool_wasm))
+                .arg("with-init-call")
+                .arg("new")
+                .arg("json-args")
+                .arg(init_args.to_string())
+                .arg("prepaid-gas")
+                .arg("50.0 Tgas")
+                .arg("attached-deposit")
+                .arg("0 NEAR")
+                .arg("network-config")
+                .arg(ctx.common.readonly.network.as_near_network())
+                .arg("sign-with-keychain")
+                .arg("send");
+            run_tx(ctx, cmd)?;
+        }
     }
 
     let existing = view_json(
@@ -476,6 +489,20 @@ fn configure_validator(
         "1 yoctoNEAR",
         ctx.signer.as_str(),
     )
+}
+
+fn mock_pool_has_owner(network: Network, validator_id: &str, owner: &str) -> Result<bool> {
+    match view_json(network, validator_id, "get_owner_id", json!({})) {
+        Ok(stored) if stored.as_str() == Some(owner) => Ok(true),
+        Ok(stored) if stored.as_str().is_some() => {
+            bail!(
+                "mock pool {validator_id} is already deployed with owner {}, expected {owner}",
+                stored
+            )
+        }
+        Ok(stored) => bail!("mock pool {validator_id} returned unexpected owner value: {stored}"),
+        Err(_) => Ok(false),
+    }
 }
 
 fn configure_product(

@@ -36,9 +36,9 @@ Fresh deploy configs include the storage stake fields passed to `new(config)`:
 ```json
 {
   "init": {
-    "per_lock_storage_stake": "0",
-    "per_farm_position_storage_stake": "0",
-    "per_purchase_storage_stake": "0"
+    "per_lock_storage_stake": "10000000000000000000000",
+    "per_farm_position_storage_stake": "5000000000000000000000",
+    "per_purchase_storage_stake": "5000000000000000000000"
   }
 }
 ```
