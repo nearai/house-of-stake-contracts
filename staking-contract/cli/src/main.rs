@@ -308,6 +308,8 @@ fn deploy(args: DeployArgs) -> Result<()> {
     let ctx = MutContext::new(args.common, account_id.clone(), account_id.clone())?;
     guard_mainnet(&ctx)?;
     require_file(&wasm)?;
+    let init_args = matches!(mode, DeployMode::Fresh)
+        .then(|| json!({ "config": init_json(&owner, &config.init) }));
 
     println!(
         "network:        {}",
@@ -319,6 +321,10 @@ fn deploy(args: DeployArgs) -> Result<()> {
     println!("wasm:           {}", wasm.display());
     println!("wasm sha256:    {}", wasm_sha256(&wasm)?);
     println!("test feature:   {test_feature}");
+    if let Some(init_args) = init_args.as_ref() {
+        println!("init method:    new");
+        println!("init args:      {init_args}");
+    }
     if ctx.common.send {
         confirm_sent_operation(
             "deploy",
@@ -337,11 +343,15 @@ fn deploy(args: DeployArgs) -> Result<()> {
 
     match mode {
         DeployMode::Fresh => {
-            let init_args = json!({ "config": init_json(&owner, &config.init) });
             cmd.arg("with-init-call")
                 .arg("new")
                 .arg("json-args")
-                .arg(init_args.to_string())
+                .arg(
+                    init_args
+                        .as_ref()
+                        .expect("fresh deploy init args must be set")
+                        .to_string(),
+                )
                 .arg("prepaid-gas")
                 .arg("100.0 Tgas")
                 .arg("attached-deposit")
