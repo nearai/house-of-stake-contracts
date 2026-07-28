@@ -33,12 +33,14 @@ cp target/near/venear_contract/venear_contract.wasm "$RELEASE_DIR/"
 cp target/near/lockup_contract/lockup_contract.wasm "$RELEASE_DIR/"
 cp target/near/voting_contract/voting_contract.wasm "$RELEASE_DIR/"
 cp target/near/staking_contract/staking_contract.wasm "$RELEASE_DIR/"
+cp target/near/staking_contract/staking_contract.wasm "$RELEASE_DIR/staking.wasm"
 
 release_artifacts=(
     "$RELEASE_DIR/venear_contract.wasm"
     "$RELEASE_DIR/lockup_contract.wasm"
     "$RELEASE_DIR/voting_contract.wasm"
     "$RELEASE_DIR/staking_contract.wasm"
+    "$RELEASE_DIR/staking.wasm"
 )
 
 echo "Built reproducible release WASM artifacts in $RELEASE_DIR:"
