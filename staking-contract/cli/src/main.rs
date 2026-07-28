@@ -221,12 +221,21 @@ struct PriceConfig {
     set_default: bool,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 struct VerifyConfig {
     #[serde(default)]
     test_feature: bool,
     #[serde(default = "default_view_limit")]
     view_limit: u64,
+}
+
+impl Default for VerifyConfig {
+    fn default() -> Self {
+        Self {
+            test_feature: false,
+            view_limit: default_view_limit(),
+        }
+    }
 }
 
 fn main() -> Result<()> {
@@ -245,13 +254,6 @@ fn deploy(args: DeployArgs) -> Result<()> {
         .owner
         .or_else(|| config.staking.owner_account_id.clone())
         .unwrap_or_else(|| account_id.clone());
-    let signer = args
-        .common
-        .readonly
-        .signer
-        .clone()
-        .or_else(|| config.staking.signer_account_id.clone())
-        .unwrap_or_else(|| owner.clone());
     let test_feature = args.test_feature || config.staking.test_feature.unwrap_or(false);
     let wasm = args
         .wasm
@@ -270,7 +272,17 @@ fn deploy(args: DeployArgs) -> Result<()> {
             }
         });
     let mode = deploy_mode(args.fresh, args.code_only)?;
-    let ctx = MutContext::new(args.common, account_id.clone(), signer)?;
+    if test_feature && args.common.readonly.network == Network::Mainnet {
+        bail!("test-feature deployments are not allowed on mainnet");
+    }
+    if let Some(signer) = args.common.readonly.signer.as_deref() {
+        if signer != account_id {
+            bail!(
+                "deploy signer must equal target account {account_id}; near-cli signs contract deploys with the deployed account key"
+            );
+        }
+    }
+    let ctx = MutContext::new(args.common, account_id.clone(), account_id.clone())?;
     guard_mainnet(&ctx)?;
     require_file(&wasm)?;
 
@@ -316,10 +328,12 @@ fn deploy(args: DeployArgs) -> Result<()> {
     run_tx(&ctx, cmd)?;
 
     if ctx.common.send {
-        verify(VerifyArgs {
-            common: ctx.common.readonly,
+        verify_deployment_health(
+            ctx.common.readonly.network,
+            &account_id,
+            Some((&owner, &config.init)),
             test_feature,
-        })?;
+        )?;
     }
     Ok(())
 }
@@ -382,17 +396,20 @@ fn verify(args: VerifyArgs) -> Result<()> {
     println!("network: {}", network.as_near_network());
     println!("account: {account_id}");
 
-    let version = view_json(network, &account_id, "get_version", json!({}))?;
-    println!("version: {version}");
-
-    let contract_config = view_json(network, &account_id, "get_config", json!({}))?;
-    println!(
-        "owner:   {}",
-        contract_config
-            .get("owner_account_id")
-            .and_then(Value::as_str)
-            .unwrap_or("<missing>")
-    );
+    let expected_owner = config
+        .staking
+        .owner_account_id
+        .clone()
+        .unwrap_or_else(|| account_id.clone());
+    verify_deployment_health(
+        network,
+        &account_id,
+        args.common
+            .config
+            .as_ref()
+            .map(|_| (expected_owner.as_str(), &config.init)),
+        test_feature,
+    )?;
 
     if config.validators.is_empty() && config.products.is_empty() {
         let validators = view_json(
@@ -420,14 +437,53 @@ fn verify(args: VerifyArgs) -> Result<()> {
         verify_configured_state(network, &account_id, &config)?;
     }
 
-    let bounds = view_json(network, &account_id, "storage_balance_bounds", json!({}))?;
+    Ok(())
+}
+
+fn verify_deployment_health(
+    network: Network,
+    account_id: &str,
+    expected_init: Option<(&str, &InitConfig)>,
+    test_feature: bool,
+) -> Result<()> {
+    let version = view_json(network, account_id, "get_version", json!({}))?;
+    println!("version: {version}");
+
+    let contract_config = view_json(network, account_id, "get_config", json!({}))?;
+    println!(
+        "owner:   {}",
+        contract_config
+            .get("owner_account_id")
+            .and_then(Value::as_str)
+            .unwrap_or("<missing>")
+    );
+    if let Some((owner, init)) = expected_init {
+        verify_init_config_matches(&contract_config, owner, init)?;
+        println!("init config verified");
+    }
+
+    let bounds = view_json(network, account_id, "storage_balance_bounds", json!({}))?;
     println!("storage balance bounds: {bounds}");
 
     if test_feature {
-        let ts = view_json(network, &account_id, "get_block_timestamp", json!({}))?;
+        let ts = view_json(network, account_id, "get_block_timestamp", json!({}))?;
         println!("test clock: {ts}");
     }
 
+    Ok(())
+}
+
+fn verify_init_config_matches(stored: &Value, owner: &str, init: &InitConfig) -> Result<()> {
+    let expected = init_json(owner, init);
+    let expected_fields = expected
+        .as_object()
+        .ok_or_else(|| anyhow!("internal error: init_json did not produce an object"))?;
+    for (field, expected_value) in expected_fields {
+        let actual = stored.get(field).unwrap_or(&Value::Null);
+        if actual != expected_value {
+            bail!("init config field {field} mismatch: expected {expected_value}, got {actual}");
+        }
+    }
     Ok(())
 }
 
@@ -437,6 +493,17 @@ fn configure_validator(
     validator: &ValidatorConfig,
     mock_pool_wasm: &Path,
 ) -> Result<()> {
+    let existing = view_json(
+        ctx.common.readonly.network,
+        staking_account,
+        "get_validator",
+        json!({ "validator_id": validator.validator_id }),
+    )?;
+    if !existing.is_null() {
+        println!("validator already exists: {}", validator.validator_id);
+        return Ok(());
+    }
+
     if validator.deploy_mock_pool {
         require_file(mock_pool_wasm)?;
         let owner = validator
@@ -467,17 +534,6 @@ fn configure_validator(
                 .arg("send");
             run_tx(ctx, cmd)?;
         }
-    }
-
-    let existing = view_json(
-        ctx.common.readonly.network,
-        staking_account,
-        "get_validator",
-        json!({ "validator_id": validator.validator_id }),
-    )?;
-    if !existing.is_null() {
-        println!("validator already exists: {}", validator.validator_id);
-        return Ok(());
     }
 
     near_tx(
@@ -705,6 +761,7 @@ fn sync_price_by_id(
     let current_description = stored.get("description").and_then(Value::as_str);
     if current_name == Some(price.name.as_str())
         && current_description == Some(price.description.as_str())
+        && metadata_matches(&stored, price.metadata.as_ref())
     {
         println!("price already up to date: {} ({price_id})", price.name);
         return Ok(());
@@ -871,16 +928,20 @@ fn assert_optional_string_field(
 }
 
 fn assert_metadata_field(stored: &Value, expected: Option<&Value>, id: &str) -> Result<()> {
-    let actual = stored.get("metadata");
-    match (actual, expected) {
-        (Some(Value::Null) | None, None) => Ok(()),
-        (Some(actual), Some(expected)) if actual == expected => Ok(()),
-        _ => bail!(
-            "{id} field metadata mismatch: expected {:?}, got {:?}",
-            expected,
-            actual
-        ),
+    if metadata_matches(stored, expected) {
+        return Ok(());
     }
+    bail!(
+        "{id} field metadata mismatch: expected {:?}, got {:?}",
+        expected,
+        stored.get("metadata")
+    )
+}
+
+fn metadata_matches(stored: &Value, expected: Option<&Value>) -> bool {
+    let actual = stored.get("metadata");
+    matches!((actual, expected), (Some(Value::Null) | None, None))
+        || matches!((actual, expected), (Some(actual), Some(expected)) if actual == expected)
 }
 
 fn assert_immutable_price_field(
@@ -954,25 +1015,40 @@ fn find_product(
     staking_account: &str,
     product: &ProductConfig,
 ) -> Result<Option<String>> {
-    let products = view_json(
-        network,
-        staking_account,
-        "get_products",
-        json!({ "from_index": 0, "limit": 200 }),
-    )?;
-    let Some(items) = products.as_array() else {
-        bail!("get_products did not return an array");
-    };
-    Ok(items
-        .iter()
-        .rev()
-        .find(|item| {
-            item.get("validator_id").and_then(Value::as_str) == Some(product.validator_id.as_str())
+    const PAGE_LIMIT: u64 = 200;
+
+    let mut from_index = 0;
+    let mut found = None;
+    loop {
+        let products = view_json(
+            network,
+            staking_account,
+            "get_products",
+            json!({ "from_index": from_index, "limit": PAGE_LIMIT }),
+        )?;
+        let Some(items) = products.as_array() else {
+            bail!("get_products did not return an array");
+        };
+        if items.is_empty() {
+            break;
+        }
+        for item in items {
+            if item.get("validator_id").and_then(Value::as_str)
+                == Some(product.validator_id.as_str())
                 && item.get("name").and_then(Value::as_str) == Some(product.name.as_str())
                 && item.get("status").and_then(Value::as_str) == Some("Active")
-        })
-        .and_then(|item| item.get("product_id").and_then(Value::as_str))
-        .map(ToOwned::to_owned))
+            {
+                if let Some(product_id) = item.get("product_id").and_then(Value::as_str) {
+                    found = Some(product_id.to_string());
+                }
+            }
+        }
+        if items.len() < PAGE_LIMIT as usize {
+            break;
+        }
+        from_index += items.len() as u64;
+    }
+    Ok(found)
 }
 
 fn find_price(
@@ -1289,4 +1365,59 @@ fn default_price_type() -> String {
 
 fn default_view_limit() -> u64 {
     20
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_verify_section_uses_default_view_limit() {
+        let config: BootstrapConfig = serde_json::from_str("{}").unwrap();
+
+        assert!(!config.verify.test_feature);
+        assert_eq!(config.verify.view_limit, default_view_limit());
+    }
+
+    #[test]
+    fn init_config_verification_compares_configured_fields() {
+        let mut init = InitConfig::default();
+        init.guardians = vec!["guardian.testnet".to_string()];
+        init.min_lock_duration_ns = "10".to_string();
+        init.max_lock_duration_ns = "100".to_string();
+        init.epoch_unstake_settle_epochs = 7;
+        init.min_storage_deposit = "11".to_string();
+        init.per_lock_storage_stake = "12".to_string();
+        init.per_farm_position_storage_stake = "13".to_string();
+        init.per_purchase_storage_stake = "14".to_string();
+        init.min_lock_amount = "15".to_string();
+
+        let stored = init_json("owner.testnet", &init);
+        verify_init_config_matches(&stored, "owner.testnet", &init).unwrap();
+
+        let mut mismatched = stored;
+        mismatched["min_lock_amount"] = json!("16");
+        let err = verify_init_config_matches(&mismatched, "owner.testnet", &init).unwrap_err();
+        assert!(err.to_string().contains("min_lock_amount"));
+    }
+
+    #[test]
+    fn metadata_matching_treats_missing_and_null_as_empty_only() {
+        assert!(metadata_matches(&json!({}), None));
+        assert!(metadata_matches(&json!({ "metadata": null }), None));
+
+        let expected = json!({
+            "max_amount": "100",
+            "farm_reward_rate": null
+        });
+        assert!(metadata_matches(
+            &json!({ "metadata": expected.clone() }),
+            Some(&expected)
+        ));
+        assert!(!metadata_matches(
+            &json!({ "metadata": { "max_amount": "101", "farm_reward_rate": null } }),
+            Some(&expected)
+        ));
+        assert!(!metadata_matches(&json!({ "metadata": expected }), None));
+    }
 }
