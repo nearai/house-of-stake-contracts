@@ -326,6 +326,7 @@ fn deploy(args: DeployArgs) -> Result<()> {
 
 fn configure(args: ConfigureArgs) -> Result<()> {
     let config = load_config(args.common.readonly.config.as_deref())?;
+    validate_config(&config)?;
     let account_id = resolve_account(&args.common.readonly, &config)?;
     let signer = args
         .common
@@ -370,6 +371,7 @@ fn configure(args: ConfigureArgs) -> Result<()> {
 
 fn verify(args: VerifyArgs) -> Result<()> {
     let config = load_config(args.common.config.as_deref())?;
+    validate_config(&config)?;
     let account_id = resolve_account(&args.common, &config)?;
     let network = args.common.network;
     let limit = config.verify.view_limit;
@@ -407,6 +409,7 @@ fn verify(args: VerifyArgs) -> Result<()> {
         json!({ "from_index": 0, "limit": limit }),
     )?;
     println!("products:   {}", products.as_array().map_or(0, Vec::len));
+    verify_configured_state(network, &account_id, &config)?;
 
     let bounds = view_json(network, &account_id, "storage_balance_bounds", json!({}))?;
     println!("storage balance bounds: {bounds}");
@@ -692,12 +695,165 @@ fn sync_price_by_id(
             "price_id": price_id,
             "name": price.name,
             "description": price.description,
-            "metadata": null,
+            "metadata": price.metadata,
         }),
         "200.0 Tgas",
         "1 yoctoNEAR",
         signer,
     )
+}
+
+fn verify_configured_state(
+    network: Network,
+    staking_account: &str,
+    config: &BootstrapConfig,
+) -> Result<()> {
+    let mut configured_price_count = 0;
+
+    for validator in &config.validators {
+        let stored = view_json(
+            network,
+            staking_account,
+            "get_validator",
+            json!({ "validator_id": validator.validator_id }),
+        )?;
+        if stored.is_null() {
+            bail!(
+                "configured validator was not found: {}",
+                validator.validator_id
+            );
+        }
+    }
+
+    for product in &config.products {
+        let product_id = if let Some(product_id) = non_empty(product.product_id.as_deref()) {
+            product_id.to_string()
+        } else {
+            find_product(network, staking_account, product)?
+                .ok_or_else(|| anyhow!("configured product was not found: {}", product.name))?
+        };
+        let stored_product = view_json(
+            network,
+            staking_account,
+            "get_product",
+            json!({ "product_id": product_id }),
+        )?;
+        verify_product_matches(&stored_product, &product_id, product)?;
+
+        for price in &product.prices {
+            configured_price_count += 1;
+            let price_id = if let Some(price_id) = non_empty(price.price_id.as_deref()) {
+                price_id.to_string()
+            } else {
+                find_price(network, staking_account, &product_id, price)?
+                    .ok_or_else(|| anyhow!("configured price was not found: {}", price.name))?
+            };
+            let stored_price = view_json(
+                network,
+                staking_account,
+                "get_price",
+                json!({ "price_id": price_id }),
+            )?;
+            verify_price_matches(&stored_price, &price_id, &product_id, price)?;
+
+            if price.set_default
+                && stored_product
+                    .get("default_price_id")
+                    .and_then(Value::as_str)
+                    != Some(price_id.as_str())
+            {
+                bail!(
+                    "configured default price mismatch for product {product_id}: expected {price_id}, got {:?}",
+                    stored_product.get("default_price_id")
+                );
+            }
+        }
+    }
+
+    if !config.validators.is_empty() || !config.products.is_empty() || configured_price_count > 0 {
+        println!(
+            "configured validators verified: {}",
+            config.validators.len()
+        );
+        println!("configured products verified:   {}", config.products.len());
+        println!("configured prices verified:     {configured_price_count}");
+    }
+
+    Ok(())
+}
+
+fn verify_product_matches(stored: &Value, product_id: &str, product: &ProductConfig) -> Result<()> {
+    if stored.is_null() {
+        bail!("configured product_id was not found: {product_id}");
+    }
+    assert_string_field(stored, "validator_id", &product.validator_id, product_id)?;
+    assert_string_field(stored, "name", &product.name, product_id)?;
+    assert_string_field(stored, "description", &product.description, product_id)?;
+    Ok(())
+}
+
+fn verify_price_matches(
+    stored: &Value,
+    price_id: &str,
+    product_id: &str,
+    price: &PriceConfig,
+) -> Result<()> {
+    if stored.is_null() {
+        bail!("configured price_id was not found: {price_id}");
+    }
+    assert_string_field(stored, "product_id", product_id, price_id)?;
+    assert_string_field(stored, "name", &price.name, price_id)?;
+    assert_string_field(stored, "description", &price.description, price_id)?;
+    assert_string_field(stored, "amount", &price.amount, price_id)?;
+    assert_string_field(stored, "price_type", &price.price_type, price_id)?;
+    assert_optional_string_field(
+        stored,
+        "billing_period",
+        price.billing_period.as_deref(),
+        price_id,
+    )?;
+    assert_string_field(
+        stored,
+        "lock_factor_near_months",
+        &price.lock_factor_near_months,
+        price_id,
+    )?;
+    assert_metadata_field(stored, price.metadata.as_ref(), price_id)?;
+    Ok(())
+}
+
+fn assert_string_field(stored: &Value, field: &str, expected: &str, id: &str) -> Result<()> {
+    let actual = stored.get(field).and_then(Value::as_str);
+    if actual != Some(expected) {
+        bail!("{id} field {field} mismatch: expected {expected:?}, got {actual:?}");
+    }
+    Ok(())
+}
+
+fn assert_optional_string_field(
+    stored: &Value,
+    field: &str,
+    expected: Option<&str>,
+    id: &str,
+) -> Result<()> {
+    let actual = stored.get(field).and_then(Value::as_str);
+    if actual != expected {
+        bail!("{id} field {field} mismatch: expected {expected:?}, got {actual:?}");
+    }
+    Ok(())
+}
+
+fn assert_metadata_field(stored: &Value, expected: Option<&Value>, id: &str) -> Result<()> {
+    let actual = stored.get("metadata");
+    match (actual, expected) {
+        (Some(Value::Null) | None, None) => Ok(()),
+        (Some(actual), Some(expected)) if actual == expected => Ok(()),
+        _ => bail!(
+            "{id} field metadata mismatch: expected {:?}, got {:?}",
+            expected,
+            actual
+        ),
+    }
 }
 
 fn assert_immutable_price_field(
@@ -1004,6 +1160,23 @@ fn load_config(path: Option<&Path>) -> Result<BootstrapConfig> {
     let raw = fs::read_to_string(path)
         .with_context(|| format!("failed to read config {}", path.display()))?;
     serde_json::from_str(&raw).with_context(|| format!("failed to parse config {}", path.display()))
+}
+
+fn validate_config(config: &BootstrapConfig) -> Result<()> {
+    for product in &config.products {
+        let default_count = product
+            .prices
+            .iter()
+            .filter(|price| price.set_default)
+            .count();
+        if default_count > 1 {
+            bail!(
+                "product {} config has {default_count} default prices; mark at most one price with set_default",
+                product.name
+            );
+        }
+    }
+    Ok(())
 }
 
 fn resolve_account(args: &ReadOnlyCommonArgs, config: &BootstrapConfig) -> Result<String> {
