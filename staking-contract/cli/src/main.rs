@@ -189,6 +189,8 @@ struct ValidatorConfig {
 
 #[derive(Debug, Deserialize)]
 struct ProductConfig {
+    #[serde(default)]
+    product_id: Option<String>,
     validator_id: String,
     #[serde(default)]
     owner_account_id: Option<String>,
@@ -201,6 +203,8 @@ struct ProductConfig {
 
 #[derive(Debug, Deserialize)]
 struct PriceConfig {
+    #[serde(default)]
+    price_id: Option<String>,
     name: String,
     #[serde(default)]
     description: String,
@@ -477,6 +481,11 @@ fn configure_product(
     product: &ProductConfig,
     cache: &mut HashMap<(String, String), String>,
 ) -> Result<String> {
+    if let Some(product_id) = product.product_id.as_deref() {
+        sync_product_by_id(ctx, staking_account, product_id, product)?;
+        return Ok(product_id.to_string());
+    }
+
     let key = (product.validator_id.clone(), product.name.clone());
     if let Some(product_id) = cache.get(&key) {
         return Ok(product_id.clone());
@@ -518,6 +527,56 @@ fn configure_product(
     Ok(product_id)
 }
 
+fn sync_product_by_id(
+    ctx: &MutContext,
+    staking_account: &str,
+    product_id: &str,
+    product: &ProductConfig,
+) -> Result<()> {
+    let stored = view_json(
+        ctx.common.readonly.network,
+        staking_account,
+        "get_product",
+        json!({ "product_id": product_id }),
+    )?;
+    if stored.is_null() {
+        bail!("configured product_id was not found: {product_id}");
+    }
+    if stored.get("validator_id").and_then(Value::as_str) != Some(product.validator_id.as_str()) {
+        bail!("configured product_id {product_id} belongs to a different validator");
+    }
+
+    let current_name = stored.get("name").and_then(Value::as_str);
+    let current_description = stored.get("description").and_then(Value::as_str);
+    if current_name == Some(product.name.as_str())
+        && current_description == Some(product.description.as_str())
+    {
+        println!(
+            "product already up to date: {} ({product_id})",
+            product.name
+        );
+        return Ok(());
+    }
+
+    let signer = product
+        .owner_account_id
+        .as_deref()
+        .unwrap_or(ctx.signer.as_str());
+    near_tx(
+        ctx,
+        staking_account,
+        "edit_product",
+        json!({
+            "product_id": product_id,
+            "name": product.name,
+            "description": product.description,
+        }),
+        "200.0 Tgas",
+        "1 yoctoNEAR",
+        signer,
+    )
+}
+
 fn configure_price(
     ctx: &MutContext,
     staking_account: &str,
@@ -525,6 +584,11 @@ fn configure_price(
     product: &ProductConfig,
     price: &PriceConfig,
 ) -> Result<String> {
+    if let Some(price_id) = price.price_id.as_deref() {
+        sync_price_by_id(ctx, staking_account, product_id, price_id, product, price)?;
+        return Ok(price_id.to_string());
+    }
+
     if let Some(price_id) = find_price(
         ctx.common.readonly.network,
         staking_account,
@@ -569,6 +633,101 @@ fn configure_price(
         price,
     )?
     .ok_or_else(|| anyhow!("created price was not found by name: {}", price.name))
+}
+
+fn sync_price_by_id(
+    ctx: &MutContext,
+    staking_account: &str,
+    product_id: &str,
+    price_id: &str,
+    product: &ProductConfig,
+    price: &PriceConfig,
+) -> Result<()> {
+    let stored = view_json(
+        ctx.common.readonly.network,
+        staking_account,
+        "get_price",
+        json!({ "price_id": price_id }),
+    )?;
+    if stored.is_null() {
+        bail!("configured price_id was not found: {price_id}");
+    }
+    if stored.get("product_id").and_then(Value::as_str) != Some(product_id) {
+        bail!("configured price_id {price_id} belongs to a different product");
+    }
+
+    assert_immutable_price_field(&stored, "amount", &price.amount, price_id)?;
+    assert_immutable_price_field(&stored, "price_type", &price.price_type, price_id)?;
+    assert_immutable_optional_price_field(
+        &stored,
+        "billing_period",
+        price.billing_period.as_deref(),
+        price_id,
+    )?;
+    assert_immutable_price_field(
+        &stored,
+        "lock_factor_near_months",
+        &price.lock_factor_near_months,
+        price_id,
+    )?;
+
+    let current_name = stored.get("name").and_then(Value::as_str);
+    let current_description = stored.get("description").and_then(Value::as_str);
+    if current_name == Some(price.name.as_str())
+        && current_description == Some(price.description.as_str())
+    {
+        println!("price already up to date: {} ({price_id})", price.name);
+        return Ok(());
+    }
+
+    let signer = product
+        .owner_account_id
+        .as_deref()
+        .unwrap_or(ctx.signer.as_str());
+    near_tx(
+        ctx,
+        staking_account,
+        "edit_price",
+        json!({
+            "price_id": price_id,
+            "name": price.name,
+            "description": price.description,
+            "metadata": null,
+        }),
+        "200.0 Tgas",
+        "1 yoctoNEAR",
+        signer,
+    )
+}
+
+fn assert_immutable_price_field(
+    stored: &Value,
+    field: &str,
+    expected: &str,
+    price_id: &str,
+) -> Result<()> {
+    let actual = stored.get(field).and_then(Value::as_str);
+    if actual != Some(expected) {
+        bail!(
+            "configured price_id {price_id} cannot update immutable field {field}: on-chain={actual:?}, config={expected:?}"
+        );
+    }
+    Ok(())
+}
+
+fn assert_immutable_optional_price_field(
+    stored: &Value,
+    field: &str,
+    expected: Option<&str>,
+    price_id: &str,
+) -> Result<()> {
+    let actual = stored.get(field).and_then(Value::as_str);
+    if actual != expected {
+        bail!(
+            "configured price_id {price_id} cannot update immutable field {field}: on-chain={actual:?}, config={expected:?}"
+        );
+    }
+    Ok(())
 }
 
 fn set_default_price(

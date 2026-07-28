@@ -110,14 +110,16 @@
       ]
     },
     {
+      "product_id": "prod_37o5G0rr2wMJ5C",
       "validator_id": "mock-pool-0.hos-e2e-0601144939.testnet",
       "owner_account_id": "hos-e2e-0601144939.testnet",
-      "name": "NEAR AI Credits",
+      "name": "NEAR AI Agent One-Off Credits",
       "description": "One-off NEAR AI credits for chat-api payments",
       "prices": [
         {
-          "name": "NEAR AI Credit",
-          "description": "One NEAR AI credit",
+          "price_id": "price_z2EbTifr7Nyqwt6v5kFqSiUb",
+          "name": "One-Off Credits at NEAR Price $2.5",
+          "description": "One-Off NEAR AI credit",
           "amount": "400000000000000000000000",
           "price_type": "OneOff",
           "billing_period": null,
