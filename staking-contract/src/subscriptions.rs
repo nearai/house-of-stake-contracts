@@ -44,6 +44,10 @@ pub(crate) fn billing_anchor_day_from_timestamp(ts: u64) -> u8 {
     day as u8
 }
 
+pub(crate) fn check_recurring_subscription_price_lock(price: &Price, amount: u128) {
+    check_near_price_lock(price, amount, AVG_MONTH_NS).unwrap_or_else(|e| env::panic_str(e));
+}
+
 fn civil_from_days(days_since_unix_epoch: i64) -> (i64, u32, u32) {
     let z = days_since_unix_epoch + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
@@ -89,7 +93,6 @@ struct SubscriptionUpdateInputs {
     target_price: Price,
     target_product: Product,
     lock: Lock,
-    now_ns: u64,
 }
 
 struct SubscriptionUpdateDecision {
@@ -712,7 +715,7 @@ impl Contract {
         sub.pending_update = None;
     }
 
-    fn projected_subscription_window_from(
+    pub(crate) fn projected_subscription_window_from(
         &self,
         anchor_day: u8,
         mut start: u64,
@@ -912,7 +915,6 @@ impl Contract {
             target_price,
             target_product,
             lock,
-            now_ns: now,
         }
     }
 
@@ -931,8 +933,6 @@ impl Contract {
             .0
             .cmp(&inputs.current_price.amount.0);
         let stake_direction = target_amount.0.cmp(&current_amount);
-        let rem_ns = u128::from(inputs.sub.end_ns.0.saturating_sub(inputs.now_ns));
-
         // Plan and stake amount can move independently: e.g. upgrade the plan now
         // while scheduling a lower stake amount for the next billing period.
         let immediate_stake_increase = (stake_direction == std::cmp::Ordering::Greater)
@@ -946,10 +946,9 @@ impl Contract {
             match plan_direction {
                 std::cmp::Ordering::Greater => {
                     if pending_stake_decrease_target.is_some() {
-                        self.price_supports_amount_for_duration(
+                        self.price_supports_recurring_subscription_amount(
                             &inputs.target_price,
                             current_amount,
-                            rem_ns,
                         )
                     } else {
                         true
@@ -957,10 +956,9 @@ impl Contract {
                 }
                 std::cmp::Ordering::Equal => {
                     if pending_stake_decrease_target.is_some() {
-                        self.price_supports_amount_for_duration(
+                        self.price_supports_recurring_subscription_amount(
                             &inputs.target_price,
                             current_amount,
-                            rem_ns,
                         )
                     } else {
                         true
@@ -982,13 +980,11 @@ impl Contract {
             } else {
                 current_amount
             };
-            check_near_price_lock(immediate_price, immediate_amount, rem_ns)
-                .unwrap_or_else(|e| env::panic_str(e));
+            check_recurring_subscription_price_lock(immediate_price, immediate_amount);
         }
 
         if pending_plan_change || pending_stake_decrease_target.is_some() {
-            check_near_price_lock(&inputs.target_price, target_amount.0, AVG_MONTH_NS)
-                .unwrap_or_else(|e| env::panic_str(e));
+            check_recurring_subscription_price_lock(&inputs.target_price, target_amount.0);
         }
 
         SubscriptionUpdateDecision {
@@ -1001,12 +997,7 @@ impl Contract {
         }
     }
 
-    fn price_supports_amount_for_duration(
-        &self,
-        price: &Price,
-        amount: u128,
-        duration_ns: u128,
-    ) -> bool {
+    fn price_supports_recurring_subscription_amount(&self, price: &Price, amount: u128) -> bool {
         if amount < price.amount.0 {
             return false;
         }
@@ -1015,7 +1006,7 @@ impl Contract {
                 return false;
             }
         }
-        check_near_price_lock(price, amount, duration_ns).is_ok()
+        check_near_price_lock(price, amount, AVG_MONTH_NS).is_ok()
     }
 
     fn subscription_update_outcome(

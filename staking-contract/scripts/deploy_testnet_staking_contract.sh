@@ -21,6 +21,7 @@
 #   OWNER_ACCOUNT_ID=<owner.testnet>      # default: staking account
 #   GUARDIANS_JSON='["guardian.testnet"]' # default: []
 #   DRY_RUN=1                             # print commands without sending txs
+#   EPOCH_UNSTAKE_SETTLE_EPOCHS=4         # default: 4 for real/mixed pools, 1 for mock-only
 #
 # Optional account creation for fresh testnet subaccounts:
 #   CREATE_ACCOUNT=1 PARENT_ACCOUNT_ID=<parent.testnet> FUND_STAKING_NEAR='8 NEAR' ...
@@ -107,7 +108,7 @@ fi
 
 : "${MIN_LOCK_DURATION_NS:=1}"
 : "${MAX_LOCK_DURATION_NS:=63072000000000000}"
-: "${EPOCH_UNSTAKE_SETTLE_EPOCHS:=1}"
+: "${EPOCH_UNSTAKE_SETTLE_EPOCHS:=}"
 : "${MIN_STORAGE_DEPOSIT_YOCTO:=10000000000000000000000}"
 : "${PER_LOCK_STORAGE_STAKE_YOCTO:=0}"
 : "${PER_FARM_POSITION_STORAGE_STAKE_YOCTO:=0}"
@@ -163,6 +164,13 @@ fi
 if ! printf '%s' "$CATALOG_JSON" | jq -e 'type == "array"' >/dev/null; then
   echo "CATALOG_JSON must be a JSON array, got: $CATALOG_JSON" >&2
   exit 1
+fi
+if [[ -z "$EPOCH_UNSTAKE_SETTLE_EPOCHS" ]]; then
+  if printf '%s' "$VALIDATORS_JSON" | jq -e 'length > 0 and all(.[]; .deploy_mock_pool == true)' >/dev/null; then
+    EPOCH_UNSTAKE_SETTLE_EPOCHS=1
+  else
+    EPOCH_UNSTAKE_SETTLE_EPOCHS=4
+  fi
 fi
 
 build_agent_subscription_catalog_json() {

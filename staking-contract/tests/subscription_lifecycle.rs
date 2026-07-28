@@ -20,6 +20,8 @@ use staking_contract::utils::AVG_MONTH_NS;
 const BASE_TS: u64 = 1_700_000_000_000_000_000;
 const JAN_31_2026_10_UTC_NS: u64 = 1_769_853_600_000_000_000;
 const FEB_28_2026_10_UTC_NS: u64 = 1_772_272_800_000_000_000;
+const MAR_1_2026_10_UTC_NS: u64 = 1_772_359_200_000_000_000;
+const MAR_31_2026_10_UTC_NS: u64 = 1_774_951_200_000_000_000;
 
 #[test]
 fn recurring_lock_uses_calendar_month_window_and_utc_anchor() {
@@ -52,6 +54,79 @@ fn recurring_lock_uses_calendar_month_window_and_utc_anchor() {
         } => {
             assert_eq!(period_start_ns, sub.start_ns);
             assert_eq!(period_end_ns, sub.end_ns);
+        }
+        OrderRef::ProductPurchase { .. } => panic!("expected subscription order"),
+    }
+}
+
+#[test]
+fn recurring_lock_uses_normalized_month_validation_for_short_month() {
+    let mut c = deploy();
+    common::add_validator_allowlisted(&mut c);
+    let (product_id, price_id) = add_subscription_product(
+        &mut c,
+        "Sub product",
+        NearToken::from_near(1).as_yoctonear(),
+    );
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(
+        acct(BUYER),
+        NearToken::from_near(1),
+        JAN_31_2026_10_UTC_NS
+    ));
+    let _lock_id = unwrap_sync_lock_id(c.lock(Some(price_id), None, None));
+
+    let sub = c
+        .get_subscription_for_product(acct(BUYER), product_id)
+        .expect("subscription");
+    assert_eq!(sub.start_ns.0, JAN_31_2026_10_UTC_NS);
+    assert_eq!(sub.end_ns.0, FEB_28_2026_10_UTC_NS);
+    assert_eq!(sub.anchor_day, 31);
+}
+
+#[test]
+fn late_anchor_31_renewal_uses_stored_billing_boundaries() {
+    let mut c = deploy();
+    common::add_validator_allowlisted(&mut c);
+    let (product_id, price_id) = add_subscription_product(
+        &mut c,
+        "Sub product",
+        NearToken::from_near(1).as_yoctonear(),
+    );
+    register_buyer(&mut c);
+
+    testing_env!(ctx_ts(
+        acct(BUYER),
+        NearToken::from_near(1),
+        JAN_31_2026_10_UTC_NS
+    ));
+    let _first_lock = unwrap_sync_lock_id(c.lock(Some(price_id.clone()), None, None));
+
+    testing_env!(ctx_ts(
+        acct(BUYER),
+        NearToken::from_near(1),
+        MAR_1_2026_10_UTC_NS
+    ));
+    let second_lock_id = unwrap_sync_lock_id(c.lock(Some(price_id), None, None));
+
+    let sub = c
+        .get_subscription_for_product(acct(BUYER), product_id)
+        .expect("subscription");
+    assert_eq!(sub.start_ns.0, FEB_28_2026_10_UTC_NS);
+    assert_eq!(sub.end_ns.0, MAR_31_2026_10_UTC_NS);
+
+    let lock = c.get_lock(second_lock_id).expect("lock");
+    assert_eq!(lock.start_ns.0, MAR_1_2026_10_UTC_NS);
+    assert_eq!(lock.end_ns.0, MAR_31_2026_10_UTC_NS);
+    match lock.order {
+        OrderRef::Subscription {
+            period_start_ns,
+            period_end_ns,
+            ..
+        } => {
+            assert_eq!(period_start_ns.0, FEB_28_2026_10_UTC_NS);
+            assert_eq!(period_end_ns.0, MAR_31_2026_10_UTC_NS);
         }
         OrderRef::ProductPurchase { .. } => panic!("expected subscription order"),
     }

@@ -216,11 +216,15 @@ impl Contract {
                 subscription_now = now;
                 (sub_new, sid_new, true)
             } else {
-                // Renewal window: extend billing period for the current effective tier.
-                let start = sub.end_ns.0.max(subscription_now);
-                let end = crate::subscriptions::add_months_stripe_style(sub.anchor_day, 1, start);
-                sub.start_ns = U64(start);
-                sub.end_ns = U64(end);
+                // Renewal window: choose the active calendar period projected from stored
+                // billing boundaries, even if the renewal transaction is late.
+                let (start, end) = self.projected_subscription_window_from(
+                    sub.anchor_day,
+                    sub.start_ns.0,
+                    subscription_now,
+                );
+                sub.start_ns = start;
+                sub.end_ns = end;
                 sub.status = SubscriptionStatus::Active;
                 (sub, sid, false)
             }
@@ -251,8 +255,10 @@ impl Contract {
         let duration_ns = u128::from(subscription.end_ns.0.saturating_sub(subscription_now));
         require!(duration_ns > 0, "Lock duration must be positive");
 
-        check_near_price_lock(&price, locked.as_yoctonear(), duration_ns)
-            .unwrap_or_else(|e| env::panic_str(e));
+        crate::subscriptions::check_recurring_subscription_price_lock(
+            &price,
+            locked.as_yoctonear(),
+        );
 
         let order = OrderRef::Subscription {
             subscription_id: sub_id.clone(),
