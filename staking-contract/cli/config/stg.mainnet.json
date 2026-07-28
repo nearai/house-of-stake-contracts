@@ -23,7 +23,6 @@
   "products": [
     {
       "validator_id": "nearai.pool.near",
-      "owner_account_id": "stake-dao.near",
       "name": "NEAR AI Agents",
       "description": "Monthly NEAR AI Agents subscription tiers",
       "prices": [
@@ -70,7 +69,6 @@
     },
     {
       "validator_id": "nearai.pool.near",
-      "owner_account_id": "stake-dao.near",
       "name": "NEAR AI Agent One-Off Credits",
       "description": "One-off NEAR AI agents credits",
       "prices": [
@@ -88,13 +86,12 @@
     },
     {
       "validator_id": "nearai.pool.near",
-      "owner_account_id": "stake-dao.near",
       "name": "NEAR AI Cloud Credits",
       "description": "Stake NEAR to earn NEAR AI Cloud credits",
       "prices": [
         {
-          "name": "NEAR AI Cloud Staking Farm",
-          "description": "Stake NEAR in the NEAR AI Cloud staking farm",
+          "name": "Staking Farm",
+          "description": "$100 NEAR x 1 month = $1 credit",
           "amount": "1000000000000000000000000",
           "price_type": "Farm",
           "billing_period": null,
