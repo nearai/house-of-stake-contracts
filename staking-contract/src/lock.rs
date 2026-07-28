@@ -321,6 +321,9 @@ impl Contract {
 
         if let Some(target_amount) = pending.target_amount {
             self.project_scheduled_stake_decrease_lock(&mut lock, target_amount);
+            if lock.status != LockStatus::Active {
+                return lock;
+            }
         }
 
         let (period_start_ns, period_end_ns) =

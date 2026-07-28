@@ -1113,7 +1113,7 @@ fn get_lock_effective_projects_full_share_exit_status() {
     register_buyer(&mut c);
 
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(50), BASE_TS));
-    let lock_id = unwrap_sync_lock_id(c.lock(Some(price_high), None, None));
+    let lock_id = unwrap_sync_lock_id(c.lock(Some(price_high.clone()), None, None));
 
     let sub = c
         .get_subscription_for_product(acct(BUYER), product_id)
@@ -1153,6 +1153,21 @@ fn get_lock_effective_projects_full_share_exit_status() {
     assert_eq!(effective_lock.amount_near, NearToken::from_near(30));
     assert_eq!(effective_lock.shares.0, 0);
     assert_eq!(effective_lock.status, LockStatus::UnlockRequested);
+    assert_eq!(effective_lock.start_ns, raw_lock.start_ns);
+    assert_eq!(effective_lock.end_ns, raw_lock.end_ns);
+    match effective_lock.order {
+        OrderRef::Subscription {
+            price_id,
+            period_start_ns,
+            period_end_ns,
+            ..
+        } => {
+            assert_eq!(price_id, price_high);
+            assert_eq!(period_start_ns, raw_lock.start_ns);
+            assert_eq!(period_end_ns, raw_lock.end_ns);
+        }
+        OrderRef::ProductPurchase { .. } => panic!("expected subscription order"),
+    }
 }
 
 #[test]
