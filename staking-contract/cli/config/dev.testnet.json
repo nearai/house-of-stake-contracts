@@ -3,8 +3,6 @@
     "account_id": "hos-e2e-0601144939.testnet",
     "owner_account_id": "hos-e2e-0601144939.testnet",
     "signer_account_id": "hos-e2e-0601144939.testnet",
-    "wasm": "res/local/staking_contract.wasm",
-    "test_wasm": "res/local/staking_contract_test.wasm",
     "test_feature": true
   },
   "init": {
@@ -21,8 +19,7 @@
   "validators": [
     {
       "validator_id": "mock-pool-0.hos-e2e-0601144939.testnet",
-      "owner_account_id": "hos-e2e-0601144939.testnet",
-      "deploy_mock_pool": false
+      "owner_account_id": "hos-e2e-0601144939.testnet"
     }
   ],
   "products": [
@@ -151,9 +148,5 @@
         }
       ]
     }
-  ],
-  "verify": {
-    "test_feature": true,
-    "view_limit": 20
-  }
+  ]
 }

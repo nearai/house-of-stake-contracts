@@ -2,10 +2,7 @@
   "staking": {
     "account_id": "stake-dao.testnet",
     "owner_account_id": "stake-dao.testnet",
-    "signer_account_id": "stake-dao.testnet",
-    "wasm": "res/local/staking_contract.wasm",
-    "test_wasm": "res/local/staking_contract_test.wasm",
-    "test_feature": false
+    "signer_account_id": "stake-dao.testnet"
   },
   "init": {
     "guardians": [],
@@ -20,13 +17,8 @@
   },
   "validators": [
     {
-      "validator_id": "aurora.pool.f863973.m0",
-      "deploy_mock_pool": false
+      "validator_id": "aurora.pool.f863973.m0"
     }
   ],
-  "products": [],
-  "verify": {
-    "test_feature": false,
-    "view_limit": 20
-  }
+  "products": []
 }

@@ -2,10 +2,7 @@
   "staking": {
     "account_id": "stake-dao.near",
     "owner_account_id": "stake-dao.near",
-    "signer_account_id": "stake-dao.near",
-    "wasm": "res/local/staking_contract.wasm",
-    "test_wasm": "res/local/staking_contract_test.wasm",
-    "test_feature": false
+    "signer_account_id": "stake-dao.near"
   },
   "init": {
     "guardians": [],
@@ -20,13 +17,8 @@
   },
   "validators": [
     {
-      "validator_id": "nearai.pool.near",
-      "deploy_mock_pool": false
+      "validator_id": "nearai.pool.near"
     }
   ],
-  "products": [],
-  "verify": {
-    "test_feature": false,
-    "view_limit": 20
-  }
+  "products": []
 }
