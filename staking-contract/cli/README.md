@@ -31,6 +31,18 @@ Environment config files live under `staking-contract/cli/config/`:
 - `stg.mainnet.json` targets `stake-dao.near`
 - `prod.mainnet.json` targets `stake.dao`
 
+Fresh deploy configs include the storage stake fields passed to `new(config)`:
+
+```json
+{
+  "init": {
+    "per_lock_storage_stake": "0",
+    "per_farm_position_storage_stake": "0",
+    "per_purchase_storage_stake": "0"
+  }
+}
+```
+
 Code-only deploy to the shared testnet account without running `migrate_state()`:
 
 ```bash
