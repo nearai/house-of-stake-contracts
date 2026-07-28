@@ -154,6 +154,24 @@ pub fn testing_env_catalog_callback_at(pool_owner: AccountId, block_timestamp_ns
     );
 }
 
+pub fn testing_env_transfer_callback_success() {
+    testing_env_transfer_callback(PromiseResult::Successful(Vec::new()));
+}
+
+pub fn testing_env_transfer_callback_failure() {
+    testing_env_transfer_callback(PromiseResult::Failed);
+}
+
+fn testing_env_transfer_callback(result: PromiseResult) {
+    testing_env!(
+        ctx_catalog_callback(),
+        test_vm_config(),
+        RuntimeFeesConfig::test(),
+        HashMap::default(),
+        vec![result],
+    );
+}
+
 pub fn deploy_with_config(config: Config) -> Contract {
     Contract::new(config)
 }

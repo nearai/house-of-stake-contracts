@@ -6,7 +6,9 @@ use crate::*;
 use near_sdk::ext_contract;
 use near_sdk::json_types::U64;
 use near_sdk::store::Vector;
-use near_sdk::{AccountId, NearToken, Promise, assert_one_yocto, env, near, require};
+use near_sdk::{
+    AccountId, NearToken, Promise, assert_one_yocto, env, is_promise_success, near, require,
+};
 
 fn next_unique_purchase_id(contract: &mut Contract) -> PurchaseId {
     crate::ids::next_unique_generated_id(
@@ -25,6 +27,12 @@ pub trait ExtSelfPayments {
         validator_id: ValidatorId,
         expected_caller: AccountId,
     ) -> Promise;
+    fn on_revenue_withdraw_transfer_done(
+        &mut self,
+        validator_id: ValidatorId,
+        pool_owner: AccountId,
+        balance: NearToken,
+    ) -> bool;
 }
 
 #[near]
@@ -139,8 +147,39 @@ impl Contract {
         self.revenue_by_validator
             .insert(validator_id.clone(), NearToken::from_yoctonear(0));
 
-        crate::events::log_revenue_withdraw(&validator_id, &pool_owner, balance.as_yoctonear());
-        Promise::new(pool_owner).transfer(balance)
+        Promise::new(pool_owner.clone()).transfer(balance).then(
+            ext_self_payments::ext(env::current_account_id())
+                .with_static_gas(callbacks::ON_REVENUE_WITHDRAW_TRANSFER_DONE)
+                .on_revenue_withdraw_transfer_done(validator_id, pool_owner, balance),
+        )
+    }
+
+    #[private]
+    pub fn on_revenue_withdraw_transfer_done(
+        &mut self,
+        validator_id: ValidatorId,
+        pool_owner: AccountId,
+        balance: NearToken,
+    ) -> bool {
+        if is_promise_success() {
+            crate::events::log_revenue_withdraw(&validator_id, &pool_owner, balance.as_yoctonear());
+            return true;
+        }
+
+        let current = self
+            .revenue_by_validator
+            .get(&validator_id)
+            .copied()
+            .unwrap_or_else(|| NearToken::from_yoctonear(0));
+        self.revenue_by_validator.insert(
+            validator_id,
+            NearToken::from_yoctonear(
+                current
+                    .as_yoctonear()
+                    .saturating_add(balance.as_yoctonear()),
+            ),
+        );
+        false
     }
 
     pub fn get_purchase(&self, purchase_id: PurchaseId) -> Option<Purchase> {

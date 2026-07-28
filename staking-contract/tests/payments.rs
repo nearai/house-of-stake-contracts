@@ -6,6 +6,7 @@ use common::{
     BUYER, CATALOG_MANAGER, OWNER, POOL, VALIDATOR_OWNER_ACCOUNT, acct, base_config, ctx, deploy,
     register_buyer, set_default_price_for_product, setup_catalog_near_oneoff,
     setup_catalog_near_subscription, testing_env_catalog_callback,
+    testing_env_transfer_callback_failure,
 };
 use near_sdk::json_types::{U64, U128};
 use near_sdk::{NearToken, testing_env};
@@ -209,7 +210,7 @@ fn validator_owner_can_withdraw_full_revenue() {
     c.pay(Some(price_id), None, U64(5));
 
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
-    c.withdraw_revenue_after_get_owner(
+    let _ = c.withdraw_revenue_after_get_owner(
         acct(VALIDATOR_OWNER_ACCOUNT),
         acct(POOL),
         acct(VALIDATOR_OWNER_ACCOUNT),
@@ -220,6 +221,39 @@ fn validator_owner_can_withdraw_full_revenue() {
         NearToken::from_yoctonear(0)
     );
     assert_eq!(c.get_purchases(0, 10).len(), 1);
+}
+
+#[test]
+fn failed_revenue_transfer_restores_validator_revenue() {
+    let mut c = deploy();
+    let (_product_id, price_id) = setup_catalog_near_oneoff(&mut c);
+    register_buyer(&mut c);
+
+    testing_env!(ctx(acct(BUYER), NearToken::from_yoctonear(5)));
+    c.pay(Some(price_id), None, U64(5));
+
+    testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
+    let _ = c.withdraw_revenue_after_get_owner(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        acct(POOL),
+        acct(VALIDATOR_OWNER_ACCOUNT),
+    );
+    assert_eq!(
+        c.get_revenue_balance_for_validator(acct(POOL)),
+        NearToken::from_yoctonear(0)
+    );
+
+    testing_env_transfer_callback_failure();
+    assert!(!c.on_revenue_withdraw_transfer_done(
+        acct(POOL),
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        NearToken::from_yoctonear(5),
+    ));
+
+    assert_eq!(
+        c.get_revenue_balance_for_validator(acct(POOL)),
+        NearToken::from_yoctonear(5)
+    );
 }
 
 #[test]
@@ -241,7 +275,7 @@ fn revenue_withdraw_rejects_paused_contract() {
         acct(VALIDATOR_OWNER_ACCOUNT),
         NearToken::from_yoctonear(1)
     ));
-    c.withdraw_revenue(acct(POOL));
+    let _ = c.withdraw_revenue(acct(POOL));
 }
 
 #[test]
@@ -255,7 +289,7 @@ fn revenue_withdraw_rejects_non_owner() {
     c.pay(Some(price_id), None, U64(5));
 
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
-    c.withdraw_revenue_after_get_owner(
+    let _ = c.withdraw_revenue_after_get_owner(
         acct(VALIDATOR_OWNER_ACCOUNT),
         acct(POOL),
         acct("not-owner.near"),
@@ -296,7 +330,7 @@ fn revenue_withdraw_rejects_zero_balance() {
     register_buyer(&mut c);
 
     testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
-    c.withdraw_revenue_after_get_owner(
+    let _ = c.withdraw_revenue_after_get_owner(
         acct(VALIDATOR_OWNER_ACCOUNT),
         acct(POOL),
         acct(VALIDATOR_OWNER_ACCOUNT),

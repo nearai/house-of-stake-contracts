@@ -2,7 +2,10 @@
 
 mod common;
 
-use common::{BUYER, POOL, acct, ctx, deploy, one_yocto, register_buyer};
+use common::{
+    BUYER, POOL, acct, ctx, deploy, one_yocto, register_buyer,
+    testing_env_transfer_callback_failure,
+};
 use near_sdk::{NearToken, testing_env};
 use staking_contract::{PendingUnstakeTranche, TransactionStatus};
 
@@ -341,4 +344,80 @@ fn withdraw_removes_all_claimable_tranches_and_pays_sum() {
     assert_eq!(remaining.len(), 1);
     assert_eq!(remaining[0].amount, NearToken::from_near(3));
     assert_eq!(remaining[0].available_epoch_height, 999);
+}
+
+#[test]
+fn failed_withdraw_transfer_restores_claim_bucket_and_tranches() {
+    let mut c = deploy();
+    common::add_validator_allowlisted(&mut c);
+    register_buyer(&mut c);
+
+    let pool = acct(POOL);
+    let mut validator = c
+        .get_validator(pool.clone())
+        .expect("validator row")
+        .clone();
+    validator.pending_to_claim = NearToken::from_near(20);
+    c.validators.insert(pool.clone(), validator.into());
+
+    let claimed_tranches = vec![
+        PendingUnstakeTranche {
+            amount: NearToken::from_near(10),
+            available_epoch_height: 0,
+        },
+        PendingUnstakeTranche {
+            amount: NearToken::from_near(5),
+            available_epoch_height: 100,
+        },
+    ];
+    let future_tranche = PendingUnstakeTranche {
+        amount: NearToken::from_near(3),
+        available_epoch_height: 999,
+    };
+    let ukey = (acct(BUYER), pool.clone());
+    let mut all_tranches = claimed_tranches.clone();
+    all_tranches.push(future_tranche.clone());
+    c.user_pending_unstake.insert(ukey.clone(), all_tranches);
+
+    testing_env!(ctx(acct(BUYER), one_yocto()));
+    let _ = c.withdraw(pool.clone());
+
+    assert_eq!(
+        c.get_validator(pool.clone())
+            .expect("validator row")
+            .pending_to_claim,
+        NearToken::from_near(5)
+    );
+
+    testing_env_transfer_callback_failure();
+    assert!(!c.on_user_withdraw_transfer_done(
+        acct(BUYER),
+        pool.clone(),
+        claimed_tranches,
+        NearToken::from_near(15),
+    ));
+
+    assert_eq!(
+        c.get_validator(pool)
+            .expect("validator row")
+            .pending_to_claim,
+        NearToken::from_near(20)
+    );
+    assert_eq!(
+        c.user_pending_unstake
+            .get(&ukey)
+            .expect("tranches restored")
+            .clone(),
+        vec![
+            PendingUnstakeTranche {
+                amount: NearToken::from_near(10),
+                available_epoch_height: 0,
+            },
+            PendingUnstakeTranche {
+                amount: NearToken::from_near(5),
+                available_epoch_height: 100,
+            },
+            future_tranche,
+        ]
+    );
 }

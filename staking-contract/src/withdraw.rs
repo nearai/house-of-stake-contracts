@@ -8,7 +8,21 @@
 use crate::utils::epoch_height;
 use crate::*;
 use near_sdk::json_types::U128;
-use near_sdk::{AccountId, NearToken, Promise, assert_one_yocto, env, near, require};
+use near_sdk::{
+    AccountId, NearToken, Promise, assert_one_yocto, env, ext_contract, is_promise_success, near,
+    require,
+};
+
+#[ext_contract(ext_self_withdraw)]
+pub trait ExtSelfWithdraw {
+    fn on_user_withdraw_transfer_done(
+        &mut self,
+        account_id: AccountId,
+        validator_id: ValidatorId,
+        claimed_tranches: Vec<PendingUnstakeTranche>,
+        credit: NearToken,
+    ) -> bool;
+}
 
 // Public `withdraw` + private promise callback (WASM continuation).
 
@@ -67,6 +81,24 @@ impl Contract {
         validator_id: ValidatorId,
     ) -> Promise {
         self.payout_user_withdraw(account_id, validator_id)
+    }
+
+    /// Finalize user transfer accounting. Failed transfers restore the claim records so the user
+    /// can retry instead of losing the claim.
+    #[private]
+    pub fn on_user_withdraw_transfer_done(
+        &mut self,
+        account_id: AccountId,
+        validator_id: ValidatorId,
+        claimed_tranches: Vec<PendingUnstakeTranche>,
+        credit: NearToken,
+    ) -> bool {
+        if is_promise_success() {
+            return true;
+        }
+
+        self.restore_user_withdraw_claim(account_id, validator_id, claimed_tranches, credit);
+        false
     }
 
     /// Return UI-ready pending unstake and withdraw status for one account on one validator.
@@ -159,27 +191,33 @@ impl Contract {
             .unwrap_or(0)
     }
 
-    /// Removes every tranche with `available_epoch_height <= at_epoch` and returns their total yocto.
-    /// Non-claimable tranches are kept. Returns `true` when no tranches remain.
+    /// Removes every tranche with `available_epoch_height <= at_epoch` and returns the removed
+    /// tranches plus their total yocto. Non-claimable tranches are kept.
     fn remove_claimable_tranches(
         &mut self,
         account_validator_key: &(AccountId, ValidatorId),
         at_epoch: u64,
-    ) -> (u128, bool) {
+    ) -> (Vec<PendingUnstakeTranche>, u128) {
         let mut tranches = self
             .user_pending_unstake
             .get(account_validator_key)
             .cloned()
             .unwrap_or_default();
-        let claimable_yocto = tranches
+        let mut claimed_tranches = Vec::new();
+        tranches.retain(|tranche| {
+            if at_epoch >= tranche.available_epoch_height {
+                claimed_tranches.push(tranche.clone());
+                false
+            } else {
+                true
+            }
+        });
+        let claimable_yocto = claimed_tranches
             .iter()
-            .filter(|tranche| at_epoch >= tranche.available_epoch_height)
             .map(|tranche| tranche.amount.as_yoctonear())
             .fold(0u128, |sum, yocto| sum.saturating_add(yocto));
-        tranches.retain(|tranche| at_epoch < tranche.available_epoch_height);
-        let user_done = tranches.is_empty();
         self.set_user_pending_unstake_tranches(account_validator_key.clone(), tranches);
-        (claimable_yocto, user_done)
+        (claimed_tranches, claimable_yocto)
     }
 
     /// Drops all epoch-eligible tranches, debits the claim bucket by their sum, and returns that NEAR.
@@ -188,7 +226,7 @@ impl Contract {
         &mut self,
         account_id: AccountId,
         validator_id: ValidatorId,
-    ) -> NearToken {
+    ) -> (Vec<PendingUnstakeTranche>, NearToken) {
         let account_validator_key = (account_id.clone(), validator_id.clone());
         let mut validator = self.require_validator(&validator_id);
         let pending_claim_bucket_yocto = validator.pending_to_claim.as_yoctonear();
@@ -197,7 +235,8 @@ impl Contract {
             "No NEAR is claimable yet; wait until unstaked funds are withdrawn from the pool into this contract, then retry"
         );
         let eh = epoch_height();
-        let (credit_yocto, _) = self.remove_claimable_tranches(&account_validator_key, eh);
+        let (claimed_tranches, credit_yocto) =
+            self.remove_claimable_tranches(&account_validator_key, eh);
         require!(
             credit_yocto > 0,
             "Nothing to claim yet: wait until `epoch_height >=` your tranche's available epoch height"
@@ -216,7 +255,33 @@ impl Contract {
         self.internal_set_validator(validator_id.clone(), validator);
 
         crate::events::log_withdraw(&account_id, &validator_id, credit.as_yoctonear());
-        credit
+        (claimed_tranches, credit)
+    }
+
+    fn restore_user_withdraw_claim(
+        &mut self,
+        account_id: AccountId,
+        validator_id: ValidatorId,
+        mut claimed_tranches: Vec<PendingUnstakeTranche>,
+        credit: NearToken,
+    ) {
+        let account_validator_key = (account_id, validator_id.clone());
+        let mut tranches = self
+            .user_pending_unstake
+            .get(&account_validator_key)
+            .cloned()
+            .unwrap_or_default();
+        claimed_tranches.append(&mut tranches);
+        self.set_user_pending_unstake_tranches(account_validator_key, claimed_tranches);
+
+        let mut validator = self.require_validator(&validator_id);
+        validator.pending_to_claim = NearToken::from_yoctonear(
+            validator
+                .pending_to_claim
+                .as_yoctonear()
+                .saturating_add(credit.as_yoctonear()),
+        );
+        self.internal_set_validator(validator_id, validator);
     }
 
     /// Claim from `pending_to_claim` and transfer to the user. Pool → contract withdraw runs in the
@@ -228,11 +293,16 @@ impl Contract {
         account_id: AccountId,
         validator_id: ValidatorId,
     ) -> Promise {
-        let credit = self.claim_from_withdraw_bucket(account_id.clone(), validator_id);
+        let (claimed_tranches, credit) =
+            self.claim_from_withdraw_bucket(account_id.clone(), validator_id.clone());
         require!(
             env::account_balance().as_yoctonear() >= credit.as_yoctonear(),
             "Contract does not hold enough NEAR to complete this withdraw transfer yet; retry after pool funds arrive"
         );
-        Promise::new(account_id).transfer(credit)
+        Promise::new(account_id.clone()).transfer(credit).then(
+            ext_self_withdraw::ext(env::current_account_id())
+                .with_static_gas(crate::gas::callbacks::ON_USER_WITHDRAW_TRANSFER_DONE)
+                .on_user_withdraw_transfer_done(account_id, validator_id, claimed_tranches, credit),
+        )
     }
 }
