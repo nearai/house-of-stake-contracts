@@ -63,5 +63,5 @@ cargo run -p staking-cli -- verify \
   --test-feature
 ```
 
-The CLI supports `--network testnet`, `--network mainnet`, and `--network localnet`. Mainnet
-deployment/configuration requires `--yes-mainnet` in addition to `--send`.
+The CLI supports `--network testnet` and `--network mainnet`. Mainnet deployment/configuration
+requires `--yes-mainnet` in addition to `--send`.

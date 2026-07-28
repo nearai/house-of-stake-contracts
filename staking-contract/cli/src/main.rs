@@ -105,7 +105,6 @@ struct ReadOnlyCommonArgs {
 enum Network {
     Testnet,
     Mainnet,
-    Localnet,
 }
 
 impl Network {
@@ -113,7 +112,6 @@ impl Network {
         match self {
             Self::Testnet => "testnet",
             Self::Mainnet => "mainnet",
-            Self::Localnet => "localnet",
         }
     }
 }
