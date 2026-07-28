@@ -17,13 +17,13 @@
   },
   "validators": [
     {
-      "validator_id": "nearai.pool.near"
+      "validator_id": "nearai.pool.near",
+      "owner_account_id": "jasnah-treasury.sputnik-dao.near"
     }
   ],
   "products": [
     {
       "validator_id": "nearai.pool.near",
-      "owner_account_id": "jasnah-treasury.sputnik-dao.near",
       "name": "NEAR AI Agents",
       "description": "Monthly NEAR AI Agents subscription tiers",
       "prices": [
@@ -70,7 +70,6 @@
     },
     {
       "validator_id": "nearai.pool.near",
-      "owner_account_id": "jasnah-treasury.sputnik-dao.near",
       "name": "NEAR AI Agent One-Off Credits",
       "description": "One-off NEAR AI agents credits",
       "prices": [
@@ -88,7 +87,6 @@
     },
     {
       "validator_id": "nearai.pool.near",
-      "owner_account_id": "jasnah-treasury.sputnik-dao.near",
       "name": "NEAR AI Cloud Credits",
       "description": "Stake NEAR to earn NEAR AI Cloud credits",
       "prices": [

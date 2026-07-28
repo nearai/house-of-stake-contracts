@@ -366,13 +366,41 @@ fn configure(args: ConfigureArgs) -> Result<()> {
         configure_validator(&ctx, &account_id, validator, &args.mock_pool_wasm)?;
     }
 
+    let validator_owners: HashMap<String, String> = config
+        .validators
+        .iter()
+        .filter_map(|validator| {
+            non_empty(validator.owner_account_id.as_deref())
+                .map(|owner| (validator.validator_id.clone(), owner.to_string()))
+        })
+        .collect();
     let mut product_cache = HashMap::new();
     for product in &config.products {
-        let product_id = configure_product(&ctx, &account_id, product, &mut product_cache)?;
+        let product_id = configure_product(
+            &ctx,
+            &account_id,
+            product,
+            &validator_owners,
+            &mut product_cache,
+        )?;
         for price in &product.prices {
-            let price_id = configure_price(&ctx, &account_id, &product_id, product, price)?;
+            let price_id = configure_price(
+                &ctx,
+                &account_id,
+                &product_id,
+                product,
+                price,
+                &validator_owners,
+            )?;
             if price.set_default {
-                set_default_price(&ctx, &account_id, product, &product_id, &price_id)?;
+                set_default_price(
+                    &ctx,
+                    &account_id,
+                    product,
+                    &product_id,
+                    &price_id,
+                    &validator_owners,
+                )?;
             }
         }
     }
@@ -572,10 +600,11 @@ fn configure_product(
     ctx: &MutContext,
     staking_account: &str,
     product: &ProductConfig,
+    validator_owners: &HashMap<String, String>,
     cache: &mut HashMap<(String, String), String>,
 ) -> Result<String> {
     if let Some(product_id) = non_empty(product.product_id.as_deref()) {
-        sync_product_by_id(ctx, staking_account, product_id, product)?;
+        sync_product_by_id(ctx, staking_account, product_id, product, validator_owners)?;
         return Ok(product_id.to_string());
     }
 
@@ -590,10 +619,7 @@ fn configure_product(
         return Ok(product_id);
     }
 
-    let signer = product
-        .owner_account_id
-        .as_deref()
-        .unwrap_or(ctx.signer.as_str());
+    let signer = catalog_signer(ctx, product, validator_owners);
     near_tx(
         ctx,
         staking_account,
@@ -625,6 +651,7 @@ fn sync_product_by_id(
     staking_account: &str,
     product_id: &str,
     product: &ProductConfig,
+    validator_owners: &HashMap<String, String>,
 ) -> Result<()> {
     let stored = view_json(
         ctx.common.readonly.network,
@@ -651,10 +678,7 @@ fn sync_product_by_id(
         return Ok(());
     }
 
-    let signer = product
-        .owner_account_id
-        .as_deref()
-        .unwrap_or(ctx.signer.as_str());
+    let signer = catalog_signer(ctx, product, validator_owners);
     near_tx(
         ctx,
         staking_account,
@@ -676,9 +700,18 @@ fn configure_price(
     product_id: &str,
     product: &ProductConfig,
     price: &PriceConfig,
+    validator_owners: &HashMap<String, String>,
 ) -> Result<String> {
     if let Some(price_id) = non_empty(price.price_id.as_deref()) {
-        sync_price_by_id(ctx, staking_account, product_id, price_id, product, price)?;
+        sync_price_by_id(
+            ctx,
+            staking_account,
+            product_id,
+            price_id,
+            product,
+            price,
+            validator_owners,
+        )?;
         return Ok(price_id.to_string());
     }
 
@@ -692,10 +725,7 @@ fn configure_price(
         return Ok(price_id);
     }
 
-    let signer = product
-        .owner_account_id
-        .as_deref()
-        .unwrap_or(ctx.signer.as_str());
+    let signer = catalog_signer(ctx, product, validator_owners);
     near_tx(
         ctx,
         staking_account,
@@ -735,6 +765,7 @@ fn sync_price_by_id(
     price_id: &str,
     product: &ProductConfig,
     price: &PriceConfig,
+    validator_owners: &HashMap<String, String>,
 ) -> Result<()> {
     let stored = view_json(
         ctx.common.readonly.network,
@@ -775,10 +806,7 @@ fn sync_price_by_id(
         return Ok(());
     }
 
-    let signer = product
-        .owner_account_id
-        .as_deref()
-        .unwrap_or(ctx.signer.as_str());
+    let signer = catalog_signer(ctx, product, validator_owners);
     near_tx(
         ctx,
         staking_account,
@@ -1033,6 +1061,7 @@ fn set_default_price(
     product: &ProductConfig,
     product_id: &str,
     price_id: &str,
+    validator_owners: &HashMap<String, String>,
 ) -> Result<()> {
     if price_id.starts_with('<') {
         println!("skip default price dry-run placeholder for product {product_id}");
@@ -1048,10 +1077,7 @@ fn set_default_price(
         println!("default price already set: {product_id} -> {price_id}");
         return Ok(());
     }
-    let signer = product
-        .owner_account_id
-        .as_deref()
-        .unwrap_or(ctx.signer.as_str());
+    let signer = catalog_signer(ctx, product, validator_owners);
     near_tx(
         ctx,
         staking_account,
@@ -1061,6 +1087,20 @@ fn set_default_price(
         "1 yoctoNEAR",
         signer,
     )
+}
+
+fn catalog_signer<'a>(
+    ctx: &'a MutContext,
+    product: &'a ProductConfig,
+    validator_owners: &'a HashMap<String, String>,
+) -> &'a str {
+    if let Some(owner) = non_empty(product.owner_account_id.as_deref()) {
+        return owner;
+    }
+    validator_owners
+        .get(&product.validator_id)
+        .map(String::as_str)
+        .unwrap_or(ctx.signer.as_str())
 }
 
 fn find_product(

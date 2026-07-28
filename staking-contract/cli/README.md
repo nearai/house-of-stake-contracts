@@ -94,7 +94,7 @@ requires `--yes-mainnet` in addition to `--send`.
 
 Mainnet catalog calls must be signed by the validator pool owner or by a catalog manager already
 granted on the staking contract. For staging, `nearai.pool.near` is owned by
-`jasnah-treasury.sputnik-dao.near`, so `stg.mainnet.json` sets that account on catalog products
-instead of using the staking contract signer. To let `stake-dao.near` manage those catalog rows
-directly, first submit `add_validator_catalog_manager` from the pool-owner DAO for
+`jasnah-treasury.sputnik-dao.near`, so `stg.mainnet.json` sets that account once on the validator
+entry and uses it as the default signer for products under that validator. To let `stake-dao.near`
+manage those catalog rows directly, first submit `add_validator_catalog_manager` from the pool-owner DAO for
 `catalog_manager_account_id: "stake-dao.near"`.
