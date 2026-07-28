@@ -1,7 +1,7 @@
 {
   "staking": {
     "account_id": "stake.dao",
-    "owner_account_id": "hos-root.sputnik-dao.near",
+    "owner_account_id": "stake.dao",
     "signer_account_id": "stake.dao"
   },
   "init": {
