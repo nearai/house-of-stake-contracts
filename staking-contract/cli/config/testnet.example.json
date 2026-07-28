@@ -1,0 +1,54 @@
+{
+  "staking": {
+    "account_id": "hos-e2e-0601144939.testnet",
+    "owner_account_id": "hos-e2e-0601144939.testnet",
+    "signer_account_id": "hos-e2e-0601144939.testnet",
+    "wasm": "res/local/staking_contract.wasm",
+    "test_wasm": "res/local/staking_contract_test.wasm",
+    "test_feature": true
+  },
+  "init": {
+    "guardians": [],
+    "min_lock_duration_ns": "1",
+    "max_lock_duration_ns": "63072000000000000",
+    "epoch_unstake_settle_epochs": 1,
+    "min_storage_deposit": "10000000000000000000000",
+    "per_lock_storage_stake": "0",
+    "per_farm_position_storage_stake": "0",
+    "per_purchase_storage_stake": "0",
+    "min_lock_amount": "1000000000000000000000000"
+  },
+  "validators": [
+    {
+      "validator_id": "mock-pool-0.hos-e2e-0601144939.testnet",
+      "owner_account_id": "hos-e2e-0601144939.testnet",
+      "deploy_mock_pool": false
+    }
+  ],
+  "products": [
+    {
+      "validator_id": "mock-pool-0.hos-e2e-0601144939.testnet",
+      "owner_account_id": "hos-e2e-0601144939.testnet",
+      "name": "NEAR AI Agents",
+      "description": "Monthly agent hosting subscription tiers",
+      "prices": [
+        {
+          "name": "Starter",
+          "description": "1 agent; stake range [1, 10] NEAR",
+          "amount": "1000000000000000000000000",
+          "price_type": "Recurring",
+          "billing_period": "Monthly",
+          "lock_factor_near_months": "1000000000000000000000000",
+          "metadata": {
+            "max_amount": "10000000000000000000000000"
+          },
+          "set_default": false
+        }
+      ]
+    }
+  ],
+  "verify": {
+    "test_feature": true,
+    "view_limit": 20
+  }
+}
