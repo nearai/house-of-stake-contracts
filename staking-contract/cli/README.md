@@ -63,7 +63,8 @@ cargo run -p staking-cli -- configure \
 
 For existing catalog rows, include `product_id` and/or `price_id` in the config. `configure` will
 then update product and price display fields in place. Price amount, type, billing period, and lock
-factor are immutable; changing those fields requires creating a new price.
+factor are immutable; changing those fields requires creating a new price. To create a new price
+under an existing product, include the existing `product_id` and omit `price_id` on the new price.
 
 Verify deployment health:
 

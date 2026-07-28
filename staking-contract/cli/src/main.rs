@@ -481,7 +481,7 @@ fn configure_product(
     product: &ProductConfig,
     cache: &mut HashMap<(String, String), String>,
 ) -> Result<String> {
-    if let Some(product_id) = product.product_id.as_deref() {
+    if let Some(product_id) = non_empty(product.product_id.as_deref()) {
         sync_product_by_id(ctx, staking_account, product_id, product)?;
         return Ok(product_id.to_string());
     }
@@ -584,7 +584,7 @@ fn configure_price(
     product: &ProductConfig,
     price: &PriceConfig,
 ) -> Result<String> {
-    if let Some(price_id) = price.price_id.as_deref() {
+    if let Some(price_id) = non_empty(price.price_id.as_deref()) {
         sync_price_by_id(ctx, staking_account, product_id, price_id, product, price)?;
         return Ok(price_id.to_string());
     }
@@ -1011,6 +1011,13 @@ fn resolve_account(args: &ReadOnlyCommonArgs, config: &BootstrapConfig) -> Resul
         .clone()
         .or_else(|| config.staking.account_id.clone())
         .ok_or_else(|| anyhow!("missing staking account; pass --account or set staking.account_id"))
+}
+
+fn non_empty(value: Option<&str>) -> Option<&str> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then_some(trimmed)
+    })
 }
 
 fn init_json(owner: &str, init: &InitConfig) -> Value {

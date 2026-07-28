@@ -27,7 +27,7 @@
       "validator_id": "mock-pool-0.hos-e2e-0601144939.testnet",
       "owner_account_id": "hos-e2e-0601144939.testnet",
       "name": "NEAR AI Agents",
-      "description": "Monthly agent hosting subscription tiers",
+      "description": "Monthly NEAR AI Agents subscription tiers",
       "prices": [
         {
           "name": "Starter",
@@ -121,6 +121,16 @@
           "name": "One-Off Credits at NEAR Price $2.5",
           "description": "One-Off NEAR AI credit",
           "amount": "400000000000000000000000",
+          "price_type": "OneOff",
+          "billing_period": null,
+          "lock_factor_near_months": "0",
+          "metadata": null,
+          "set_default": true
+        },
+        {
+          "name": "One-Off Credits at NEAR Price $2",
+          "description": "One-Off NEAR AI credit",
+          "amount": "500000000000000000000000",
           "price_type": "OneOff",
           "billing_period": null,
           "lock_factor_near_months": "0",
