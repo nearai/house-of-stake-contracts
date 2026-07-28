@@ -29,7 +29,7 @@ Code-only deploy to the shared testnet account without running `migrate_state()`
 ```bash
 cargo run -p staking-cli -- deploy \
   --network testnet \
-  --config staking-contract/cli/config/testnet.example.json \
+  --config staking-contract/cli/config/testnet.dev.json \
   --code-only \
   --test-feature \
   --send
@@ -40,7 +40,7 @@ Fresh deploy with `new(config)`:
 ```bash
 cargo run -p staking-cli -- deploy \
   --network testnet \
-  --config staking-contract/cli/config/testnet.example.json \
+  --config staking-contract/cli/config/testnet.dev.json \
   --fresh \
   --send
 ```
@@ -50,7 +50,7 @@ Configure validators and catalog entries from the config file:
 ```bash
 cargo run -p staking-cli -- configure \
   --network testnet \
-  --config staking-contract/cli/config/testnet.example.json \
+  --config staking-contract/cli/config/testnet.dev.json \
   --send
 ```
 
@@ -59,7 +59,7 @@ Verify deployment health:
 ```bash
 cargo run -p staking-cli -- verify \
   --network testnet \
-  --config staking-contract/cli/config/testnet.example.json \
+  --config staking-contract/cli/config/testnet.dev.json \
   --test-feature
 ```
 
