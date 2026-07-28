@@ -152,11 +152,11 @@ struct InitConfig {
     epoch_unstake_settle_epochs: u64,
     #[serde(default = "default_min_storage_deposit")]
     min_storage_deposit: String,
-    #[serde(default)]
+    #[serde(default = "default_zero_amount")]
     per_lock_storage_stake: String,
-    #[serde(default)]
+    #[serde(default = "default_zero_amount")]
     per_farm_position_storage_stake: String,
-    #[serde(default)]
+    #[serde(default = "default_zero_amount")]
     per_purchase_storage_stake: String,
     #[serde(default = "default_min_lock_amount")]
     min_lock_amount: String,
@@ -328,10 +328,14 @@ fn deploy(args: DeployArgs) -> Result<()> {
     run_tx(&ctx, cmd)?;
 
     if ctx.common.send {
+        let expected_init = match mode {
+            DeployMode::Fresh => Some((owner.as_str(), &config.init)),
+            DeployMode::CodeOnly => None,
+        };
         verify_deployment_health(
             ctx.common.readonly.network,
             &account_id,
-            Some((&owner, &config.init)),
+            expected_init,
             test_feature,
         )?;
     }
@@ -557,7 +561,10 @@ fn mock_pool_has_owner(network: Network, validator_id: &str, owner: &str) -> Res
             )
         }
         Ok(stored) => bail!("mock pool {validator_id} returned unexpected owner value: {stored}"),
-        Err(_) => Ok(false),
+        Err(err) if is_missing_contract_view_error(&err) => Ok(false),
+        Err(err) => Err(err).with_context(|| {
+            format!("failed to inspect existing mock pool contract {validator_id}")
+        }),
     }
 }
 
@@ -759,6 +766,7 @@ fn sync_price_by_id(
 
     let current_name = stored.get("name").and_then(Value::as_str);
     let current_description = stored.get("description").and_then(Value::as_str);
+    let metadata_update = price_metadata_update(&stored, price.metadata.as_ref(), price_id)?;
     if current_name == Some(price.name.as_str())
         && current_description == Some(price.description.as_str())
         && metadata_matches(&stored, price.metadata.as_ref())
@@ -779,7 +787,7 @@ fn sync_price_by_id(
             "price_id": price_id,
             "name": price.name,
             "description": price.description,
-            "metadata": price.metadata,
+            "metadata": metadata_update,
         }),
         "200.0 Tgas",
         "1 yoctoNEAR",
@@ -807,6 +815,7 @@ fn verify_configured_state(
                 validator.validator_id
             );
         }
+        assert_active_status(&stored, &validator.validator_id)?;
     }
 
     for product in &config.products {
@@ -873,6 +882,7 @@ fn verify_product_matches(stored: &Value, product_id: &str, product: &ProductCon
     assert_string_field(stored, "validator_id", &product.validator_id, product_id)?;
     assert_string_field(stored, "name", &product.name, product_id)?;
     assert_string_field(stored, "description", &product.description, product_id)?;
+    assert_active_status(stored, product_id)?;
     Ok(())
 }
 
@@ -903,6 +913,7 @@ fn verify_price_matches(
         price_id,
     )?;
     assert_metadata_field(stored, price.metadata.as_ref(), price_id)?;
+    assert_active_status(stored, price_id)?;
     Ok(())
 }
 
@@ -927,6 +938,10 @@ fn assert_optional_string_field(
     Ok(())
 }
 
+fn assert_active_status(stored: &Value, id: &str) -> Result<()> {
+    assert_string_field(stored, "status", "Active", id)
+}
+
 fn assert_metadata_field(stored: &Value, expected: Option<&Value>, id: &str) -> Result<()> {
     if metadata_matches(stored, expected) {
         return Ok(());
@@ -939,9 +954,47 @@ fn assert_metadata_field(stored: &Value, expected: Option<&Value>, id: &str) -> 
 }
 
 fn metadata_matches(stored: &Value, expected: Option<&Value>) -> bool {
-    let actual = stored.get("metadata");
-    matches!((actual, expected), (Some(Value::Null) | None, None))
-        || matches!((actual, expected), (Some(actual), Some(expected)) if actual == expected)
+    match (
+        canonical_metadata_value(stored.get("metadata")),
+        canonical_metadata_value(expected),
+    ) {
+        (Ok(actual), Ok(expected)) => actual == expected,
+        _ => false,
+    }
+}
+
+fn price_metadata_update(
+    stored: &Value,
+    expected: Option<&Value>,
+    price_id: &str,
+) -> Result<Value> {
+    let actual = canonical_metadata_value(stored.get("metadata"))?;
+    let expected = canonical_metadata_value(expected)?;
+    if actual.is_some() && expected.is_none() {
+        bail!(
+            "configured price_id {price_id} cannot clear metadata; edit_price treats null metadata as leave-unchanged"
+        );
+    }
+    Ok(expected.unwrap_or(Value::Null))
+}
+
+fn canonical_metadata_value(value: Option<&Value>) -> Result<Option<Value>> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Object(raw)) => {
+            let mut normalized = serde_json::Map::new();
+            normalized.insert(
+                "max_amount".to_string(),
+                raw.get("max_amount").cloned().unwrap_or(Value::Null),
+            );
+            normalized.insert(
+                "farm_reward_rate".to_string(),
+                raw.get("farm_reward_rate").cloned().unwrap_or(Value::Null),
+            );
+            Ok(Some(Value::Object(normalized)))
+        }
+        Some(other) => bail!("price metadata must be null or an object, got {other}"),
+    }
 }
 
 fn assert_immutable_price_field(
@@ -1146,6 +1199,15 @@ fn view_json(network: Network, contract_id: &str, method: &str, args: Value) -> 
     let stdout = String::from_utf8_lossy(&output.stdout);
     parse_near_json(&stdout)
         .with_context(|| format!("failed to parse near output for {method}: {stdout}"))
+}
+
+fn is_missing_contract_view_error(err: &anyhow::Error) -> bool {
+    let message = err.to_string().to_ascii_lowercase();
+    (message.contains("account") && message.contains("does not exist"))
+        || (message.contains("contract") && message.contains("does not exist"))
+        || message.contains("wasm code is not deployed")
+        || message.contains("code is not deployed")
+        || message.contains("contract code is not deployed")
 }
 
 fn parse_near_json(output: &str) -> Result<Value> {
@@ -1355,6 +1417,10 @@ fn default_min_storage_deposit() -> String {
     "10000000000000000000000".to_string()
 }
 
+fn default_zero_amount() -> String {
+    "0".to_string()
+}
+
 fn default_min_lock_amount() -> String {
     "1000000000000000000000000".to_string()
 }
@@ -1402,7 +1468,16 @@ mod tests {
     }
 
     #[test]
-    fn metadata_matching_treats_missing_and_null_as_empty_only() {
+    fn partial_init_config_uses_zero_storage_stake_defaults() {
+        let config: BootstrapConfig = serde_json::from_str(r#"{"init":{}}"#).unwrap();
+
+        assert_eq!(config.init.per_lock_storage_stake, "0");
+        assert_eq!(config.init.per_farm_position_storage_stake, "0");
+        assert_eq!(config.init.per_purchase_storage_stake, "0");
+    }
+
+    #[test]
+    fn metadata_matching_uses_canonical_optional_fields() {
         assert!(metadata_matches(&json!({}), None));
         assert!(metadata_matches(&json!({ "metadata": null }), None));
 
@@ -1412,6 +1487,10 @@ mod tests {
         });
         assert!(metadata_matches(
             &json!({ "metadata": expected.clone() }),
+            Some(&json!({ "max_amount": "100" }))
+        ));
+        assert!(metadata_matches(
+            &json!({ "metadata": expected.clone() }),
             Some(&expected)
         ));
         assert!(!metadata_matches(
@@ -1419,5 +1498,65 @@ mod tests {
             Some(&expected)
         ));
         assert!(!metadata_matches(&json!({ "metadata": expected }), None));
+    }
+
+    #[test]
+    fn metadata_clear_is_rejected_for_existing_metadata() {
+        let stored = json!({
+            "metadata": {
+                "max_amount": "100",
+                "farm_reward_rate": null
+            }
+        });
+
+        let err = price_metadata_update(&stored, None, "price_1").unwrap_err();
+        assert!(err.to_string().contains("cannot clear metadata"));
+    }
+
+    #[test]
+    fn product_and_price_verification_require_active_status() {
+        let product = ProductConfig {
+            product_id: None,
+            validator_id: "pool.testnet".to_string(),
+            owner_account_id: None,
+            name: "Product".to_string(),
+            description: "Description".to_string(),
+            prices: Vec::new(),
+        };
+        let archived_product = json!({
+            "validator_id": "pool.testnet",
+            "name": "Product",
+            "description": "Description",
+            "status": "Archived"
+        });
+        let product_err =
+            verify_product_matches(&archived_product, "prod_1", &product).unwrap_err();
+        assert!(product_err.to_string().contains("status"));
+
+        let price = PriceConfig {
+            price_id: None,
+            name: "Price".to_string(),
+            description: "Description".to_string(),
+            amount: "1".to_string(),
+            price_type: "OneOff".to_string(),
+            billing_period: None,
+            lock_factor_near_months: "0".to_string(),
+            metadata: None,
+            set_default: false,
+        };
+        let archived_price = json!({
+            "product_id": "prod_1",
+            "name": "Price",
+            "description": "Description",
+            "amount": "1",
+            "price_type": "OneOff",
+            "billing_period": null,
+            "lock_factor_near_months": "0",
+            "metadata": null,
+            "status": "Archived"
+        });
+        let price_err =
+            verify_price_matches(&archived_price, "price_1", "prod_1", &price).unwrap_err();
+        assert!(price_err.to_string().contains("status"));
     }
 }

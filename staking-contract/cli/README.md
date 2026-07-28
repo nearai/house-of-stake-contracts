@@ -77,6 +77,8 @@ For existing catalog rows, include `product_id` and/or `price_id` in the config.
 then update product and price display fields in place. Price amount, type, billing period, and lock
 factor are immutable; changing those fields requires creating a new price. To create a new price
 under an existing product, include the existing `product_id` and omit `price_id` on the new price.
+Price metadata can be updated, but clearing existing metadata to `null` is not supported by the
+contract `edit_price` call; create a replacement price when metadata must be removed.
 
 Verify deployment health:
 
@@ -89,3 +91,10 @@ cargo run -p staking-cli -- verify \
 
 The CLI supports `--network testnet` and `--network mainnet`. Mainnet deployment/configuration
 requires `--yes-mainnet` in addition to `--send`.
+
+Mainnet catalog calls must be signed by the validator pool owner or by a catalog manager already
+granted on the staking contract. For staging, `nearai.pool.near` is owned by
+`jasnah-treasury.sputnik-dao.near`, so `stg.mainnet.json` sets that account on catalog products
+instead of using the staking contract signer. To let `stake-dao.near` manage those catalog rows
+directly, first submit `add_validator_catalog_manager` from the pool-owner DAO for
+`catalog_manager_account_id: "stake-dao.near"`.
