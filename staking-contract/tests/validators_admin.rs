@@ -9,7 +9,7 @@ use common::{
 };
 use near_sdk::json_types::U64;
 use near_sdk::{AccountId, NearToken, testing_env};
-use staking_contract::types::ValidatorStatus;
+use staking_contract::types::{TransactionStatus, ValidatorStatus};
 use staking_contract::validators::{MAX_VALIDATOR_CATALOG_MANAGERS, MAX_VALIDATORS};
 
 #[test]
@@ -36,6 +36,32 @@ fn remove_validator_on_idle_pool_marks_removed() {
 
     let v = c.get_validator(acct(POOL)).expect("validator row retained");
     assert_eq!(v.status, ValidatorStatus::Removed);
+}
+
+#[test]
+#[should_panic(expected = "Validator pool is busy")]
+fn pause_validator_fails_while_pipeline_busy() {
+    let mut c = deploy();
+    add_validator_allowlisted(&mut c);
+    let mut validator = c.get_validator(acct(POOL)).expect("validator");
+    validator.tx_status = TransactionStatus::Busy;
+    c.validators.insert(acct(POOL), validator.into());
+
+    testing_env!(ctx(acct(OWNER), one_yocto()));
+    c.pause_validator(acct(POOL));
+}
+
+#[test]
+#[should_panic(expected = "Validator pool is busy")]
+fn remove_validator_fails_while_pipeline_busy() {
+    let mut c = deploy();
+    add_validator_allowlisted(&mut c);
+    let mut validator = c.get_validator(acct(POOL)).expect("validator");
+    validator.tx_status = TransactionStatus::Busy;
+    c.validators.insert(acct(POOL), validator.into());
+
+    testing_env!(ctx(acct(OWNER), one_yocto()));
+    c.remove_validator(acct(POOL));
 }
 
 #[test]

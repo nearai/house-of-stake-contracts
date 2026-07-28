@@ -3,12 +3,15 @@
 mod common;
 
 use common::{
-    BUYER, OWNER, acct, ctx, ctx_ts, deploy, register_buyer, setup_catalog_near_oneoff,
-    setup_catalog_near_subscription, unwrap_sync_lock_id,
+    BUYER, OWNER, POOL, VALIDATOR_OWNER_ACCOUNT, acct, ctx, ctx_ts, deploy, register_buyer,
+    setup_catalog_near_oneoff, setup_catalog_near_subscription, testing_env_catalog_callback,
+    unwrap_sync_lock_id,
 };
 use near_sdk::json_types::U64;
 use near_sdk::{NearToken, testing_env};
-use staking_contract::types::{CatalogStatus, LockStatus, OrderRef};
+use staking_contract::types::{
+    CatalogStatus, LockStatus, OrderRef, TransactionStatus, ValidatorStatus,
+};
 
 const OTHER_BUYER: &str = "other.near";
 
@@ -33,6 +36,31 @@ fn lock_one_off_happy_path_records_lock_and_usage() {
     let pr = c.get_price(price_id).expect("price");
     assert_eq!(pr.usage_count, 1);
     assert_eq!(pr.status, CatalogStatus::Active);
+}
+
+#[test]
+#[should_panic(expected = "new stake is not allowed")]
+fn lock_tail_rechecks_validator_active_before_minting() {
+    let mut c = deploy();
+    let (product_id, price_id) = setup_catalog_near_oneoff(&mut c);
+    register_buyer(&mut c);
+    let mut validator = c.get_validator(acct(POOL)).expect("validator");
+    validator.tx_status = TransactionStatus::Busy;
+    validator.status = ValidatorStatus::Paused;
+    c.validators.insert(acct(POOL), validator.into());
+
+    let dur = c.get_config().min_lock_duration_ns.0.saturating_add(10_000);
+    testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
+    let _ = c.resolve_lock(
+        acct(BUYER),
+        NearToken::from_near(50),
+        u128::from(dur),
+        OrderRef::ProductPurchase {
+            product_id,
+            price_id,
+        },
+        acct(POOL),
+    );
 }
 
 #[test]

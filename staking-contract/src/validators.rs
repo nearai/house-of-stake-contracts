@@ -164,7 +164,7 @@ impl Contract {
     pub fn pause_validator(&mut self, validator_id: ValidatorId) {
         assert_one_yocto();
         self.assert_owner();
-        let mut validator = self.require_validator(&validator_id);
+        let mut validator = self.require_validator_idle(&validator_id);
         validator.status = ValidatorStatus::Paused;
         self.internal_set_validator(validator_id, validator);
     }
@@ -173,7 +173,7 @@ impl Contract {
     pub fn remove_validator(&mut self, validator_id: ValidatorId) {
         assert_one_yocto();
         self.assert_owner();
-        let mut validator = self.require_validator(&validator_id);
+        let mut validator = self.require_validator_idle(&validator_id);
         require!(
             validator.total_shares.0 == 0
                 && validator.pending_to_stake.as_yoctonear() == 0
@@ -324,6 +324,10 @@ impl Contract {
         deposit: NearToken,
     ) -> u128 {
         let mut validator = self.require_validator(validator_id);
+        require!(
+            validator.status == ValidatorStatus::Active,
+            "This validator is paused or removed; new stake is not allowed on it"
+        );
         let net_stake = validator.net_stake_yocto();
         let validator_total_shares = validator.total_shares.0;
         if validator_total_shares > 0 {
