@@ -18,7 +18,12 @@
     "per_purchase_storage_stake": "0",
     "min_lock_amount": "1000000000000000000000000"
   },
-  "validators": [],
+  "validators": [
+    {
+      "validator_id": "aurora.pool.f863973.m0",
+      "deploy_mock_pool": false
+    }
+  ],
   "products": [],
   "verify": {
     "test_feature": false,
