@@ -45,7 +45,7 @@ Typical sequence after locks exist (no public `epoch_stake` / `epoch_unstake` / 
 
 Implemented in code:
 
-- Config, owner / guardians governance, pause, upgrade (`upgrade()` + `migrate_state`)
+- Config, owner / guardians governance, pause, validator-local `tx_status` recovery, upgrade (`upgrade()` + `migrate_state`)
 - On-contract validator **allowlist** (`add_validator`, `pause_validator`, `remove_validator`)
 - Validator-owner **catalog** (`create_product`, `create_price`, …)
 - Stripe-like deterministic IDs (`prod_*`, `price_*`, `lock_*`, `sub_*`)

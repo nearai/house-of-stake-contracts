@@ -42,8 +42,8 @@ flowchart LR
 ```
 
 Key roles:
-- **Contract owner** — HoS DAO (initially a multisig). Onboards validators (adds them to the on-contract allowlist), sets guardians and global parameters, upgrades the contract. Does **not** set a separate staking “operator” list; pool scheduling is not permissioned that way.
-- **Guardians** — can pause the contract (same pattern as [venear-contract/src/pause.rs](../../venear-contract/src/pause.rs)).
+- **Contract owner** — HoS DAO (initially a multisig). Onboards validators (adds them to the on-contract allowlist), sets guardians and global parameters, upgrades the contract. Does **not** set a separate staking “operator” list; pool scheduling is not permissioned that way. The owner can also perform emergency validator-local recovery for a stuck pool pipeline.
+- **Guardians** — can pause the contract (same pattern as [venear-contract/src/pause.rs](../../venear-contract/src/pause.rs)) and can perform emergency validator-local recovery by resetting a stuck validator **`tx_status`** from **`Busy`** to **`Idle`**. This recovery does not require globally pausing the contract; guardians are therefore trusted for availability controls and for validator-local mutex recovery.
 - **Validator owner** (e.g., `nearai.sputnik-dao.near`) — manages that validator's products and prices on stake.dao via pool-attested catalog methods, may delegate product/price management to a bounded list of catalog managers, and (separately, off this contract) controls the underlying staking pool (commission, etc.). The contract owner does **not** manage products/prices.
 - **Validator catalog managers** — validator-owner-appointed accounts that can create, edit, archive, unarchive, delete, and set default products/prices for that validator. Catalog managers cannot manage the catalog manager list, validator allowlist/status, governance, upgrades, settlement, user funds, or direct-payment revenue withdrawal.
 - **Stakers** — end users buying products/subscriptions; their actions drive pool settlement when needed.
@@ -65,7 +65,8 @@ See source files under [src/](../src/). Key modules: `config`, `types`, `ids`, `
 
 ## 5. Governance
 
-- **Contract owner**: allowlist (`add_validator`, `pause_validator`, `remove_validator`), guardians, storage/lock parameter setters, upgrade. No `set_operators`.
+- **Contract owner**: allowlist (`add_validator`, `pause_validator`, `remove_validator`), guardians, storage/lock parameter setters, upgrade, emergency validator **`tx_status`** recovery. No `set_operators`.
+- **Guardians**: pause the contract and call **`force_reset_validator_busy_status(validator_id)`** when a validator pool pipeline is known to be stuck in **`Busy`**. This is a live, validator-scoped recovery path; operators must only use it after confirming the in-flight promise chain is no longer expected to complete, or that a late callback is harmless for that validator's accounting state.
 - **Validator owner** (via pool-owner-verified callbacks in `validators.rs`, `products.rs`, and `prices.rs`): can manage catalog managers for its validator; can create, edit, archive, unarchive, delete, and set default products/prices; and can withdraw direct-payment revenue for that validator.
 - **Validator catalog managers** (via owner-or-catalog-manager verified catalog callbacks in `products.rs` and `prices.rs`): can create, edit, archive, unarchive, delete, and set default products/prices for their validator only.
 
