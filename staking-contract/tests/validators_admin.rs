@@ -3,14 +3,21 @@
 mod common;
 
 use common::{
-    BUYER, CATALOG_MANAGER, OWNER, POOL, VALIDATOR_OWNER_ACCOUNT, acct, add_validator_allowlisted,
-    ctx, deploy, one_yocto, register_buyer, setup_catalog_near_oneoff,
-    testing_env_catalog_callback,
+    BUYER, CATALOG_MANAGER, GUARDIAN, OWNER, POOL, VALIDATOR_OWNER_ACCOUNT, acct,
+    add_validator_allowlisted, ctx, deploy, event_json, one_yocto, register_buyer,
+    setup_catalog_near_oneoff, testing_env_catalog_callback,
 };
 use near_sdk::json_types::U64;
 use near_sdk::{AccountId, NearToken, testing_env};
-use staking_contract::types::ValidatorStatus;
+use staking_contract::types::{TransactionStatus, ValidatorStatus};
 use staking_contract::validators::{MAX_VALIDATOR_CATALOG_MANAGERS, MAX_VALIDATORS};
+
+fn set_validator_busy(c: &mut staking_contract::Contract) {
+    let pool = acct(POOL);
+    let mut validator = c.get_validator(pool.clone()).expect("validator").clone();
+    validator.tx_status = TransactionStatus::Busy;
+    c.validators.insert(pool, validator.into());
+}
 
 #[test]
 fn get_validators_includes_registered_pool() {
@@ -51,6 +58,85 @@ fn remove_validator_fails_while_pending_stake_exists() {
 
     testing_env!(ctx(acct(OWNER), one_yocto()));
     c.remove_validator(acct(POOL));
+}
+
+#[test]
+fn owner_can_force_reset_busy_validator_tx_status() {
+    let mut c = deploy();
+    add_validator_allowlisted(&mut c);
+    set_validator_busy(&mut c);
+
+    testing_env!(ctx(acct(OWNER), one_yocto()));
+    c.force_reset_validator_busy_status(acct(POOL));
+
+    let validator = c.get_validator(acct(POOL)).expect("validator");
+    assert_eq!(validator.tx_status, TransactionStatus::Idle);
+
+    let event = event_json("validator_tx_status_reset");
+    assert_eq!(event["data"]["validator_id"], POOL);
+    assert_eq!(event["data"]["caller_id"], OWNER);
+    assert_eq!(event["data"]["previous_status"], "Busy");
+    assert_eq!(event["data"]["new_status"], "Idle");
+    assert_eq!(event["data"]["epoch_height"], "100");
+    assert_eq!(event["data"]["block_height"], "42");
+    assert_eq!(event["data"]["block_timestamp_ns"], "1700000000000000000");
+}
+
+#[test]
+fn guardian_can_force_reset_busy_validator_tx_status() {
+    let mut c = deploy();
+    add_validator_allowlisted(&mut c);
+    set_validator_busy(&mut c);
+
+    testing_env!(ctx(acct(OWNER), one_yocto()));
+    c.set_guardians(vec![acct(GUARDIAN)]);
+
+    testing_env!(ctx(acct(GUARDIAN), one_yocto()));
+    c.force_reset_validator_busy_status(acct(POOL));
+
+    let validator = c.get_validator(acct(POOL)).expect("validator");
+    assert_eq!(validator.tx_status, TransactionStatus::Idle);
+}
+
+#[test]
+#[should_panic(expected = "Only a guardian or the contract owner can call this method")]
+fn random_account_cannot_force_reset_busy_validator_tx_status() {
+    let mut c = deploy();
+    add_validator_allowlisted(&mut c);
+    set_validator_busy(&mut c);
+
+    testing_env!(ctx(acct(BUYER), one_yocto()));
+    c.force_reset_validator_busy_status(acct(POOL));
+}
+
+#[test]
+#[should_panic(expected = "Requires attached deposit of exactly 1 yoctoNEAR")]
+fn force_reset_busy_validator_tx_status_requires_one_yocto() {
+    let mut c = deploy();
+    add_validator_allowlisted(&mut c);
+    set_validator_busy(&mut c);
+
+    testing_env!(ctx(acct(OWNER), NearToken::from_near(0)));
+    c.force_reset_validator_busy_status(acct(POOL));
+}
+
+#[test]
+#[should_panic(expected = "Validator not found on the allowlist")]
+fn force_reset_busy_validator_tx_status_requires_existing_validator() {
+    let mut c = deploy();
+
+    testing_env!(ctx(acct(OWNER), one_yocto()));
+    c.force_reset_validator_busy_status(acct(POOL));
+}
+
+#[test]
+#[should_panic(expected = "Validator tx_status is already Idle")]
+fn force_reset_busy_validator_tx_status_rejects_idle_validator() {
+    let mut c = deploy();
+    add_validator_allowlisted(&mut c);
+
+    testing_env!(ctx(acct(OWNER), one_yocto()));
+    c.force_reset_validator_busy_status(acct(POOL));
 }
 
 #[test]

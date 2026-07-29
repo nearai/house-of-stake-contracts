@@ -81,6 +81,7 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 | `remove_validator_catalog_manager` | **1 yocto** | Validator pool owner only. Revoke catalog management rights for **`catalog_manager_account_id`**. Removing an absent catalog manager is a no-op. |
 | `pause_validator` | **1 yocto** | Set validator **`ValidatorStatus::Paused`** (blocks **new** locks for that pool). |
 | `remove_validator` | **1 yocto** | Mark **`Removed`** when no shares / pending stake / unstake / withdraw buckets (see contract checks). |
+| `force_reset_validator_busy_status` | **1 yocto** | Owner or guardian emergency recovery. Requires the validator exists and **`tx_status == Busy`**, then sets **`tx_status`** to **`Idle`** and emits `validator_tx_status_reset`. Operators should only call this after confirming the in-flight promise chain will not complete or late completion is harmless. |
 
 ---
 

@@ -186,6 +186,39 @@ impl Contract {
         self.internal_set_validator(validator_id, validator);
     }
 
+    /// Emergency recovery for a validator pool pipeline stuck in `Busy`.
+    ///
+    /// Operators must only call this after confirming the in-flight promise chain is no longer
+    /// expected to complete, or that a late completion is harmless.
+    #[payable]
+    pub fn force_reset_validator_busy_status(&mut self, validator_id: ValidatorId) {
+        assert_one_yocto();
+        self.assert_guardian();
+
+        let mut validator = self.require_validator(&validator_id);
+        let previous_status = validator.tx_status;
+        require!(
+            previous_status == TransactionStatus::Busy,
+            "Validator tx_status is already Idle"
+        );
+
+        let caller_id = env::predecessor_account_id();
+        let epoch_height = epoch_height();
+        let block_height = env::block_height();
+        let block_timestamp_ns = block_timestamp();
+        validator.tx_status = TransactionStatus::Idle;
+        self.internal_set_validator(validator_id.clone(), validator);
+
+        crate::events::log_validator_tx_status_reset(
+            &validator_id,
+            &caller_id,
+            &format!("{previous_status:?}"),
+            epoch_height,
+            block_height,
+            block_timestamp_ns,
+        );
+    }
+
     // -------------------------------------------------------------------------
     // Public validator view functions
     // -------------------------------------------------------------------------
