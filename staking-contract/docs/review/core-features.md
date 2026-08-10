@@ -11,7 +11,7 @@ Quick reference for reviewers: what the contract does on-chain, and which source
 5. **Lazy pool pipeline** — No settlement operator role: **`deposit_and_stake` / `unstake` / withdraw** and balance refresh are driven from lock, unlock, claim, plus manual settle/retry as documented. **One** successful stake **or** unstake per pool per NEAR epoch; net settle on pending buckets (`epoch.rs`).
 6. **Unlock → withdraw** — After lock end: unstake path, settle epochs, pull from pool when allowed, then user **`withdraw(validator_id)`** to receive NEAR (`unlock.rs`, `withdraw.rs`).
 7. **Accounts & storage** — NEP-145-style registration, per-lock storage stake, `storage_withdraw` (`accounts.rs`, `lib.rs` state).
-8. **Pause / upgrade** — Guardians pause; owner upgrades + migrate (`pause.rs`, `upgrade.rs`, `governance.rs`).
+8. **Pause / recovery / upgrade** — Guardians pause and can reset a stuck validator `tx_status` from `Busy` to `Idle`; owner upgrades + migrate (`pause.rs`, `validators.rs`, `upgrade.rs`, `governance.rs`).
 9. **Events** — `EVENT_JSON` for indexing (`events.rs`).
 
 ## Files to review (priority order)

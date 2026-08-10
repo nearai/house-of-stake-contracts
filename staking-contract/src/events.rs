@@ -48,6 +48,28 @@ pub fn log_validator_catalog_manager_remove(
     );
 }
 
+pub fn log_validator_tx_status_reset(
+    validator_id: &ValidatorId,
+    caller_id: &AccountId,
+    previous_status: &str,
+    epoch_height: u64,
+    block_height: u64,
+    block_timestamp_ns: u64,
+) {
+    emit(
+        "validator_tx_status_reset",
+        serde_json::json!({
+            "validator_id": validator_id.to_string(),
+            "caller_id": caller_id.to_string(),
+            "previous_status": previous_status,
+            "new_status": "Idle",
+            "epoch_height": epoch_height.to_string(),
+            "block_height": block_height.to_string(),
+            "block_timestamp_ns": block_timestamp_ns.to_string(),
+        }),
+    );
+}
+
 pub fn log_product_created(product_id: &str, validator_id: &ValidatorId) {
     emit(
         "product_create",
