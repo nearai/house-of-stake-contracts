@@ -134,6 +134,39 @@ impl Contract {
         })
     }
 
+    pub fn get_farm_positions_for_product(
+        &self,
+        product_id: ProductId,
+        from_index: u64,
+        limit: u64,
+    ) -> Vec<FarmPositionView> {
+        let Some(account_ids) = self.farm_position_accounts_by_product.get(&product_id) else {
+            return Vec::new();
+        };
+        self.collect_paginated(from_index, limit, account_ids.len() as u64, |index| {
+            account_ids
+                .get(index)
+                .and_then(|account_id| self.internal_get_farm_position(account_id, &product_id))
+                .map(|position| self.farm_position_view(position))
+        })
+    }
+
+    pub fn get_farm_positions(&self, from_index: u64, limit: u64) -> Vec<FarmPositionView> {
+        self.collect_paginated(
+            from_index,
+            limit,
+            self.farm_position_keys.len() as u64,
+            |index| {
+                self.farm_position_keys
+                    .get(index)
+                    .and_then(|(account_id, product_id)| {
+                        self.internal_get_farm_position(account_id, product_id)
+                    })
+                    .map(|position| self.farm_position_view(position))
+            },
+        )
+    }
+
     pub fn get_farm_account(&self, account_id: AccountId) -> FarmAccountView {
         let account = self
             .internal_get_farm_account(&account_id)
@@ -430,6 +463,10 @@ impl Contract {
         }
 
         self.add_farm_position_product_to_account(&account_id, &product_id);
+        if is_new_position {
+            self.add_farm_position_to_global_index(&account_id, &product_id);
+            self.add_farm_position_account_to_product(&account_id, &product_id);
+        }
         price.usage_count = price.usage_count.saturating_add(1);
         product.usage_count = product.usage_count.saturating_add(1);
         self.internal_set_price(price_id.clone(), price);
@@ -631,6 +668,43 @@ impl Contract {
             product_ids.push(product_id.clone());
             self.farm_position_products_by_account
                 .insert(account_id.clone(), product_ids);
+        }
+    }
+
+    pub(crate) fn add_farm_position_to_global_index(
+        &mut self,
+        account_id: &AccountId,
+        product_id: &ProductId,
+    ) {
+        self.farm_position_keys
+            .push((account_id.clone(), product_id.clone()));
+    }
+
+    pub(crate) fn add_farm_position_account_to_product(
+        &mut self,
+        account_id: &AccountId,
+        product_id: &ProductId,
+    ) {
+        if let Some(account_ids) = self.farm_position_accounts_by_product.get_mut(product_id) {
+            if !account_ids.iter().any(|id| id == account_id) {
+                account_ids.push(account_id.clone());
+            }
+            return;
+        }
+
+        let mut account_ids = near_sdk::store::Vector::new(
+            Self::farm_position_accounts_by_product_vector_key(product_id),
+        );
+        account_ids.push(account_id.clone());
+        self.farm_position_accounts_by_product
+            .insert(product_id.clone(), account_ids);
+    }
+
+    pub(crate) fn farm_position_accounts_by_product_vector_key(
+        product_id: &ProductId,
+    ) -> StorageKeys {
+        StorageKeys::FarmPositionAccountsByProductVector {
+            product_hash: env::sha256(product_id.as_bytes()),
         }
     }
 

@@ -52,9 +52,12 @@ enum StorageKeys {
     RevenueByValidator,
     FarmPools,
     FarmPositions,
+    FarmPositionKeys,
     FarmPositionProductsByAccount,
+    FarmPositionAccountsByProduct,
     FarmAccounts,
     UserFarmPositionCount,
+    FarmPositionAccountsByProductVector { product_hash: Vec<u8> },
     UserPendingUnstakeValidatorCount,
     PurchasesByAccountVector { account_hash: Vec<u8> },
     PurchasesByProductVector { product_hash: Vec<u8> },
@@ -125,8 +128,12 @@ pub struct Contract {
     pub farm_pools: LookupMap<PriceId, VFarmPool>,
     /// One farm position per `(account_id, product_id)`.
     pub farm_positions: LookupMap<(AccountId, ProductId), VFarmPosition>,
+    /// Global creation order of current and historical farm position keys.
+    pub farm_position_keys: Vector<(AccountId, ProductId)>,
     /// Secondary index: farm owner account -> product ids with current or historical farm positions.
     pub farm_position_products_by_account: LookupMap<AccountId, Vec<ProductId>>,
+    /// Secondary index: product id -> account ids with current or historical farm positions.
+    pub farm_position_accounts_by_product: LookupMap<ProductId, Vector<AccountId>>,
     /// Monotonic count of farm positions created per account; multiplied by [`Config::per_farm_position_storage_stake`] for prepaid retained-position storage.
     pub user_farm_position_count: LookupMap<AccountId, u32>,
     /// Per-account rolled-up farm reward totals from closed positions.
@@ -181,8 +188,12 @@ impl Contract {
             revenue_by_validator: LookupMap::new(StorageKeys::RevenueByValidator),
             farm_pools: LookupMap::new(StorageKeys::FarmPools),
             farm_positions: LookupMap::new(StorageKeys::FarmPositions),
+            farm_position_keys: Vector::new(StorageKeys::FarmPositionKeys),
             farm_position_products_by_account: LookupMap::new(
                 StorageKeys::FarmPositionProductsByAccount,
+            ),
+            farm_position_accounts_by_product: LookupMap::new(
+                StorageKeys::FarmPositionAccountsByProduct,
             ),
             user_farm_position_count: LookupMap::new(StorageKeys::UserFarmPositionCount),
             farm_accounts: LookupMap::new(StorageKeys::FarmAccounts),
