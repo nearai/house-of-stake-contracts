@@ -78,6 +78,8 @@ pub mod callbacks {
     pub const ON_UNLOCK_TAIL_AFTER_PRE_USER: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// Withdraw tail after pre-user settlement.
     pub const ON_WITHDRAW_TAIL_AFTER_PRE_USER: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
+    /// Finalize user withdraw transfer accounting after the outgoing transfer resolves.
+    pub const ON_USER_WITHDRAW_TRANSFER_DONE: Gas = Gas::from_gas(BASE_GAS.as_gas() * 2);
     /// Subscription update after pre-user settlement.
     pub const ON_SUBSCRIPTION_UPDATE_AFTER_SETTLE: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// Farm stake after pre-user settlement.
@@ -86,6 +88,8 @@ pub mod callbacks {
     pub const ON_FARM_UNSTAKE_AFTER_SETTLE: Gas = Gas::from_gas(BASE_GAS.as_gas() * 8);
     /// After user-flow tail promise completes: release pipeline `Busy`.
     pub const ON_EPOCH_PIPELINE_TERMINAL_RELEASE: Gas = BASE_GAS;
+    /// Finalize direct-payment revenue accounting after the outgoing transfer resolves.
+    pub const ON_REVENUE_WITHDRAW_TRANSFER_DONE: Gas = Gas::from_gas(BASE_GAS.as_gas() * 2);
     /// Release pipeline `Busy`, return lock id, or refund payable entry on tail failure (transfer).
     pub const ON_EPOCH_PIPELINE_RELEASE_WITH_LOCK_ID: Gas = Gas::from_gas(BASE_GAS.as_gas() * 2);
     /// Release pipeline `Busy`, return subscription update outcome, or refund payable entry on tail failure.

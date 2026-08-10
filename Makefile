@@ -105,13 +105,13 @@ check-mock-staking-pool-contract check-mock-pool:
 
 test-staking-contract test-staking:
 	$(MAKE) staking-contract staking-contract-test mock-staking-pool-contract
-	cd "$(ROOT)" && cargo test -p staking-contract
+	cd "$(ROOT)" && RUST_TEST_THREADS=1 cargo test -p staking-contract
 
 test:
 	$(MAKE) all-contracts staking-contract-test
-	cd "$(ROOT)" && cargo test --workspace --exclude integration-tests
+	cd "$(ROOT)" && RUST_TEST_THREADS=1 cargo test --workspace --exclude integration-tests
 	$(MAKE) test-integration
 
 test-integration:
 	@if [ -z "$(strip $(INTEGRATION_TEST_ARGS))" ]; then echo "No integration tests matched"; exit 1; fi
-	cd "$(ROOT)" && cargo test -p integration-tests $(INTEGRATION_TEST_ARGS)
+	cd "$(ROOT)" && RUST_TEST_THREADS=1 cargo test -p integration-tests $(INTEGRATION_TEST_ARGS)
