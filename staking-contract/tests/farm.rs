@@ -23,6 +23,44 @@ fn unwrap_sync_position(result: PromiseOrValue<FarmPosition>) -> FarmPosition {
     }
 }
 
+fn register_account(c: &mut staking_contract::Contract, account_id: &str) {
+    testing_env!(ctx(acct(account_id), NearToken::from_millinear(500)));
+    c.storage_deposit(None, None);
+}
+
+fn add_farm_product(
+    c: &mut staking_contract::Contract,
+    reward_rate: u128,
+    min_amount_yocto: u128,
+) -> (String, String) {
+    testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
+    let product_id = c.create_product_after_get_owner(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        acct(POOL),
+        "Farm product".into(),
+        "Farm desc".into(),
+        acct(VALIDATOR_OWNER_ACCOUNT),
+    );
+
+    testing_env_catalog_callback(acct(VALIDATOR_OWNER_ACCOUNT));
+    let price_id = c.create_price_after_get_owner(
+        acct(VALIDATOR_OWNER_ACCOUNT),
+        product_id.clone(),
+        "Farm".into(),
+        "".into(),
+        U128(min_amount_yocto),
+        PriceType::Farm,
+        None,
+        U128(0),
+        Some(PriceMetadata {
+            max_amount: None,
+            farm_reward_rate: Some(U128(reward_rate)),
+        }),
+        acct(VALIDATOR_OWNER_ACCOUNT),
+    );
+    (product_id, price_id)
+}
+
 #[test]
 fn farm_stake_accrues_rewards_in_account_view() {
     let mut c = deploy();
@@ -223,6 +261,95 @@ fn farm_stake_twice_aggregates_one_position() {
     assert_eq!(positions[0].shares.0, second.shares.0);
     assert_eq!(c.get_price(price_id).expect("price").usage_count, 2);
     assert_eq!(c.get_product(product_id).expect("product").usage_count, 2);
+}
+
+#[test]
+fn farm_position_product_and_global_views_are_paginated_and_include_closed_positions() {
+    let mut c = deploy();
+    let (product_one, _price_one) = setup_catalog_farm(
+        &mut c,
+        SPEC_REWARD_RATE,
+        NearToken::from_near(1).as_yoctonear(),
+        None,
+    );
+    let (product_two, _price_two) = add_farm_product(
+        &mut c,
+        SPEC_REWARD_RATE,
+        NearToken::from_near(1).as_yoctonear(),
+    );
+    register_account(&mut c, BUYER);
+    register_account(&mut c, "alice.near");
+    register_account(&mut c, "bob.near");
+
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(3), BASE_TS));
+    let _ = unwrap_sync_position(c.stake(product_one.clone(), None));
+    testing_env!(ctx_ts(
+        acct("alice.near"),
+        NearToken::from_near(5),
+        BASE_TS + NS_PER_SECOND as u64
+    ));
+    let _ = unwrap_sync_position(c.stake(product_one.clone(), None));
+    testing_env!(ctx_ts(
+        acct("bob.near"),
+        NearToken::from_near(7),
+        BASE_TS + 2 * NS_PER_SECOND as u64
+    ));
+    let _ = unwrap_sync_position(c.stake(product_two.clone(), None));
+
+    testing_env!(ctx_ts(
+        acct(BUYER),
+        one_yocto(),
+        BASE_TS + 3 * NS_PER_SECOND as u64
+    ));
+    let _ = c.unstake(product_one.clone(), None);
+    testing_env!(ctx_ts(
+        acct(STAKING),
+        NearToken::from_yoctonear(0),
+        BASE_TS + 3 * NS_PER_SECOND as u64
+    ));
+    c.resolve_farm_unstake(acct(BUYER), product_one.clone(), acct(POOL), None);
+
+    let product_positions = c.get_farm_positions_for_product(product_one.clone(), 0, 10);
+    assert_eq!(product_positions.len(), 2);
+    assert_eq!(product_positions[0].account_id, acct(BUYER));
+    assert_eq!(product_positions[0].product_id, product_one);
+    assert_eq!(product_positions[0].status, FarmStatus::Closed);
+    assert_eq!(product_positions[0].staked_near_amount.0, 0);
+    assert_eq!(product_positions[1].account_id, acct("alice.near"));
+    assert_eq!(product_positions[1].status, FarmStatus::Active);
+    assert_eq!(
+        product_positions[1].staked_near_amount.0,
+        NearToken::from_near(5).as_yoctonear()
+    );
+
+    let active_product_total = product_positions
+        .iter()
+        .filter(|position| position.status == FarmStatus::Active)
+        .fold(0u128, |sum, position| {
+            sum.saturating_add(position.staked_near_amount.0)
+        });
+    assert_eq!(active_product_total, NearToken::from_near(5).as_yoctonear());
+
+    let second_product_page = c.get_farm_positions_for_product(product_one.clone(), 1, 1);
+    assert_eq!(second_product_page.len(), 1);
+    assert_eq!(second_product_page[0].account_id, acct("alice.near"));
+
+    let global_first_page = c.get_farm_positions(0, 2);
+    assert_eq!(global_first_page.len(), 2);
+    assert_eq!(global_first_page[0].account_id, acct(BUYER));
+    assert_eq!(global_first_page[0].product_id, product_one);
+    assert_eq!(global_first_page[1].account_id, acct("alice.near"));
+
+    let global_second_page = c.get_farm_positions(2, 10);
+    assert_eq!(global_second_page.len(), 1);
+    assert_eq!(global_second_page[0].account_id, acct("bob.near"));
+    assert_eq!(global_second_page[0].product_id, product_two);
+    assert_eq!(global_second_page[0].status, FarmStatus::Active);
+    assert_eq!(
+        c.get_farm_positions_for_product("missing".into(), 0, 10)
+            .len(),
+        0
+    );
 }
 
 #[test]

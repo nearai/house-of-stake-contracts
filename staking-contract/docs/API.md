@@ -53,7 +53,9 @@ Reference for **on-chain methods** exposed by `staking-contract` (Rust type name
 | `get_revenue_balance_for_validator` | `validator_id: AccountId` | `NearToken` | Current withdrawable direct-payment revenue for the validator. |
 | `get_farm_pool` | `price_id: string` | `FarmPool \| null` | Stored farm accumulator for a Farm price. |
 | `get_farm_position` | `account_id`, `product_id` | `FarmPositionView \| null` | Stored farm position plus view-time `staked_near_amount`, `pending_reward_units`, and `total_earned_reward_units` for one `(account, product)`. |
+| `get_farm_positions` | `from_index: u64`, `limit: u64` | `FarmPositionView[]` | Paginated current and historical farm positions in first-creation order across all accounts and products. |
 | `get_farm_positions_for_account` | `account_id`, `from_index: u64`, `limit: u64` | `FarmPositionView[]` | Paginated current and historical farm positions for an account, including view-time staked NEAR and reward fields. |
+| `get_farm_positions_for_product` | `product_id`, `from_index: u64`, `limit: u64` | `FarmPositionView[]` | Paginated current and historical farm positions for a product, including view-time staked NEAR and reward fields. Active product farm stake is the sum of `staked_near_amount` where `status == Active`. |
 | `get_farm_account` | `account_id` | `FarmAccountView` | Stored closed-position reward roll-up plus simulated pending rewards for active positions. `active_positions` contains `FarmPositionView` rows. Reward units are 24-decimal fixed-point accounting units (`1e24 == 1 whole reward unit`). |
 
 ---
