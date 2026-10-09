@@ -1895,3 +1895,62 @@ fn cancel_subscription_normalizes_stale_window_before_marking_cancel_at_end() {
         OrderRef::ProductPurchase { .. } => panic!("expected subscription order"),
     }
 }
+
+#[test]
+fn due_plan_downgrade_repeated_update_releases_only_surplus_once() {
+    let mut c = deploy();
+    let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
+    let price_high = add_subscription_price(&mut c, product_id.clone(), "Basic", 20);
+    register_buyer(&mut c);
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(20), BASE_TS));
+    let lock_id = unwrap_sync_lock_id(c.lock(Some(price_high), None, None));
+    let sub = c
+        .get_subscription_for_product(acct(BUYER), product_id)
+        .expect("subscription");
+    let target = U128(NearToken::from_near(1).as_yoctonear());
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_yoctonear(1), BASE_TS));
+    let _ = c.update_subscription(sub.subscription_id.clone(), price_low.clone(), target);
+
+    // Before the boundary, repeating the request must not release funds.
+    let _ = c.update_subscription(sub.subscription_id.clone(), price_low.clone(), target);
+    assert_eq!(
+        c.get_account_pending_unstake(acct(BUYER), acct(POOL))
+            .total_pending_yocto
+            .0,
+        0
+    );
+    testing_env!(ctx_ts(
+        acct(BUYER),
+        NearToken::from_yoctonear(1),
+        sub.end_ns.0 + 1
+    ));
+    let _ = c.update_subscription(sub.subscription_id.clone(), price_low.clone(), target);
+    let lock = c.get_lock(lock_id.clone(), None).expect("lock");
+    assert_eq!(lock.amount_near.as_yoctonear(), target.0);
+    assert_eq!(lock.status, LockStatus::Active);
+    let active = c
+        .get_subscription(sub.subscription_id.clone())
+        .expect("subscription");
+    assert_eq!(active.price_id, price_low);
+    assert_eq!(active.status, SubscriptionStatus::Active);
+    assert!(!active.cancel_at_period_end);
+    assert!(active.pending_update.is_none());
+    let pending = c.get_account_pending_unstake(acct(BUYER), acct(POOL));
+    assert_eq!(
+        pending.total_pending_yocto.0,
+        NearToken::from_near(19).as_yoctonear()
+    );
+    assert_eq!(pending.tranches.len(), 1);
+
+    let _ = c.update_subscription(sub.subscription_id, price_low, target);
+    let retried = c.get_account_pending_unstake(acct(BUYER), acct(POOL));
+    assert_eq!(retried.total_pending_yocto.0, pending.total_pending_yocto.0);
+    assert_eq!(retried.tranches.len(), 1);
+    assert_eq!(
+        c.get_lock(lock_id, None)
+            .expect("lock")
+            .amount_near
+            .as_yoctonear(),
+        target.0
+    );
+}

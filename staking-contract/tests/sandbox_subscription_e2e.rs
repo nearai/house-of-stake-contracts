@@ -9,8 +9,9 @@ mod mock_pool;
 
 use mock_pool::{
     buyer_lock_subscription, buyer_storage_deposit, buyer_update_subscription_scheduled,
-    buyer_update_subscription_with_stake_increase, create_recurring_price_on_product,
-    create_subscription_product_and_price, fast_forward_subscription_for_product_to,
+    buyer_update_subscription_with_stake_increase, buyer_withdraw,
+    create_recurring_price_on_product, create_subscription_product_and_price,
+    drive_validator_settlement_epochs, fast_forward_subscription_for_product_to,
     json_near_token_yocto, json_u64_field, set_mock_timestamp, setup_staking_fixture,
     top_up_buyer_near,
 };
@@ -318,5 +319,171 @@ async fn sandbox_test_clock_fast_forwards_only_selected_subscription()
         "unselected subscription end should not move"
     );
 
+    Ok(())
+}
+
+/// A due tier downgrade is released by repeating the target update, without cancelling
+/// or unlocking the subscription's remaining stake (regression for issue #169).
+#[tokio::test]
+async fn sandbox_due_downgrade_releases_surplus_and_withdraws_without_cancelling()
+-> Result<(), Box<dyn std::error::Error>> {
+    let worker = near_workspaces::sandbox().await?;
+    let (staking, pool, owner, _, _) = setup_staking_fixture(&worker).await?;
+    let (product_id, price_low) =
+        create_subscription_product_and_price(&staking, &pool, &owner).await?;
+    let price_high = create_recurring_price_on_product(
+        &staking,
+        &owner,
+        &product_id,
+        "Basic",
+        &near_yocto(20).to_string(),
+    )
+    .await?;
+    let buyer = worker.dev_create_account().await?;
+    let operator = worker.dev_create_account().await?;
+    buyer_storage_deposit(&buyer, staking.id()).await?;
+    let lock_id = buyer_lock_subscription(&buyer, staking.id(), &price_high, 20).await?;
+    drive_validator_settlement_epochs(&worker, &operator, staking.id(), pool.id(), 1).await?;
+    let sub: serde_json::Value = worker
+        .view(staking.id(), "get_subscription_for_product")
+        .args_json(json!({ "account_id": buyer.id(), "product_id": product_id }))
+        .await?
+        .json()?;
+    let subscription_id = sub["subscription_id"].as_str().expect("subscription_id");
+    buyer_update_subscription_scheduled(
+        &buyer,
+        staking.id(),
+        subscription_id,
+        &price_low,
+        near_yocto(1),
+    )
+    .await?;
+    let end_ns = json_u64_field(&sub["end_ns"]).expect("end_ns");
+    fast_forward_subscription_for_product_to(
+        &buyer,
+        staking.id(),
+        &product_id,
+        end_ns.saturating_add(1),
+    )
+    .await?;
+
+    // Views project the new stake, but do not create a withdrawal entitlement.
+    let raw: serde_json::Value = worker
+        .view(staking.id(), "get_lock")
+        .args_json(json!({ "lock_id": lock_id, "effective": false }))
+        .await?
+        .json()?;
+    let effective: serde_json::Value = worker
+        .view(staking.id(), "get_lock")
+        .args_json(json!({ "lock_id": lock_id, "effective": true }))
+        .await?
+        .json()?;
+    assert_eq!(
+        json_near_token_yocto(&raw["amount_near"]),
+        Some(near_yocto(20))
+    );
+    assert_eq!(
+        json_near_token_yocto(&effective["amount_near"]),
+        Some(near_yocto(1))
+    );
+    let before: serde_json::Value = worker
+        .view(staking.id(), "get_account_pending_unstake")
+        .args_json(json!({ "account_id": buyer.id(), "validator_id": pool.id() }))
+        .await?
+        .json()?;
+    assert_eq!(before["total_pending_yocto"], json!("0"));
+
+    // Repeating the due target commits the decrease and queues only the surplus.
+    buyer_update_subscription_scheduled(
+        &buyer,
+        staking.id(),
+        subscription_id,
+        &price_low,
+        near_yocto(1),
+    )
+    .await?;
+    let released: serde_json::Value = worker
+        .view(staking.id(), "get_account_pending_unstake")
+        .args_json(json!({ "account_id": buyer.id(), "validator_id": pool.id() }))
+        .await?
+        .json()?;
+    assert_eq!(
+        released["total_pending_yocto"],
+        json!(near_yocto(19).to_string())
+    );
+    let retained: serde_json::Value = worker
+        .view(staking.id(), "get_lock")
+        .args_json(json!({ "lock_id": lock_id, "effective": false }))
+        .await?
+        .json()?;
+    assert_eq!(
+        json_near_token_yocto(&retained["amount_near"]),
+        Some(near_yocto(1))
+    );
+    assert_eq!(retained["status"], json!("Active"));
+
+    // A retry must not release the retained stake or create another tranche.
+    buyer_update_subscription_scheduled(
+        &buyer,
+        staking.id(),
+        subscription_id,
+        &price_low,
+        near_yocto(1),
+    )
+    .await?;
+    let retried: serde_json::Value = worker
+        .view(staking.id(), "get_account_pending_unstake")
+        .args_json(json!({ "account_id": buyer.id(), "validator_id": pool.id() }))
+        .await?
+        .json()?;
+    assert_eq!(
+        retried["total_pending_yocto"],
+        released["total_pending_yocto"]
+    );
+
+    drive_validator_settlement_epochs(&worker, &operator, staking.id(), pool.id(), 2).await?;
+    let ready: serde_json::Value = worker
+        .view(staking.id(), "get_account_pending_unstake")
+        .args_json(json!({ "account_id": buyer.id(), "validator_id": pool.id() }))
+        .await?
+        .json()?;
+    assert_eq!(ready["can_withdraw_now"], json!(true));
+    assert_eq!(
+        ready["withdrawable_yocto"],
+        json!(near_yocto(19).to_string())
+    );
+    let balance_before = buyer.view_account().await?.balance.as_yoctonear();
+    buyer_withdraw(&buyer, staking.id(), pool.id()).await?;
+    let balance_after = buyer.view_account().await?.balance.as_yoctonear();
+    assert!(
+        balance_after > balance_before + near_yocto(18),
+        "buyer receives surplus less gas"
+    );
+    let done: serde_json::Value = worker
+        .view(staking.id(), "get_account_pending_unstake")
+        .args_json(json!({ "account_id": buyer.id(), "validator_id": pool.id() }))
+        .await?
+        .json()?;
+    assert_eq!(done["total_pending_yocto"], json!("0"));
+    assert_eq!(done["can_withdraw_now"], json!(false));
+    let active: serde_json::Value = worker
+        .view(staking.id(), "get_subscription")
+        .args_json(json!({ "subscription_id": subscription_id }))
+        .await?
+        .json()?;
+    assert_eq!(active["status"], json!("Active"));
+    assert_eq!(active["cancel_at_period_end"], json!(false));
+    assert_eq!(active["price_id"], json!(price_low));
+    assert!(active["pending_update"].is_null());
+    let final_lock: serde_json::Value = worker
+        .view(staking.id(), "get_lock")
+        .args_json(json!({ "lock_id": lock_id }))
+        .await?
+        .json()?;
+    assert_eq!(
+        json_near_token_yocto(&final_lock["amount_near"]),
+        Some(near_yocto(1))
+    );
+    assert_eq!(final_lock["status"], json!("Active"));
     Ok(())
 }
