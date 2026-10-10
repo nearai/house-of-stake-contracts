@@ -1954,3 +1954,132 @@ fn due_plan_downgrade_repeated_update_releases_only_surplus_once() {
         target.0
     );
 }
+
+// Simulate a non-unit share price, then rewards discovered by settlement between
+// the effective view and update_subscription's commit. Host calls bypass async settlement.
+fn rounded_due_decrease(use_projection: bool, rewards: bool, capped: bool) {
+    let mut c = deploy();
+    let (product_id, price_low) = setup_catalog_near_subscription(&mut c);
+    let target = NearToken::from_near(1).as_yoctonear();
+    let price_low = if capped {
+        add_subscription_price_with_metadata(
+            &mut c,
+            product_id.clone(),
+            "Capped",
+            1,
+            Some(PriceMetadata {
+                max_amount: Some(U128(target)),
+                farm_reward_rate: None,
+            }),
+        )
+    } else {
+        price_low
+    };
+    let price_high = add_subscription_price(&mut c, product_id.clone(), "High", 20);
+    register_buyer(&mut c);
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_near(20), BASE_TS));
+    let lock_id = unwrap_sync_lock_id(c.lock(Some(price_high), None, None));
+    let sub = c
+        .get_subscription_for_product(acct(BUYER), product_id)
+        .unwrap();
+    testing_env!(ctx_ts(acct(BUYER), NearToken::from_yoctonear(1), BASE_TS));
+    let _ = c.update_subscription(sub.subscription_id.clone(), price_low.clone(), U128(target));
+    let mut validator = c.get_validator(acct(POOL)).unwrap();
+    validator.total_staked_balance = NearToken::from_yoctonear(target * 214 / 10);
+    validator.pending_to_stake = NearToken::from_near(0);
+    c.validators.insert(acct(POOL), validator.into());
+    testing_env!(ctx_ts(
+        acct(BUYER),
+        NearToken::from_yoctonear(1),
+        sub.end_ns.0 + 1
+    ));
+    let projected = c
+        .get_lock(lock_id.clone(), Some(true))
+        .unwrap()
+        .amount_near
+        .as_yoctonear();
+    assert_eq!(projected, target + 2);
+    // Projected subscription views hide the pending update, but the new view
+    // must preserve the exact target until it has actually been committed.
+    assert!(
+        c.get_subscription(sub.subscription_id.clone())
+            .unwrap()
+            .pending_update
+            .is_none()
+    );
+    let pending = c
+        .get_subscription_pending_update(sub.subscription_id.clone())
+        .unwrap();
+    assert_eq!(pending.target_amount.unwrap().as_yoctonear(), target);
+    if rewards {
+        let mut validator = c.get_validator(acct(POOL)).unwrap();
+        validator.total_staked_balance = NearToken::from_yoctonear(target * 21401 / 1000);
+        c.validators.insert(acct(POOL), validator.into());
+        assert_eq!(
+            c.get_lock(lock_id.clone(), Some(true))
+                .unwrap()
+                .amount_near
+                .as_yoctonear(),
+            target + 1
+        );
+    }
+    let requested = if use_projection {
+        projected
+    } else {
+        pending.target_amount.unwrap().as_yoctonear()
+    };
+    let _ = c.update_subscription(
+        sub.subscription_id.clone(),
+        price_low.clone(),
+        U128(requested),
+    );
+    let lock = c.get_lock(lock_id, None).unwrap();
+    assert_eq!(
+        lock.amount_near.as_yoctonear(),
+        target + if rewards { 1 } else { 2 }
+    );
+    assert_eq!(lock.status, LockStatus::Active);
+    let active = c.get_subscription(sub.subscription_id.clone()).unwrap();
+    assert_eq!(active.price_id, price_low);
+    assert_eq!(active.status, SubscriptionStatus::Active);
+    assert!(!active.cancel_at_period_end);
+    assert_eq!(
+        c.get_account_pending_unstake(acct(BUYER), acct(POOL))
+            .total_pending_yocto
+            .0,
+        target * 19 - if rewards { 1 } else { 2 }
+    );
+    // Any rounding dust may schedule another decrease, but retry cannot duplicate
+    // the already queued unstake before the next boundary.
+    let before = c
+        .get_account_pending_unstake(acct(BUYER), acct(POOL))
+        .total_pending_yocto;
+    let _ = c.update_subscription(sub.subscription_id, price_low, U128(target));
+    assert_eq!(
+        c.get_account_pending_unstake(acct(BUYER), acct(POOL))
+            .total_pending_yocto,
+        before
+    );
+}
+
+#[test]
+#[should_panic(expected = "Attached NEAR is below the contract minimum lock amount")]
+fn projected_decrease_target_rejects_rounding_increase_after_rewards() {
+    rounded_due_decrease(true, true, false);
+}
+
+#[test]
+#[should_panic(expected = "Target stake amount is above the price maximum")]
+fn projected_decrease_target_rejects_rounding_above_price_cap() {
+    rounded_due_decrease(true, false, true);
+}
+
+#[test]
+fn scheduled_decrease_target_survives_reward_settlement_rounding() {
+    rounded_due_decrease(false, true, false);
+}
+
+#[test]
+fn scheduled_decrease_target_survives_rounding_at_price_cap() {
+    rounded_due_decrease(false, false, true);
+}

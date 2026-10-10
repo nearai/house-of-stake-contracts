@@ -393,13 +393,22 @@ async fn sandbox_due_downgrade_releases_surplus_and_withdraws_without_cancelling
         .json()?;
     assert_eq!(before["total_pending_yocto"], json!("0"));
 
+    let pending_update: serde_json::Value = worker
+        .view(staking.id(), "get_subscription_pending_update")
+        .args_json(json!({ "subscription_id": subscription_id }))
+        .await?
+        .json()?;
+    let scheduled_target = json_near_token_yocto(&pending_update["target_amount"])
+        .expect("stored scheduled target remains visible after rollover");
+    assert_eq!(scheduled_target, near_yocto(1));
+
     // Repeating the due target commits the decrease and queues only the surplus.
     buyer_update_subscription_scheduled(
         &buyer,
         staking.id(),
         subscription_id,
         &price_low,
-        near_yocto(1),
+        scheduled_target,
     )
     .await?;
     let released: serde_json::Value = worker

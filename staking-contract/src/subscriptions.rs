@@ -236,6 +236,17 @@ impl Contract {
             .map(|sub| self.project_subscription_view_now(sub))
     }
 
+    /// Stored target awaiting commit, including after its effective billing boundary.
+    /// Use this amount when repeating `update_subscription`; projected lock balances
+    /// may differ from the scheduled NEAR target due to share rounding.
+    pub fn get_subscription_pending_update(
+        &self,
+        subscription_id: SubscriptionId,
+    ) -> Option<PendingSubscriptionUpdate> {
+        self.internal_get_subscription(&subscription_id)
+            .and_then(|sub| sub.pending_update)
+    }
+
     /// Lookup subscription by account and catalog product (at most one subscription per product).
     pub fn get_subscription_for_product(
         &self,
