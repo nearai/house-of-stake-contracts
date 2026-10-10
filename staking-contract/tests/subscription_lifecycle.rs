@@ -1984,6 +1984,11 @@ fn rounded_due_decrease(use_projection: bool, rewards: bool, capped: bool) {
         .unwrap();
     testing_env!(ctx_ts(acct(BUYER), NearToken::from_yoctonear(1), BASE_TS));
     let _ = c.update_subscription(sub.subscription_id.clone(), price_low.clone(), U128(target));
+    let pending = c
+        .get_subscription(sub.subscription_id.clone())
+        .unwrap()
+        .pending_update
+        .unwrap();
     let mut validator = c.get_validator(acct(POOL)).unwrap();
     validator.total_staked_balance = NearToken::from_yoctonear(target * 214 / 10);
     validator.pending_to_stake = NearToken::from_near(0);
@@ -1999,17 +2004,14 @@ fn rounded_due_decrease(use_projection: bool, rewards: bool, capped: bool) {
         .amount_near
         .as_yoctonear();
     assert_eq!(projected, target + 2);
-    // Projected subscription views hide the pending update, but the new view
-    // must preserve the exact target until it has actually been committed.
+    // Capture the original target before rollover: the projected subscription
+    // view hides the pending update once it is due.
     assert!(
         c.get_subscription(sub.subscription_id.clone())
             .unwrap()
             .pending_update
             .is_none()
     );
-    let pending = c
-        .get_subscription_pending_update(sub.subscription_id.clone())
-        .unwrap();
     assert_eq!(pending.target_amount.unwrap().as_yoctonear(), target);
     if rewards {
         let mut validator = c.get_validator(acct(POOL)).unwrap();
